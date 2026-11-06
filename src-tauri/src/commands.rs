@@ -1,29 +1,274 @@
 use crate::pty::{Platform, PtyManager, ShellKind, program_in_path, resolve_shell};
-use std::sync::Arc;
+use crate::ssh::{DirListing, PromptFuture, Prompter, SecretKind, SshManager, SshTarget, ssh_dir};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::State;
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tokio::sync::oneshot;
+
+#[derive(Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SshPrompt {
+    HostKey {
+        request_id: u32,
+        host: String,
+        port: u16,
+        key_type: String,
+        fingerprint: String,
+    },
+    Secret {
+        request_id: u32,
+        kind: &'static str,
+        label: String,
+    },
+}
+
+enum PendingAnswer {
+    HostKey(oneshot::Sender<bool>),
+    Secret(oneshot::Sender<Option<String>>),
+}
+
+pub struct PendingPrompts {
+    next_id: AtomicU32,
+    answers: Mutex<HashMap<u32, PendingAnswer>>,
+}
+
+impl Default for PendingPrompts {
+    fn default() -> Self {
+        Self {
+            next_id: AtomicU32::new(1),
+            answers: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl PendingPrompts {
+    fn register(self: &Arc<Self>, answer: PendingAnswer) -> Option<PendingPrompt> {
+        let id = self
+            .next_id
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .ok()?;
+        self.answers.lock().ok()?.insert(id, answer);
+        Some(PendingPrompt {
+            id,
+            pending: Arc::clone(self),
+        })
+    }
+}
+
+struct PendingPrompt {
+    id: u32,
+    pending: Arc<PendingPrompts>,
+}
+
+impl Drop for PendingPrompt {
+    fn drop(&mut self) {
+        if let Ok(mut answers) = self.pending.answers.lock() {
+            answers.remove(&self.id);
+        }
+    }
+}
+
+struct TauriPrompter {
+    pending: Arc<PendingPrompts>,
+    channel: Channel<SshPrompt>,
+}
+
+impl Prompter for TauriPrompter {
+    fn confirm_host_key(
+        &self,
+        host: String,
+        port: u16,
+        key_type: String,
+        fingerprint: String,
+    ) -> PromptFuture<bool> {
+        let pending = Arc::clone(&self.pending);
+        let channel = self.channel.clone();
+        Box::pin(async move {
+            let (sender, receiver) = oneshot::channel();
+            let Some(request) = pending.register(PendingAnswer::HostKey(sender)) else {
+                return false;
+            };
+            if channel
+                .send(SshPrompt::HostKey {
+                    request_id: request.id,
+                    host,
+                    port,
+                    key_type,
+                    fingerprint,
+                })
+                .is_err()
+            {
+                return false;
+            }
+            let accepted = tokio::time::timeout(Duration::from_secs(120), receiver)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or(false);
+            drop(request);
+            accepted
+        })
+    }
+
+    fn ask_secret(&self, kind: SecretKind, label: String) -> PromptFuture<Option<String>> {
+        let pending = Arc::clone(&self.pending);
+        let channel = self.channel.clone();
+        Box::pin(async move {
+            let (sender, receiver) = oneshot::channel();
+            let request = pending.register(PendingAnswer::Secret(sender))?;
+            let kind = match kind {
+                SecretKind::Password => "password",
+                SecretKind::Passphrase => "passphrase",
+            };
+            if channel
+                .send(SshPrompt::Secret {
+                    request_id: request.id,
+                    kind,
+                    label,
+                })
+                .is_err()
+            {
+                return None;
+            }
+            let secret = tokio::time::timeout(Duration::from_secs(120), receiver)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten();
+            drop(request);
+            secret
+        })
+    }
+}
 
 #[tauri::command]
-pub fn pty_spawn(
+#[allow(clippy::too_many_arguments)]
+pub async fn pty_spawn(
     state: State<'_, Arc<PtyManager>>,
     kind: ShellKind,
     cols: u16,
     rows: u16,
+    shell_integration: bool,
     on_data: Channel<InvokeResponseBody>,
     on_exit: Channel<Option<u32>>,
 ) -> Result<u32, String> {
-    let spec = resolve_shell(
-        kind,
-        Platform::current(),
-        std::env::var("SHELL").ok(),
-        program_in_path,
-    )
-    .map_err(|error| error.to_string())?;
+    let manager = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let spec = resolve_shell(
+            kind,
+            Platform::current(),
+            std::env::var("SHELL").ok(),
+            shell_integration,
+            program_in_path,
+        )
+        .map_err(|error| error.to_string())?;
+        manager
+            .spawn(
+                &spec,
+                cols,
+                rows,
+                Box::new(move |bytes| {
+                    let _ = on_data.send(InvokeResponseBody::Raw(bytes));
+                }),
+                Box::new(move |code| {
+                    let _ = on_exit.send(code);
+                }),
+            )
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "Terminal konnte nicht gestartet werden".to_owned())?
+}
+
+#[tauri::command]
+pub async fn pty_write(
+    state: State<'_, Arc<PtyManager>>,
+    id: u32,
+    data: String,
+) -> Result<(), String> {
+    let manager = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        manager
+            .write(id, data.as_bytes())
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "Terminaldaten konnten nicht geschrieben werden".to_owned())?
+}
+
+#[tauri::command]
+pub async fn pty_resize(
+    state: State<'_, Arc<PtyManager>>,
+    id: u32,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let manager = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        manager
+            .resize(id, cols, rows)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "Terminalgröße konnte nicht geändert werden".to_owned())?
+}
+
+#[tauri::command]
+pub async fn pty_kill(state: State<'_, Arc<PtyManager>>, id: u32) -> Result<(), String> {
+    let manager = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        manager.kill(id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|_| "Terminal konnte nicht beendet werden".to_owned())?
+}
+
+#[tauri::command]
+pub async fn available_shells() -> Result<Vec<ShellKind>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut shells = vec![ShellKind::Local];
+        if cfg!(windows) && program_in_path("wsl.exe") {
+            shells.push(ShellKind::Wsl);
+        }
+        shells
+    })
+    .await
+    .map_err(|_| "Verfügbare Shells konnten nicht ermittelt werden".to_owned())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn ssh_connect(
+    state: State<'_, Arc<SshManager>>,
+    pending: State<'_, Arc<PendingPrompts>>,
+    target: String,
+    cols: u16,
+    rows: u16,
+    on_data: Channel<InvokeResponseBody>,
+    on_exit: Channel<Option<u32>>,
+    on_prompt: Channel<SshPrompt>,
+) -> Result<u32, String> {
+    let target: SshTarget = target.parse()?;
+    let prompter = Arc::new(TauriPrompter {
+        pending: Arc::clone(pending.inner()),
+        channel: on_prompt,
+    });
     state
-        .spawn(
-            &spec,
+        .inner()
+        .connect(
+            target,
             cols,
             rows,
+            ssh_dir()?.join("known_hosts"),
+            prompter,
             Box::new(move |bytes| {
                 let _ = on_data.send(InvokeResponseBody::Raw(bytes));
             }),
@@ -31,38 +276,135 @@ pub fn pty_spawn(
                 let _ = on_exit.send(code);
             }),
         )
-        .map_err(|error| error.to_string())
+        .await
 }
 
 #[tauri::command]
-pub fn pty_write(state: State<'_, Arc<PtyManager>>, id: u32, data: String) -> Result<(), String> {
-    state
-        .write(id, data.as_bytes())
-        .map_err(|error| error.to_string())
+pub async fn ssh_answer_host_key(
+    state: State<'_, Arc<PendingPrompts>>,
+    request_id: u32,
+    accept: bool,
+) -> Result<(), String> {
+    let sender = {
+        let mut answers = state
+            .answers
+            .lock()
+            .map_err(|_| "SSH-Rückfrage konnte nicht beantwortet werden".to_owned())?;
+        if !matches!(answers.get(&request_id), Some(PendingAnswer::HostKey(_))) {
+            return Err("SSH-Hostkey-Rückfrage ist nicht mehr gültig".to_owned());
+        }
+        answers.remove(&request_id)
+    };
+    if let Some(PendingAnswer::HostKey(sender)) = sender {
+        let _ = sender.send(accept);
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn pty_resize(
-    state: State<'_, Arc<PtyManager>>,
+pub async fn ssh_answer_secret(
+    state: State<'_, Arc<PendingPrompts>>,
+    request_id: u32,
+    mut secret: Option<String>,
+) -> Result<(), String> {
+    let sender = {
+        let mut answers = state
+            .answers
+            .lock()
+            .map_err(|_| "SSH-Rückfrage konnte nicht beantwortet werden".to_owned())?;
+        if !matches!(answers.get(&request_id), Some(PendingAnswer::Secret(_))) {
+            if let Some(secret) = secret.as_mut() {
+                secret.clear();
+            }
+            return Err("SSH-Geheimnis-Rückfrage ist nicht mehr gültig".to_owned());
+        }
+        answers.remove(&request_id)
+    };
+    if let Some(PendingAnswer::Secret(sender)) = sender
+        && let Err(mut secret) = sender.send(secret)
+        && let Some(secret) = secret.as_mut()
+    {
+        secret.clear();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_write(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    data: String,
+) -> Result<(), String> {
+    state.write(id, data.as_bytes()).await
+}
+
+#[tauri::command]
+pub async fn ssh_resize(
+    state: State<'_, Arc<SshManager>>,
     id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    state
-        .resize(id, cols, rows)
-        .map_err(|error| error.to_string())
+    state.resize(id, cols, rows).await
 }
 
 #[tauri::command]
-pub fn pty_kill(state: State<'_, Arc<PtyManager>>, id: u32) -> Result<(), String> {
-    state.kill(id).map_err(|error| error.to_string())
+pub async fn ssh_close(state: State<'_, Arc<SshManager>>, id: u32) -> Result<(), String> {
+    state.close(id).await
 }
 
 #[tauri::command]
-pub fn available_shells() -> Vec<ShellKind> {
-    let mut shells = vec![ShellKind::Local];
-    if cfg!(windows) && program_in_path("wsl.exe") {
-        shells.push(ShellKind::Wsl);
+pub async fn ssh_list_dir(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    path: String,
+) -> Result<DirListing, String> {
+    state.list_dir(id, path).await
+}
+
+#[tauri::command]
+pub async fn local_list_dir(
+    path: String,
+    wsl_distro: Option<String>,
+) -> Result<DirListing, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::local_fs::list_local_dir(path, wsl_distro))
+        .await
+        .map_err(|_| "Lokales Verzeichnis konnte nicht gelesen werden".to_owned())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn prompts_use_frontend_field_names() {
+        let host = serde_json::to_value(SshPrompt::HostKey {
+            request_id: 7,
+            host: "host".into(),
+            port: 22,
+            key_type: "ssh-ed25519".into(),
+            fingerprint: "SHA256:test".into(),
+        })
+        .unwrap();
+        assert_eq!(host["type"], "hostKey");
+        assert_eq!(host["requestId"], 7);
+        assert_eq!(host["keyType"], "ssh-ed25519");
+        let secret = serde_json::to_value(SshPrompt::Secret {
+            request_id: 8,
+            kind: "password",
+            label: "user@host".into(),
+        })
+        .unwrap();
+        assert_eq!(secret["type"], "secret");
+        assert_eq!(secret["requestId"], 8);
     }
-    shells
+    #[test]
+    fn canceled_prompt_removes_pending_answer() {
+        let pending = Arc::new(PendingPrompts::default());
+        let (sender, receiver) = oneshot::channel();
+        let request = pending.register(PendingAnswer::HostKey(sender)).unwrap();
+        assert_eq!(pending.answers.lock().unwrap().len(), 1);
+        drop(request);
+        assert!(pending.answers.lock().unwrap().is_empty());
+        assert!(receiver.blocking_recv().is_err());
+    }
 }

@@ -35,6 +35,7 @@ impl Platform {
 pub struct ShellSpec {
     pub program: String,
     pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -50,11 +51,11 @@ pub enum PtyError {
 impl fmt::Display for PtyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownSession(id) => write!(f, "Unknown PTY session: {id}"),
-            Self::InvalidSize => f.write_str("PTY dimensions must be greater than zero"),
+            Self::UnknownSession(id) => write!(f, "Unbekannte PTY-Sitzung: {id}"),
+            Self::InvalidSize => f.write_str("PTY-Abmessungen müssen größer als null sein"),
             Self::UnsupportedShell(message) | Self::Operation(message) => f.write_str(message),
-            Self::Poisoned => f.write_str("PTY session mutex is poisoned"),
-            Self::IdExhausted => f.write_str("PTY session IDs exhausted"),
+            Self::Poisoned => f.write_str("PTY-Sitzungssperre ist beschädigt"),
+            Self::IdExhausted => f.write_str("PTY-Sitzungsnummern sind ausgeschöpft"),
         }
     }
 }
@@ -65,13 +66,19 @@ fn operation(error: impl fmt::Display) -> PtyError {
     PtyError::Operation(error.to_string())
 }
 
+const POWERSHELL_OSC7: &str = r#"$Global:LinMobaOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $u = ([System.Uri]::new($p)).AbsolutePath; [Console]::Write(([char]27 + ']7;file://' + $env:COMPUTERNAME + $u + [char]7)) }; if ($Global:LinMobaOriginalPrompt) { & $Global:LinMobaOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
+const WSL_OSC7: &str = r#"export PROMPT_COMMAND='printf "\033]7;file://%s%s\007" "$WSL_DISTRO_NAME" "$PWD"'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; exec bash -i"#;
+const BASH_OSC7: &str = r#"printf "\033]7;file://%s%s\007" "$HOSTNAME" "$PWD""#;
+
 pub fn resolve_shell(
     kind: ShellKind,
     platform: Platform,
     env_shell: Option<String>,
+    shell_integration: bool,
     has_program: impl Fn(&str) -> bool,
 ) -> Result<ShellSpec, PtyError> {
-    let (program, args) = match (platform, kind) {
+    let is_unix = matches!(platform, Platform::Unix);
+    let (program, mut args) = match (platform, kind) {
         (Platform::Windows, ShellKind::Local) => (
             if has_program("pwsh.exe") {
                 "pwsh.exe"
@@ -86,7 +93,7 @@ pub fn resolve_shell(
         }
         (Platform::Windows, ShellKind::Wsl) => {
             return Err(PtyError::UnsupportedShell(
-                "wsl.exe was not found in PATH".to_owned(),
+                "wsl.exe wurde nicht im PATH gefunden".to_owned(),
             ));
         }
         (Platform::Unix, ShellKind::Local) => (
@@ -101,7 +108,28 @@ pub fn resolve_shell(
             ));
         }
     };
-    Ok(ShellSpec { program, args })
+    let mut env = Vec::new();
+    if shell_integration {
+        match kind {
+            ShellKind::Wsl => {
+                args = ["-e", "bash", "-c", WSL_OSC7].map(str::to_owned).to_vec();
+            }
+            ShellKind::Local if !is_unix => {
+                args = ["-NoLogo", "-NoExit", "-Command", POWERSHELL_OSC7]
+                    .map(str::to_owned)
+                    .to_vec();
+            }
+            ShellKind::Local
+                if std::path::Path::new(&program)
+                    .file_name()
+                    .is_some_and(|name| name == "bash") =>
+            {
+                env.push(("PROMPT_COMMAND".to_owned(), BASH_OSC7.to_owned()));
+            }
+            ShellKind::Local => {}
+        }
+    }
+    Ok(ShellSpec { program, args, env })
 }
 
 pub fn program_in_path(name: &str) -> bool {
@@ -166,6 +194,9 @@ impl PtyManager {
         let writer = pair.master.take_writer().map_err(operation)?;
         let mut command = CommandBuilder::new(&spec.program);
         command.args(&spec.args);
+        for (name, value) in &spec.env {
+            command.env(name, value);
+        }
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         let home_key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
@@ -230,7 +261,9 @@ impl PtyManager {
             let _ = child.wait();
             let removed = self.sessions()?.remove(&id);
             drop(removed);
-            return Err(PtyError::Operation("PTY waiter disconnected".to_owned()));
+            return Err(PtyError::Operation(
+                "PTY-Warteprozess wurde getrennt".to_owned(),
+            ));
         }
         Ok(id)
     }
@@ -270,18 +303,20 @@ mod tests {
     #[test]
     fn resolves_all_shell_combinations() {
         for (has_pwsh, expected) in [(true, "pwsh.exe"), (false, "powershell.exe")] {
-            let shell =
-                resolve_shell(ShellKind::Local, Platform::Windows, None, |_| has_pwsh).unwrap();
+            let shell = resolve_shell(ShellKind::Local, Platform::Windows, None, false, |_| {
+                has_pwsh
+            })
+            .unwrap();
             assert_eq!(shell.program, expected);
             assert_eq!(shell.args, ["-NoLogo"]);
         }
-        let wsl = resolve_shell(ShellKind::Wsl, Platform::Windows, None, |name| {
+        let wsl = resolve_shell(ShellKind::Wsl, Platform::Windows, None, false, |name| {
             name == "wsl.exe"
         })
         .unwrap();
         assert_eq!(wsl.program, "wsl.exe");
         assert!(wsl.args.is_empty());
-        assert!(resolve_shell(ShellKind::Wsl, Platform::Windows, None, |_| false).is_err());
+        assert!(resolve_shell(ShellKind::Wsl, Platform::Windows, None, false, |_| false).is_err());
         for (env, expected) in [
             (None, "/bin/sh"),
             (Some(""), "/bin/sh"),
@@ -291,6 +326,7 @@ mod tests {
                 ShellKind::Local,
                 Platform::Unix,
                 env.map(str::to_owned),
+                false,
                 |_| false,
             )
             .unwrap();
@@ -298,11 +334,74 @@ mod tests {
             assert!(shell.args.is_empty());
         }
         assert_eq!(
-            resolve_shell(ShellKind::Wsl, Platform::Unix, None, |_| true)
+            resolve_shell(ShellKind::Wsl, Platform::Unix, None, false, |_| true)
                 .unwrap_err()
                 .to_string(),
             "WSL ist nur unter Windows verfügbar"
         );
+    }
+
+    #[test]
+    fn shell_integration_preserves_disabled_behavior_and_selects_hooks() {
+        for has_pwsh in [false, true] {
+            let spec = resolve_shell(ShellKind::Local, Platform::Windows, None, true, |_| {
+                has_pwsh
+            })
+            .unwrap();
+            assert_eq!(spec.args[..3], ["-NoLogo", "-NoExit", "-Command"]);
+            assert!(spec.args[3].contains("$Global:LinMobaOriginalPrompt = $function:prompt"));
+            assert!(spec.args[3].contains("function Global:prompt"));
+            assert!(spec.args[3].contains("[char]27"));
+            assert!(spec.args[3].contains("[char]7"));
+            assert!(spec.args[3].contains("[Console]::Write"));
+            assert!(spec.args[3].contains("$env:COMPUTERNAME"));
+            assert!(!spec.args[3].contains("`e"));
+            assert!(spec.env.is_empty());
+        }
+        let spec = resolve_shell(ShellKind::Wsl, Platform::Windows, None, true, |_| true).unwrap();
+        assert_eq!(spec.args[..3], ["-e", "bash", "-c"]);
+        assert_eq!(
+            spec.args[3],
+            r#"export PROMPT_COMMAND='printf "\033]7;file://%s%s\007" "$WSL_DISTRO_NAME" "$PWD"'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; exec bash -i"#
+        );
+        for shell in ["/bin/bash", "bash"] {
+            let spec = resolve_shell(
+                ShellKind::Local,
+                Platform::Unix,
+                Some(shell.to_owned()),
+                true,
+                |_| false,
+            )
+            .unwrap();
+            assert_eq!(
+                spec.env,
+                [(
+                    "PROMPT_COMMAND".to_owned(),
+                    r#"printf "\033]7;file://%s%s\007" "$HOSTNAME" "$PWD""#.to_owned()
+                )]
+            );
+            assert!(spec.args.is_empty());
+        }
+        for shell in ["/bin/zsh", "/bin/sh"] {
+            let spec = resolve_shell(
+                ShellKind::Local,
+                Platform::Unix,
+                Some(shell.to_owned()),
+                true,
+                |_| false,
+            )
+            .unwrap();
+            assert!(spec.env.is_empty());
+        }
+        let spec = resolve_shell(
+            ShellKind::Local,
+            Platform::Unix,
+            Some("/bin/bash".to_owned()),
+            false,
+            |_| false,
+        )
+        .unwrap();
+        assert!(spec.env.is_empty());
     }
 
     #[test]
@@ -311,6 +410,7 @@ mod tests {
         let spec = ShellSpec {
             program: String::new(),
             args: vec![],
+            env: vec![],
         };
         for (cols, rows) in [(0, 24), (80, 0)] {
             assert!(matches!(
@@ -350,6 +450,7 @@ mod tests {
         let spec = ShellSpec {
             program: if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }.to_owned(),
             args: vec![],
+            env: vec![],
         };
         let manager = Arc::new(PtyManager::default());
         let (exit_tx, exit_rx) = mpsc::channel();
@@ -435,11 +536,13 @@ mod tests {
         let spec = ShellSpec {
             program: "cmd.exe".to_owned(),
             args: ["/C", "echo linmoba-ok"].map(str::to_owned).to_vec(),
+            env: vec![],
         };
         #[cfg(not(windows))]
         let spec = ShellSpec {
             program: "/bin/sh".to_owned(),
             args: ["-c", "echo linmoba-ok"].map(str::to_owned).to_vec(),
+            env: vec![],
         };
         let manager = PtyManager::default();
         let output = Arc::new(Mutex::new(Vec::new()));
