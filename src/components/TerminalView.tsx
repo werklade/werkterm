@@ -65,7 +65,7 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
       const resizeSession = kind === "ssh" ? resizeSsh : resizePty;
       const close = kind === "ssh" ? closeSsh : killPty;
       const report = (error: unknown) => callbacks.current.onStatus(`Terminal: ${String(error)}`);
-      const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report);
+      const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report, () => ({ cols: terminal.cols, cursorX: terminal.buffer.active.cursorX }));
       const osc = terminal.parser.registerOscHandler(7, payload => {
         const cwd = parseOsc7(payload, kind === "local" && /Windows/i.test(navigator.userAgent));
         if (!cwd) return false;
