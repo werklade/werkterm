@@ -72,3 +72,7 @@ input::placeholder { color: var(--fg-muted); }
 .dialog-actions button { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 12px; background: var(--bg-toolbar); }
 .dialog-actions button[type="submit"] { background: var(--accent); color: var(--term-bright-white); }
 .dialog-actions button[type="submit"]:hover { background: var(--accent-hover); }
+
+.statusbar { display: flex; align-items: center; gap: 10px; }
+.statusbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.statusbar > button { flex: none; border: 1px solid var(--border-strong); border-radius: var(--radius); }

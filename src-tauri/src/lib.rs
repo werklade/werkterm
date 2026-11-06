@@ -12,6 +12,7 @@ pub fn run() {
         .manage(Arc::new(ssh::SshManager::default()))
         .manage(Arc::new(commands::PendingPrompts::default()))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::pty_spawn,
             commands::pty_write,
@@ -26,6 +27,13 @@ pub fn run() {
             commands::ssh_resize,
             commands::ssh_close,
             commands::ssh_list_dir,
+            commands::ssh_download,
+            commands::ssh_upload,
+            commands::ssh_cancel_transfer,
+            commands::ssh_mkdir,
+            commands::ssh_create_file,
+            commands::ssh_count_entries,
+            commands::ssh_delete,
             commands::local_list_dir
         ])
         .run(tauri::generate_context!())

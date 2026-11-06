@@ -9,6 +9,7 @@ import { availableShells, type ShellKind } from "./lib/pty";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { parseQuickConnect } from "./lib/quickConnect";
+import type { TransferStatus } from "./lib/transfers";
 import "./styles/theme.css";
 import "./App.css";
 
@@ -24,6 +25,7 @@ export default function App() {
   const [tabs, setTabs] = useState<BrowserTab[]>(() => [{ id: 1, kind: "local", title: `${localTitle()} 1`, exited: false, browserPath: "" }]);
   const [activeId, setActiveId] = useState<number | null>(1);
   const [hasWsl, setHasWsl] = useState(false);
+  const [transfer, setTransfer] = useState<TransferStatus | null>(null);
   const [status, setStatus] = useState("Bereit");
   const [settings, setSettings] = useState(loadSettings);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
@@ -126,7 +128,7 @@ export default function App() {
     <MenuBar />
     <Toolbar hasWsl={hasWsl} onOpen={openTab} />
     <div className="workspace">
-      <Sidebar onStatus={setStatus} onConnect={connect} tab={activeTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
+      <Sidebar onTransfer={setTransfer} onStatus={setStatus} onConnect={connect} tab={activeTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <TabBar tabs={tabs} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
         <div className="terminal-stack">
@@ -137,7 +139,7 @@ export default function App() {
         </div>
       </main>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{status}</footer>
+    <footer className="statusbar" role="status" aria-live="polite"><span>{transfer?.text ?? status}</span>{transfer && <button type="button" onClick={transfer.cancel}>Abbrechen</button>}</footer>
     {currentPrompt?.prompt.type === "hostKey" && <HostKeyDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
     {currentPrompt?.prompt.type === "secret" && <SecretDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
   </div>;

@@ -471,3 +471,86 @@ mod tests {
         assert_eq!(pending.answers.lock().unwrap().len(), 1);
     }
 }
+
+#[tauri::command]
+pub async fn ssh_download(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    remote_path: String,
+    local_path: String,
+    transfer_id: u32,
+    on_progress: Channel<crate::ssh::TransferProgress>,
+) -> Result<(), String> {
+    state
+        .download(id, remote_path, local_path, transfer_id, &move |progress| {
+            let _ = on_progress.send(progress);
+        })
+        .await
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn ssh_upload(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    local_path: String,
+    remote_dir: String,
+    overwrite: bool,
+    transfer_id: u32,
+    on_progress: Channel<crate::ssh::TransferProgress>,
+) -> Result<(), String> {
+    state
+        .upload(
+            id,
+            local_path,
+            remote_dir,
+            overwrite,
+            transfer_id,
+            &move |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
+        .await
+}
+#[tauri::command]
+pub async fn ssh_cancel_transfer(
+    state: State<'_, Arc<SshManager>>,
+    transfer_id: u32,
+) -> Result<(), String> {
+    state.cancel_transfer(transfer_id).await;
+    Ok(())
+}
+#[tauri::command]
+pub async fn ssh_mkdir(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    parent: String,
+    name: String,
+) -> Result<(), String> {
+    state.mkdir(id, parent, name).await
+}
+#[tauri::command]
+pub async fn ssh_create_file(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    parent: String,
+    name: String,
+) -> Result<(), String> {
+    state.create_file(id, parent, name).await
+}
+#[tauri::command]
+pub async fn ssh_count_entries(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    path: String,
+) -> Result<u64, String> {
+    state.count_entries(id, path).await
+}
+#[tauri::command]
+pub async fn ssh_delete(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    path: String,
+    recursive: bool,
+) -> Result<(), String> {
+    state.delete(id, path, recursive).await
+}

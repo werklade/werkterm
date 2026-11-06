@@ -1,4 +1,6 @@
+mod actions;
 pub mod lsparse;
+pub use actions::TransferProgress;
 
 use russh::{ChannelMsg, ChannelWriteHalf, Disconnect, client, keys};
 use russh_sftp::client::SftpSession;
@@ -251,6 +253,7 @@ pub struct SshManager {
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
     next_id: AtomicU32,
     connections: Mutex<Connections>,
+    transfers: Mutex<actions::Transfers>,
 }
 impl Default for SshManager {
     fn default() -> Self {
@@ -258,6 +261,7 @@ impl Default for SshManager {
             sessions: Mutex::new(HashMap::new()),
             next_id: AtomicU32::new(1),
             connections: Mutex::new(Connections::default()),
+            transfers: Mutex::new(actions::Transfers::default()),
         }
     }
 }
