@@ -416,13 +416,37 @@ impl SshManager {
             return Err("Terminalgröße muss größer als null sein".into());
         }
         let started = tokio::time::Instant::now();
-        let stream = tokio::time::timeout(
-            Duration::from_secs(15),
-            tokio::net::TcpStream::connect((target.host.as_str(), target.port)),
+        // Try every resolved address like OpenSSH does: "localhost" may resolve to an
+        // unreachable ::1 first (e.g. WSL mirrored networking), which only times out.
+        let addresses: Vec<_> = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::net::lookup_host((target.host.as_str(), target.port)),
         )
         .await
-        .map_err(|_| "Zeitüberschreitung beim SSH-Verbindungsaufbau")?
-        .map_err(ssh_error)?;
+        .map_err(|_| "Zeitüberschreitung bei der Namensauflösung")?
+        .map_err(ssh_error)?
+        .collect();
+        let mut last_error = String::from("Host konnte nicht aufgelöst werden");
+        let mut connected = None;
+        for address in addresses {
+            if started.elapsed() >= Duration::from_secs(15) {
+                break;
+            }
+            match tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::net::TcpStream::connect(address),
+            )
+            .await
+            {
+                Ok(Ok(stream)) => {
+                    connected = Some(stream);
+                    break;
+                }
+                Ok(Err(error)) => last_error = ssh_error(error),
+                Err(_) => last_error = format!("Zeitüberschreitung bei {address}"),
+            }
+        }
+        let stream = connected.ok_or(last_error)?;
         let config = Arc::new(client::Config {
             keepalive_interval: Some(Duration::from_secs(30)),
             inactivity_timeout: None,
