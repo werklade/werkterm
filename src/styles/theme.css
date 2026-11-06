@@ -1,0 +1,73 @@
+:root {
+  --bg-app: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-panel-alt: #2d2d2e;
+  --bg-toolbar: #333333;
+  --bg-menubar: #444444;
+  --bg-input: #2a2a2a;
+  --bg-hover: #3c3c3c;
+  --bg-active: #4b4b4b;
+  --bg-tab: #333333;
+  --bg-tab-active: #5e5e5e;
+  
+  --fg-primary: #d4d4d4;
+  --fg-secondary: #a9b7c6;
+  --fg-muted: #7a7a7a;
+  --fg-inverse: #1e1e1e;
+  
+  --accent: #1769ff;
+  --accent-hover: #3d84ff;
+  --border: #2a2a2a;
+  --border-strong: #3c3c3c;
+  --focus-ring: #1769ff;
+  
+  --danger: #f44747;
+  --warning: #e3961a;
+  --success: #00b452;
+  
+  --term-bg: #000000;
+  --term-fg: #c5c8c6;
+  --term-cursor: #1769ff;
+  --term-selection: #3c3c3c;
+  
+  --term-black: #000000;
+  --term-red: #cd3131;
+  --term-green: #1e9d38;
+  --term-yellow: #e3961a;
+  --term-blue: #1769ff;
+  --term-magenta: #c5178a;
+  --term-cyan: #19a679;
+  --term-white: #c5c8c6;
+  
+  --term-bright-black: #5f5f5f;
+  --term-bright-red: #f44747;
+  --term-bright-green: #6a9955;
+  --term-bright-yellow: #f38518;
+  --term-bright-blue: #729fcf;
+  --term-bright-magenta: #c33882;
+  --term-bright-cyan: #29b8db;
+  --term-bright-white: #ffffff;
+  
+  --font-ui: "Segoe UI", "Ubuntu", "Noto Sans", sans-serif;
+  --font-mono: "Cascadia Mono", "DejaVu Sans Mono", monospace;
+  --font-size-ui: 13px;
+  --font-size-term: 14px;
+  --radius: 4px;
+  --sidebar-icon-width: 40px;
+  --sidebar-width: 240px;
+  --toolbar-height: 32px;
+  --menubar-height: 26px;
+  --tabbar-height: 32px;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--fg-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
