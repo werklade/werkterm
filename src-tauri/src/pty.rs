@@ -66,7 +66,7 @@ fn operation(error: impl fmt::Display) -> PtyError {
     PtyError::Operation(error.to_string())
 }
 
-const POWERSHELL_OSC7: &str = r#"$Global:LinMobaOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $u = ([System.Uri]::new($p)).AbsolutePath; [Console]::Write(([char]27 + ']7;file://' + $env:COMPUTERNAME + $u + [char]7)) }; if ($Global:LinMobaOriginalPrompt) { & $Global:LinMobaOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
+const POWERSHELL_OSC7: &str = r#"$Global:LinMobaOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $u = ([System.Uri]::new($p)).AbsoluteUri.Substring(7); if (-not $u.StartsWith('/')) { $u = '/' + $u }; [Console]::Write(([char]27 + ']7;file://' + $env:COMPUTERNAME + $u + [char]7)) }; if ($Global:LinMobaOriginalPrompt) { & $Global:LinMobaOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
 const WSL_OSC7: &str = r#"export PROMPT_COMMAND='printf "\033]7;file://%s%s\007" "$WSL_DISTRO_NAME" "$PWD"'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; exec bash -i"#;
 const BASH_OSC7: &str = r#"printf "\033]7;file://%s%s\007" "$HOSTNAME" "$PWD""#;
 
