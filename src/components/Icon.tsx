@@ -13,6 +13,8 @@ import icon11 from "../assets/icons/file-new.svg?raw";
 import icon12 from "../assets/icons/delete.svg?raw";
 import icon13 from "../assets/icons/permissions.svg?raw";
 import icon14 from "../assets/icons/edit.svg?raw";
+import folderIcon from "../assets/icons/folder.svg?raw";
+import fileIcon from "../assets/icons/file.svg?raw";
 
 const icons = {
   "terminal": icon0,
@@ -30,6 +32,8 @@ const icons = {
   "delete": icon12,
   "permissions": icon13,
   "edit": icon14,
+  "folder": folderIcon,
+  "file": fileIcon,
 };
 export type IconName = keyof typeof icons;
 export function Icon({ name }: { name: IconName }) {

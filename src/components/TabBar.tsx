@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ShellKind } from "../lib/pty";
 
-export interface TerminalTab { id: number; kind: ShellKind; title: string; exited: boolean }
+export interface TerminalTab { id: number; kind: ShellKind | "ssh"; title: string; exited: boolean }
 interface Props {
   tabs: TerminalTab[]; activeId: number | null; hasWsl: boolean;
   onSelect: (id: number) => void; onClose: (id: number) => void; onOpen: (kind: ShellKind) => void;

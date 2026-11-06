@@ -55,3 +55,20 @@ input::placeholder { color: var(--fg-muted); }
 .terminal-container { height: 100%; width: 100%; overflow: hidden; }
 .terminal-empty { display: grid; height: 100%; place-items: center; color: var(--fg-muted); }
 .statusbar { flex: none; min-height: 23px; padding: 3px 10px; background: var(--bg-toolbar); border-top: 1px solid var(--border-strong); color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ssh-dialog {
+  max-width: min(560px, calc(100vw - 32px));
+  color: var(--fg-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+.ssh-dialog::backdrop { background: var(--bg-app); opacity: 0.75; }
+.ssh-dialog h2 { margin-top: 0; font-size: 18px; overflow-wrap: anywhere; }
+.ssh-dialog input { width: 100%; }
+.hostkey-fingerprint { display: block; font-family: var(--font-mono); user-select: text; overflow-wrap: anywhere; padding: 10px; background: var(--bg-input); }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.dialog-actions button { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 12px; background: var(--bg-toolbar); }
+.dialog-actions button[type="submit"] { background: var(--accent); color: var(--term-bright-white); }
+.dialog-actions button[type="submit"]:hover { background: var(--accent-hover); }

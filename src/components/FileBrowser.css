@@ -1,0 +1,15 @@
+.browser-settings { display: grid; gap: 5px; padding: 8px; font-size: 11px; border-bottom: 1px solid var(--border-strong); }
+.browser-settings label { display: flex; align-items: center; gap: 5px; }
+.browser-settings input { margin: 0; accent-color: var(--accent); }
+.browser-heading { margin: 0; padding: 8px; font-size: inherit; font-weight: 600; overflow-wrap: anywhere; }
+.browser-error { padding: 8px; color: var(--danger); overflow-wrap: anywhere; }
+.browser-list { margin-top: 8px; overflow: auto; }
+.browser-list table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.browser-list th { color: var(--fg-secondary); font-weight: 500; text-align: left; }
+.browser-list td, .browser-list th { padding: 5px 4px; border-bottom: 1px solid var(--border); }
+.browser-list td:not(:first-child) { white-space: nowrap; }
+.browser-list tr:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.browser-list tbody tr:hover, .browser-list tbody tr:focus { background: var(--bg-hover); }
+.browser-entry-name { display: flex; align-items: center; gap: 4px; }
+.browser-entry-name > span:last-child { min-width: 60px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-entry-name .icon { width: 16px; height: 16px; }

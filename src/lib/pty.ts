@@ -5,6 +5,7 @@ export interface SpawnOptions {
   kind: ShellKind;
   cols: number;
   rows: number;
+  shellIntegration: boolean;
   onData: Channel<ArrayBuffer>;
   onExit: Channel<number | null>;
 }
