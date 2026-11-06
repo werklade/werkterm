@@ -1,10 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
-  <rect x="1" y="1" width="22" height="22" rx="2" ry="2" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="6" y1="18" x2="18" y2="18" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="18" y1="18" x2="16" y2="16" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="18" y1="18" x2="16" y2="20" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="6" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="6" y1="6" x2="18" y2="6" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="18" y1="6" x2="22" y2="6" stroke="currentColor" stroke-width="1.75"/>
-  <line x1="6" y1="6" x2="6" y2="2" stroke="currentColor" stroke-width="1.75"/>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  class="icon icon-tabler icons-tabler-outline icon-tabler-terminal-2"
+>
+  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+  <path d="M8 9l3 3l-3 3" />
+  <path d="M13 15l3 0" />
+  <path d="M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -12" />
 </svg>

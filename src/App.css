@@ -33,7 +33,7 @@ input::placeholder { color: var(--fg-muted); }
 .sidebar-icons button[aria-pressed="true"] { background: var(--bg-active); color: var(--accent-hover); border-left-color: var(--accent); }
 .sidebar-panel { width: var(--sidebar-width); min-width: 0; overflow: auto; }
 .sidebar-panel h2 { font-size: inherit; font-weight: 600; margin: 0; padding: 10px; border-bottom: 1px solid var(--border-strong); }
-.browser-toolbar { display: flex; flex-wrap: wrap; padding: 5px; gap: 2px; }
+.browser-toolbar { display: flex; flex-wrap: wrap; padding: 4px; gap: 1px; }
 .browser-toolbar button { width: 24px; height: 28px; padding: 2px; display: grid; place-items: center; }
 .browser-toolbar .icon { width: 20px; height: 20px; }
 .remote-path { display: block; width: calc(100% - 12px); margin: 0 6px; }
