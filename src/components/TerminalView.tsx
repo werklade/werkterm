@@ -3,8 +3,9 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { Channel, killPty, resizePty, spawnPty, writePty } from "../lib/pty";
-import { answerHostKey, answerSecret, closeSsh, connectSsh, resizeSsh, writeSsh, type SshPrompt } from "../lib/ssh";
+import { answerHostKey, answerSecret, cancelSshConnect, closeSsh, connectSsh, resizeSsh, writeSsh, type SshPrompt } from "../lib/ssh";
 import { parseOsc7, type TerminalCwd } from "../lib/osc7";
+import { parseQuickConnect } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
 
 interface Props {
@@ -19,7 +20,9 @@ interface Props {
   onSession: (id: number, sessionId: number | null) => void;
   onCwd: (id: number, cwd: TerminalCwd) => void;
   onPrompt: (id: number, prompt: SshPrompt) => void;
+  onClearPrompts: (id: number) => void;
 }
+let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
 function terminalTheme(styles: CSSStyleDeclaration): ITheme {
@@ -31,13 +34,13 @@ function terminalTheme(styles: CSSStyleDeclaration): ITheme {
   };
 }
 
-export function TerminalView({ id, kind, target, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt }: Props) {
+export function TerminalView({ id, kind, target, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
-  const callbacks = useRef({ onExit, onStatus, onSession, onCwd, onPrompt });
-  callbacks.current = { onExit, onStatus, onSession, onCwd, onPrompt };
+  const callbacks = useRef({ onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts });
+  callbacks.current = { onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts };
   const settings = useRef({ shellIntegration, sshPromptCommand });
   settings.current = { shellIntegration, sshPromptCommand };
 
@@ -55,6 +58,8 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
       terminal.open(element);
       runtime.current = { terminal, fit };
       let sessionId: number | undefined;
+      const connectToken = nextConnectToken++ >>> 0;
+      let connecting = kind === "ssh";
       let exited = false;
       const write = kind === "ssh" ? writeSsh : writePty;
       const resizeSession = kind === "ssh" ? resizeSsh : resizePty;
@@ -62,7 +67,7 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
       const report = (error: unknown) => callbacks.current.onStatus(`Terminal: ${String(error)}`);
       const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report);
       const osc = terminal.parser.registerOscHandler(7, payload => {
-        const cwd = parseOsc7(payload);
+        const cwd = parseOsc7(payload, kind === "local" && /Windows/i.test(navigator.userAgent));
         if (!cwd) return false;
         if (!cancelled) callbacks.current.onCwd(id, cwd);
         return true;
@@ -79,7 +84,7 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
         promptCommand.receiveData();
       };
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; if (kind === "ssh") callbacks.current.onStatus("SSH-Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);
@@ -92,17 +97,24 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
       if (activeRef.current) terminal.focus();
       const dimensions = { cols: terminal.cols, rows: terminal.rows, onData, onExit: onExitChannel };
       const spawned = kind === "ssh"
-        ? connectSsh({ ...dimensions, target: target ?? "", onPrompt: onPromptChannel })
+        ? connectSsh({ ...dimensions, target: target ?? "", connectToken, onPrompt: onPromptChannel })
         : spawnPty({ ...dimensions, kind, shellIntegration: settings.current.shellIntegration });
-      void spawned.then(spawnedId => {
+      void spawned.then(result => {
+        connecting = false;
+        const spawnedId = typeof result === "number" ? result : result.id;
         if (cancelled) { void close(spawnedId).catch(() => undefined); return; }
         sessionId = spawnedId;
+        callbacks.current.onClearPrompts(id);
+        const destination = parseQuickConnect(target ?? "");
+        if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
         if (!exited) {
           callbacks.current.onSession(id, spawnedId);
           void resizeSession(spawnedId, terminal.cols, terminal.rows).catch(report);
           promptCommand.connect(spawnedId);
         }
       }).catch((error: unknown) => {
+        connecting = false;
+        callbacks.current.onClearPrompts(id);
         if (cancelled) return;
         exited = true;
         terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${String(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
@@ -111,6 +123,8 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
         report(error);
       });
       cleanup = () => {
+        callbacks.current.onClearPrompts(id);
+        if (connecting) void cancelSshConnect(connectToken).catch(() => undefined);
         observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); promptCommand.dispose();
         onData.onmessage = () => undefined;
         onExitChannel.onmessage = () => undefined;

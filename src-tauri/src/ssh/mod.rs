@@ -4,7 +4,7 @@ use russh::{ChannelMsg, ChannelWriteHalf, Disconnect, client, keys};
 use russh_sftp::client::SftpSession;
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     path::PathBuf,
     pin::Pin,
@@ -15,7 +15,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -229,6 +229,7 @@ impl client::Handler for Handler {
 
 type Handle = client::Handle<Handler>;
 struct Session {
+    socket: SetupSocket,
     handle: Arc<Handle>,
     writer: Arc<ChannelWriteHalf<client::Msg>>,
     sftp: Option<Arc<SftpSession>>,
@@ -236,15 +237,27 @@ struct Session {
     done: tokio::sync::Notify,
     finished: std::sync::atomic::AtomicBool,
 }
+#[derive(Default)]
+struct Connections {
+    running: HashMap<u32, watch::Sender<bool>>,
+    completed: HashSet<u32>,
+}
+#[derive(Serialize)]
+pub struct SshConnection {
+    pub id: u32,
+    pub mode: String,
+}
 pub struct SshManager {
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
     next_id: AtomicU32,
+    connections: Mutex<Connections>,
 }
 impl Default for SshManager {
     fn default() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             next_id: AtomicU32::new(1),
+            connections: Mutex::new(Connections::default()),
         }
     }
 }
@@ -400,9 +413,199 @@ fn quote(path: &str) -> String {
     format!("'{}'", path.replace('\'', "'\\''"))
 }
 
+const PHASE_TIMEOUT: Duration = Duration::from_secs(15);
+const CANCELED: &str = "Verbindungsaufbau abgebrochen";
+
+// A duplicated socket lets us terminate even a handshake task that russh has
+// already spawned internally when its connect future is dropped.
+struct SetupSocket(Option<std::net::TcpStream>);
+impl Drop for SetupSocket {
+    fn drop(&mut self) {
+        if let Some(socket) = &self.0 {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+// Prompt time is excluded, while cancellation remains active throughout.
+async fn phase<T>(
+    future: impl Future<Output = Result<T, String>>,
+    canceled: &mut watch::Receiver<bool>,
+    prompts: &mut watch::Receiver<bool>,
+) -> Result<T, String> {
+    phase_with_budget(future, canceled, prompts, PHASE_TIMEOUT).await
+}
+async fn phase_with_budget<T>(
+    future: impl Future<Output = Result<T, String>>,
+    canceled: &mut watch::Receiver<bool>,
+    prompts: &mut watch::Receiver<bool>,
+    mut remaining: Duration,
+) -> Result<T, String> {
+    tokio::pin!(future);
+    loop {
+        if *canceled.borrow() {
+            return Err(CANCELED.into());
+        }
+        let paused = *prompts.borrow_and_update();
+        let started = tokio::time::Instant::now();
+        tokio::select! {
+            biased;
+            _ = canceled.changed() => return Err(CANCELED.into()),
+            result = &mut future => return result,
+            changed = prompts.changed() => {
+                if changed.is_err() { return future.await; }
+            }
+            _ = tokio::time::sleep(remaining), if !paused => return Err("Zeitüberschreitung beim SSH-Verbindungsaufbau".into()),
+        }
+        if !paused {
+            remaining = remaining.saturating_sub(started.elapsed());
+        }
+    }
+}
+
+struct TrackedPrompter {
+    inner: Arc<dyn Prompter>,
+    active: watch::Sender<bool>,
+    canceled: watch::Receiver<bool>,
+}
+impl Prompter for TrackedPrompter {
+    fn confirm_host_key(
+        &self,
+        host: String,
+        port: u16,
+        key_type: String,
+        fingerprint: String,
+    ) -> PromptFuture<bool> {
+        let future = self
+            .inner
+            .confirm_host_key(host, port, key_type, fingerprint);
+        let active = self.active.clone();
+        let mut canceled = self.canceled.clone();
+        Box::pin(async move {
+            if *canceled.borrow() {
+                return false;
+            }
+            active.send_replace(true);
+            let result = tokio::select! { biased; _ = canceled.changed() => false, result = future => result };
+            active.send_replace(false);
+            result
+        })
+    }
+    fn ask_secret(&self, kind: SecretKind, label: String) -> PromptFuture<Option<String>> {
+        let future = self.inner.ask_secret(kind, label);
+        let active = self.active.clone();
+        let mut canceled = self.canceled.clone();
+        Box::pin(async move {
+            if *canceled.borrow() {
+                return None;
+            }
+            active.send_replace(true);
+            let result = tokio::select! { biased; _ = canceled.changed() => None, result = future => result };
+            active.send_replace(false);
+            result
+        })
+    }
+}
+
+fn terminal_message(
+    message: Option<ChannelMsg>,
+    on_data: &mut dyn FnMut(Vec<u8>),
+    replies: &mpsc::UnboundedSender<bool>,
+    code: &mut Option<u32>,
+) -> bool {
+    match message {
+        Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. }) => {
+            on_data(data.to_vec())
+        }
+        Some(ChannelMsg::Success) => {
+            let _ = replies.send(true);
+        }
+        Some(ChannelMsg::Failure) => {
+            let _ = replies.send(false);
+        }
+        Some(ChannelMsg::ExitStatus { exit_status }) => *code = Some(exit_status),
+        Some(ChannelMsg::Eof | ChannelMsg::Close) | None => return false,
+        _ => (),
+    }
+    true
+}
+
 impl SshManager {
     #[allow(clippy::too_many_arguments)]
     pub async fn connect(
+        self: &Arc<Self>,
+        connect_token: u32,
+        target: SshTarget,
+        cols: u16,
+        rows: u16,
+        known_hosts_path: PathBuf,
+        prompter: Arc<dyn Prompter>,
+        on_data: Box<dyn FnMut(Vec<u8>) + Send>,
+        on_exit: Box<dyn FnOnce(Option<u32>) + Send>,
+    ) -> Result<SshConnection, String> {
+        let (cancel, mut canceled) = watch::channel(false);
+        {
+            let mut connections = self.connections.lock().await;
+            connections.completed.remove(&connect_token);
+            if let Some(early_cancel) = connections.running.get(&connect_token) {
+                if *early_cancel.borrow() && early_cancel.receiver_count() == 0 {
+                    canceled = early_cancel.subscribe();
+                } else {
+                    return Err("Verbindungsnummer bereits verwendet".into());
+                }
+            } else {
+                connections.running.insert(connect_token, cancel);
+            }
+        }
+        let (active, mut prompts) = watch::channel(false);
+        let prompter: Arc<dyn Prompter> = Arc::new(TrackedPrompter {
+            inner: prompter,
+            active,
+            canceled: canceled.clone(),
+        });
+        let result = self
+            .connect_inner(
+                target,
+                cols,
+                rows,
+                known_hosts_path,
+                prompter,
+                on_data,
+                on_exit,
+                &mut canceled,
+                &mut prompts,
+            )
+            .await;
+        let was_canceled = {
+            let mut connections = self.connections.lock().await;
+            let canceled = connections
+                .running
+                .remove(&connect_token)
+                .is_some_and(|cancel| *cancel.borrow());
+            connections.completed.insert(connect_token);
+            canceled
+        };
+        if was_canceled {
+            if let Ok(connection) = result {
+                let _ = self.close(connection.id).await;
+            }
+            Err(CANCELED.into())
+        } else {
+            result
+        }
+    }
+    pub async fn cancel_connect(&self, connect_token: u32) {
+        let mut connections = self.connections.lock().await;
+        if let Some(cancel) = connections.running.get(&connect_token) {
+            cancel.send_replace(true);
+        } else if !connections.completed.contains(&connect_token) {
+            // A cancel IPC may be scheduled before its connect IPC.
+            let (cancel, _) = watch::channel(true);
+            connections.running.insert(connect_token, cancel);
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn connect_inner(
         self: &Arc<Self>,
         target: SshTarget,
         cols: u16,
@@ -411,48 +614,68 @@ impl SshManager {
         prompter: Arc<dyn Prompter>,
         mut on_data: Box<dyn FnMut(Vec<u8>) + Send>,
         on_exit: Box<dyn FnOnce(Option<u32>) + Send>,
-    ) -> Result<u32, String> {
+        canceled: &mut watch::Receiver<bool>,
+        prompts: &mut watch::Receiver<bool>,
+    ) -> Result<SshConnection, String> {
         if cols == 0 || rows == 0 {
             return Err("Terminalgröße muss größer als null sein".into());
         }
         let started = tokio::time::Instant::now();
         // Try every resolved address like OpenSSH does: "localhost" may resolve to an
         // unreachable ::1 first (e.g. WSL mirrored networking), which only times out.
-        let addresses: Vec<_> = tokio::time::timeout(
-            Duration::from_secs(5),
-            tokio::net::lookup_host((target.host.as_str(), target.port)),
+        let addresses: Vec<_> = phase(
+            async {
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    tokio::net::lookup_host((target.host.as_str(), target.port)),
+                )
+                .await
+                .map_err(|_| "Zeitüberschreitung bei der Namensauflösung".to_owned())?
+                .map(|addresses| addresses.collect())
+                .map_err(ssh_error)
+            },
+            canceled,
+            prompts,
         )
-        .await
-        .map_err(|_| "Zeitüberschreitung bei der Namensauflösung")?
-        .map_err(ssh_error)?
-        .collect();
+        .await?;
         let mut last_error = String::from("Host konnte nicht aufgelöst werden");
         let mut connected = None;
         for address in addresses {
             if started.elapsed() >= Duration::from_secs(15) {
                 break;
             }
-            match tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::net::TcpStream::connect(address),
+            match phase(
+                async {
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        tokio::net::TcpStream::connect(address),
+                    )
+                    .await
+                    .map_err(|_| format!("Zeitüberschreitung bei {address}"))?
+                    .map_err(ssh_error)
+                },
+                canceled,
+                prompts,
             )
             .await
             {
-                Ok(Ok(stream)) => {
+                Ok(stream) => {
                     connected = Some(stream);
                     break;
                 }
-                Ok(Err(error)) => last_error = ssh_error(error),
-                Err(_) => last_error = format!("Zeitüberschreitung bei {address}"),
+                Err(error) if error == CANCELED => return Err(error),
+                Err(error) => last_error = error,
             }
         }
-        let stream = connected.ok_or(last_error)?;
+        let stream = connected.ok_or(last_error)?.into_std().map_err(ssh_error)?;
+        let mut setup_socket = SetupSocket(Some(stream.try_clone().map_err(ssh_error)?));
+        let stream = tokio::net::TcpStream::from_std(stream).map_err(ssh_error)?;
         let config = Arc::new(client::Config {
             keepalive_interval: Some(Duration::from_secs(30)),
             inactivity_timeout: None,
             ..Default::default()
         });
-        let (prompt_active, mut prompt_state) = tokio::sync::watch::channel(false);
+        let (prompt_active, _prompt_state) = tokio::sync::watch::channel(false);
         let connecting = client::connect_stream(
             config,
             stream,
@@ -463,66 +686,107 @@ impl SshManager {
                 prompt_active,
             },
         );
-        tokio::pin!(connecting);
-        let mut remaining = Duration::from_secs(15).saturating_sub(started.elapsed());
-        let mut last = tokio::time::Instant::now();
-        let mut paused = false;
-        let mut handle = loop {
-            tokio::select! {
-                result = &mut connecting => break result.map_err(|e| e.to_string())?,
-                changed = prompt_state.changed() => {
-                    if changed.is_err() {break connecting.as_mut().await.map_err(|e| e.to_string())?;}
-                    if !paused {remaining = remaining.saturating_sub(last.elapsed());}
-                    paused = *prompt_state.borrow_and_update();
-                    last = tokio::time::Instant::now();
-                },
-                _ = tokio::time::sleep(remaining), if !paused => return Err("Zeitüberschreitung beim SSH-Verbindungsaufbau".into()),
+        let mut handle = phase(
+            async { connecting.await.map_err(|e| e.to_string()) },
+            canceled,
+            prompts,
+        )
+        .await?;
+        if let Err(error) = phase(
+            authenticate(&mut handle, &target, prompter.as_ref()),
+            canceled,
+            prompts,
+        )
+        .await
+        {
+            if let Some(socket) = &setup_socket.0 {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
             }
-        };
-        if let Err(error) = authenticate(&mut handle, &target, prompter.as_ref()).await {
-            let _ = handle.disconnect(Disconnect::ByApplication, "", "").await;
+            let _ = tokio::time::timeout(
+                PHASE_TIMEOUT,
+                handle.disconnect(Disconnect::ByApplication, "", ""),
+            )
+            .await;
             return Err(error);
         }
         let setup = async {
-            let mut terminal = handle.channel_open_session().await.map_err(ssh_error)?;
-            terminal
-                .request_pty(
-                    true,
-                    "xterm-256color",
-                    u32::from(cols),
-                    u32::from(rows),
-                    0,
-                    0,
-                    &[],
-                )
-                .await
-                .map_err(ssh_error)?;
-            reply(&mut terminal).await?;
-            terminal.request_shell(true).await.map_err(ssh_error)?;
-            reply(&mut terminal).await?;
-            let sftp = match handle.channel_open_session().await {
+            // Resolve the file-transfer mode before starting a shell that may emit
+            // enough login output to fill its bounded channel.
+            let sftp = match phase(
+                async { handle.channel_open_session().await.map_err(ssh_error) },
+                canceled,
+                prompts,
+            )
+            .await
+            {
                 Ok(mut channel) => {
-                    if channel.request_subsystem(true, "sftp").await.is_ok()
-                        && reply(&mut channel).await.is_ok()
-                    {
-                        SftpSession::new(channel.into_stream())
-                            .await
-                            .ok()
-                            .map(Arc::new)
+                    let requested = phase(
+                        async {
+                            channel
+                                .request_subsystem(true, "sftp")
+                                .await
+                                .map_err(ssh_error)?;
+                            reply(&mut channel).await
+                        },
+                        canceled,
+                        prompts,
+                    )
+                    .await;
+                    if requested.is_ok() {
+                        match phase(
+                            async {
+                                SftpSession::new(channel.into_stream())
+                                    .await
+                                    .map_err(ssh_error)
+                            },
+                            canceled,
+                            prompts,
+                        )
+                        .await
+                        {
+                            Ok(sftp) => Some(Arc::new(sftp)),
+                            Err(error) => {
+                                if error == CANCELED {
+                                    return Err(error);
+                                }
+                                None
+                            }
+                        }
                     } else {
-                        let _ = channel.close().await;
+                        let _ = tokio::time::timeout(PHASE_TIMEOUT, channel.close()).await;
+                        if *canceled.borrow() {
+                            return Err(CANCELED.into());
+                        }
                         None
                     }
                 }
-                Err(_) => None,
+                Err(error) => {
+                    if error == CANCELED {
+                        return Err(error);
+                    }
+                    None
+                }
             };
+            let terminal = phase(
+                async { handle.channel_open_session().await.map_err(ssh_error) },
+                canceled,
+                prompts,
+            )
+            .await?;
             Ok::<_, String>((terminal, sftp))
         }
         .await;
         let (terminal, sftp) = match setup {
             Ok(value) => value,
             Err(error) => {
-                let _ = handle.disconnect(Disconnect::ByApplication, "", "").await;
+                if let Some(socket) = &setup_socket.0 {
+                    let _ = socket.shutdown(std::net::Shutdown::Both);
+                }
+                let _ = tokio::time::timeout(
+                    PHASE_TIMEOUT,
+                    handle.disconnect(Disconnect::ByApplication, "", ""),
+                )
+                .await;
                 return Err(error);
             }
         };
@@ -532,7 +796,10 @@ impl SshManager {
             .map_err(|_| "SSH-Sitzungsnummern ausgeschöpft")?;
         let (mut reader, writer) = terminal.split();
         let (stop, mut stopped) = oneshot::channel();
+        let (replies, mut responses) = mpsc::unbounded_channel();
+        let mode = if sftp.is_some() { "SFTP" } else { "exec" }.to_owned();
         let session = Arc::new(Session {
+            socket: SetupSocket(setup_socket.0.take()),
             handle: Arc::new(handle),
             writer: Arc::new(writer),
             sftp,
@@ -540,33 +807,104 @@ impl SshManager {
             done: tokio::sync::Notify::new(),
             finished: std::sync::atomic::AtomicBool::new(false),
         });
-        self.sessions.lock().await.insert(id, session.clone());
+        let (registered, registration) = oneshot::channel();
+        let reader_session = session.clone();
         let manager = Arc::downgrade(self);
         tokio::spawn(async move {
+            let session = reader_session;
             let mut code = None;
             loop {
                 tokio::select! {
-                    _ = &mut stopped => {let _=session.writer.close().await;break;},
-                    message = reader.wait() => match message {
-                        Some(ChannelMsg::Data {data} | ChannelMsg::ExtendedData {data,..}) => on_data(data.to_vec()),
-                        Some(ChannelMsg::ExitStatus {exit_status}) => code=Some(exit_status),
-                        Some(ChannelMsg::Eof | ChannelMsg::Close) | None => break,
-                        _ => (),
+                    _ = &mut stopped => {let _=tokio::time::timeout(PHASE_TIMEOUT, session.writer.close()).await;break;},
+                    message = reader.wait() => {
+                        if !terminal_message(message, on_data.as_mut(), &replies, &mut code) { break; }
                     }
                 }
             }
-            let _ = session
-                .handle
-                .disconnect(Disconnect::ByApplication, "", "")
-                .await;
-            if let Some(manager) = manager.upgrade() {
+            let _ = tokio::time::timeout(
+                PHASE_TIMEOUT,
+                session.handle.disconnect(Disconnect::ByApplication, "", ""),
+            )
+            .await;
+            if let Some(socket) = &session.socket.0 {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+            // Read immediately, but do not remove a session before publication.
+            drop(replies);
+            if registration.await == Ok(true)
+                && let Some(manager) = manager.upgrade()
+            {
                 manager.sessions.lock().await.remove(&id);
             }
             on_exit(code);
             session.finished.store(true, Ordering::Release);
             session.done.notify_waiters();
         });
-        Ok(id)
+        // The reader is already consuming data before any PTY/shell request.
+        let requests = async {
+            phase(
+                async {
+                    session
+                        .writer
+                        .request_pty(
+                            true,
+                            "xterm-256color",
+                            u32::from(cols),
+                            u32::from(rows),
+                            0,
+                            0,
+                            &[],
+                        )
+                        .await
+                        .map_err(ssh_error)?;
+                    if responses.recv().await == Some(true) {
+                        Ok(())
+                    } else {
+                        Err("SSH-Kanalanforderung abgelehnt".into())
+                    }
+                },
+                canceled,
+                prompts,
+            )
+            .await?;
+            phase(
+                async {
+                    session
+                        .writer
+                        .request_shell(true)
+                        .await
+                        .map_err(ssh_error)?;
+                    if responses.recv().await == Some(true) {
+                        Ok(())
+                    } else {
+                        Err("SSH-Kanalanforderung abgelehnt".into())
+                    }
+                },
+                canceled,
+                prompts,
+            )
+            .await
+        }
+        .await;
+        if let Err(error) = requests {
+            if let Some(socket) = &session.socket.0 {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+            let _ = registered.send(false);
+            let done = session.done.notified();
+            tokio::pin!(done);
+            done.as_mut().enable();
+            if let Some(stop) = session.stop.lock().await.take() {
+                let _ = stop.send(());
+            }
+            if !session.finished.load(Ordering::Acquire) {
+                done.await;
+            }
+            return Err(error);
+        }
+        self.sessions.lock().await.insert(id, session);
+        let _ = registered.send(true);
+        Ok(SshConnection { id, mode })
     }
     async fn session(&self, id: u32) -> Result<Arc<Session>, String> {
         self.sessions
@@ -667,7 +1005,7 @@ impl SshManager {
             let output = exec(
                 &session.handle,
                 format!(
-                    "LC_ALL=C QUOTING_STYLE=literal ls -la --time-style=+%s -- {}",
+                    "LC_ALL=C ls -la --time-style=+%s --quoting-style=c -- {}",
                     quote(&path)
                 ),
             )
@@ -684,34 +1022,257 @@ impl SshManager {
 }
 
 async fn exec(handle: &Handle, command: String) -> Result<String, String> {
-    let mut channel = handle
-        .channel_open_session()
+    let mut channel = tokio::time::timeout(PHASE_TIMEOUT, handle.channel_open_session())
         .await
+        .map_err(|_| "Zeitüberschreitung beim Öffnen des Exec-Kanals")?
         .map_err(|_| lsparse::UNSUPPORTED)?;
-    channel
-        .exec(true, command)
-        .await
-        .map_err(|_| lsparse::UNSUPPORTED)?;
-    let mut output = Vec::new();
-    let mut code = None;
-    while let Some(message) = channel.wait().await {
-        match message {
-            ChannelMsg::Data { data } => output.extend_from_slice(&data),
-            ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
-            ChannelMsg::Failure => return Err(lsparse::UNSUPPORTED.into()),
-            ChannelMsg::Close => break,
-            _ => (),
+    run_exec(&mut channel, command, PHASE_TIMEOUT).await
+}
+
+trait ExecChannel {
+    async fn execute(&mut self, command: String) -> Result<(), String>;
+    async fn receive(&mut self) -> Option<ChannelMsg>;
+    async fn close_channel(&mut self);
+}
+impl ExecChannel for russh::Channel<client::Msg> {
+    async fn execute(&mut self, command: String) -> Result<(), String> {
+        self.exec(true, command)
+            .await
+            .map_err(|_| lsparse::UNSUPPORTED.into())
+    }
+    async fn receive(&mut self) -> Option<ChannelMsg> {
+        self.wait().await
+    }
+    async fn close_channel(&mut self) {
+        let _ = self.close().await;
+    }
+}
+async fn run_exec(
+    channel: &mut impl ExecChannel,
+    command: String,
+    budget: Duration,
+) -> Result<String, String> {
+    let result = tokio::time::timeout(budget, async {
+        channel.execute(command).await?;
+        let mut output = Vec::new();
+        let mut code = None;
+        while let Some(message) = channel.receive().await {
+            match message {
+                ChannelMsg::Data { data } => output.extend_from_slice(&data),
+                ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
+                ChannelMsg::Failure => return Err(lsparse::UNSUPPORTED.into()),
+                ChannelMsg::Close => break,
+                _ => (),
+            }
         }
-    }
-    if code != Some(0) {
-        return Err(lsparse::UNSUPPORTED.into());
-    }
-    String::from_utf8(output).map_err(|_| lsparse::UNSUPPORTED.into())
+        if code != Some(0) {
+            return Err(lsparse::UNSUPPORTED.into());
+        }
+        String::from_utf8(output).map_err(|_| lsparse::UNSUPPORTED.into())
+    })
+    .await
+    .map_err(|_| "Zeitüberschreitung beim Exec-Aufruf".to_owned())
+    .and_then(|result| result);
+    // Every operation result, including rejection and timeout, reaches close.
+    let _ = tokio::time::timeout(budget, channel.close_channel()).await;
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn phase_times_out_and_can_be_canceled_during_prompt() {
+        let (cancel, mut canceled) = watch::channel(false);
+        let (active, mut prompts) = watch::channel(false);
+        let never = std::future::pending::<Result<(), String>>();
+        assert!(
+            phase_with_budget(
+                never,
+                &mut canceled,
+                &mut prompts,
+                Duration::from_millis(10)
+            )
+            .await
+            .unwrap_err()
+            .contains("Zeitüberschreitung")
+        );
+        active.send_replace(true);
+        cancel.send_replace(true);
+        assert_eq!(
+            phase(
+                std::future::pending::<Result<(), String>>(),
+                &mut canceled,
+                &mut prompts
+            )
+            .await
+            .unwrap_err(),
+            CANCELED
+        );
+    }
+    #[tokio::test]
+    async fn phase_excludes_prompt_wait_from_budget() {
+        let (_cancel, mut canceled) = watch::channel(false);
+        let (active, mut prompts) = watch::channel(true);
+        let future = async {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            active.send_replace(false);
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            Ok::<_, String>(42)
+        };
+        assert_eq!(
+            phase_with_budget(
+                future,
+                &mut canceled,
+                &mut prompts,
+                Duration::from_millis(40)
+            )
+            .await
+            .unwrap(),
+            42
+        );
+    }
+    #[tokio::test]
+    async fn cancel_watch_interrupts_pending_phase_and_releases_token() {
+        let manager = SshManager::default();
+        let (cancel, mut canceled) = watch::channel(false);
+        manager.connections.lock().await.running.insert(7, cancel);
+        let (_active, mut prompts) = watch::channel(false);
+        let operation = phase(
+            std::future::pending::<Result<(), String>>(),
+            &mut canceled,
+            &mut prompts,
+        );
+        let cancel = async {
+            tokio::task::yield_now().await;
+            manager.cancel_connect(7).await;
+        };
+        let (result, ()) = tokio::join!(operation, cancel);
+        assert_eq!(result.unwrap_err(), CANCELED);
+    }
+    #[test]
+    fn terminal_reader_preserves_data_before_shell_success() {
+        let (replies, mut answers) = mpsc::unbounded_channel();
+        let mut output = Vec::new();
+        let mut code = None;
+        let mut on_data = |bytes| output.extend(bytes);
+        assert!(terminal_message(
+            Some(ChannelMsg::Data {
+                data: b"banner".to_vec().into()
+            }),
+            &mut on_data,
+            &replies,
+            &mut code
+        ));
+        assert!(terminal_message(
+            Some(ChannelMsg::Success),
+            &mut on_data,
+            &replies,
+            &mut code
+        ));
+        assert!(terminal_message(
+            Some(ChannelMsg::Failure),
+            &mut on_data,
+            &replies,
+            &mut code
+        ));
+        assert!(!terminal_message(
+            Some(ChannelMsg::Close),
+            &mut on_data,
+            &replies,
+            &mut code
+        ));
+        assert_eq!(output, b"banner");
+        assert!(answers.try_recv().unwrap());
+        assert!(!answers.try_recv().unwrap());
+    }
+    struct NoPrompts;
+    impl Prompter for NoPrompts {
+        fn confirm_host_key(&self, _: String, _: u16, _: String, _: String) -> PromptFuture<bool> {
+            Box::pin(async { false })
+        }
+        fn ask_secret(&self, _: SecretKind, _: String) -> PromptFuture<Option<String>> {
+            Box::pin(async { None })
+        }
+    }
+    #[tokio::test]
+    async fn early_cancel_is_consumed_and_completed_token_can_be_reused() {
+        let manager = Arc::new(SshManager::default());
+        manager.cancel_connect(19).await;
+        // Invalid dimensions avoid network access while exercising real token registration/cleanup.
+        let connect = || {
+            manager.connect(
+                19,
+                "u@example.invalid".parse().unwrap(),
+                0,
+                24,
+                PathBuf::new(),
+                Arc::new(NoPrompts),
+                Box::new(|_| {}),
+                Box::new(|_| {}),
+            )
+        };
+        assert_eq!(connect().await.err().unwrap(), CANCELED);
+        assert!(manager.connections.lock().await.running.is_empty());
+        manager.cancel_connect(19).await;
+        assert!(manager.connections.lock().await.running.is_empty());
+        assert!(connect().await.err().unwrap().contains("Terminalgröße"));
+        assert!(manager.connections.lock().await.running.is_empty());
+    }
+    struct FakeExec {
+        messages: std::collections::VecDeque<ChannelMsg>,
+        execute_error: bool,
+        hang: bool,
+        closed: bool,
+    }
+    impl ExecChannel for FakeExec {
+        async fn execute(&mut self, _: String) -> Result<(), String> {
+            if self.execute_error {
+                Err("exec rejected".into())
+            } else {
+                Ok(())
+            }
+        }
+        async fn receive(&mut self) -> Option<ChannelMsg> {
+            if self.hang {
+                std::future::pending::<()>().await;
+            }
+            self.messages.pop_front()
+        }
+        async fn close_channel(&mut self) {
+            self.closed = true;
+        }
+    }
+    #[tokio::test]
+    async fn exec_closes_on_success_failure_error_and_timeout() {
+        for (messages, execute_error, hang, success) in [
+            (
+                vec![ChannelMsg::ExitStatus { exit_status: 0 }, ChannelMsg::Close],
+                false,
+                false,
+                true,
+            ),
+            (vec![ChannelMsg::Failure], false, false, false),
+            (
+                vec![ChannelMsg::ExitStatus { exit_status: 1 }],
+                false,
+                false,
+                false,
+            ),
+            (vec![], true, false, false),
+            (vec![], false, true, false),
+        ] {
+            let mut channel = FakeExec {
+                messages: messages.into(),
+                execute_error,
+                hang,
+                closed: false,
+            };
+            let result = run_exec(&mut channel, "ls".into(), Duration::from_millis(10)).await;
+            assert_eq!(result.is_ok(), success);
+            assert!(channel.closed);
+        }
+    }
     fn temporary_path() -> PathBuf {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         std::env::temp_dir().join(format!(
@@ -826,6 +1387,7 @@ mod tests {
         let (exit_tx, exit_rx) = oneshot::channel();
         let id = manager
             .connect(
+                1,
                 target,
                 80,
                 24,
@@ -839,7 +1401,8 @@ mod tests {
                 }),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .id;
         manager.write(id, b"echo linmoba-ssh-ok\n").await.unwrap();
         let output = tokio::time::timeout(Duration::from_secs(15), async {
             let mut output = Vec::new();

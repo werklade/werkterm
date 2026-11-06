@@ -1,5 +1,7 @@
 use crate::pty::{Platform, PtyManager, ShellKind, program_in_path, resolve_shell};
-use crate::ssh::{DirListing, PromptFuture, Prompter, SecretKind, SshManager, SshTarget, ssh_dir};
+use crate::ssh::{
+    DirListing, PromptFuture, Prompter, SecretKind, SshConnection, SshManager, SshTarget, ssh_dir,
+};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -37,7 +39,7 @@ enum PendingAnswer {
 
 pub struct PendingPrompts {
     next_id: AtomicU32,
-    answers: Mutex<HashMap<u32, PendingAnswer>>,
+    answers: Mutex<HashMap<u32, (u32, PendingAnswer)>>,
 }
 
 impl Default for PendingPrompts {
@@ -50,12 +52,32 @@ impl Default for PendingPrompts {
 }
 
 impl PendingPrompts {
-    fn register(self: &Arc<Self>, answer: PendingAnswer) -> Option<PendingPrompt> {
+    fn cancel(&self, token: u32) {
+        if let Ok(mut answers) = self.answers.lock() {
+            let ids: Vec<_> = answers
+                .iter()
+                .filter_map(|(id, (owner, _))| (*owner == token).then_some(*id))
+                .collect();
+            for id in ids {
+                match answers.remove(&id) {
+                    Some((_, PendingAnswer::HostKey(sender))) => {
+                        let _ = sender.send(false);
+                    }
+                    Some((_, PendingAnswer::Secret(sender))) => {
+                        let _ = sender.send(None);
+                    }
+                    None => (),
+                }
+            }
+        }
+    }
+
+    fn register(self: &Arc<Self>, token: u32, answer: PendingAnswer) -> Option<PendingPrompt> {
         let id = self
             .next_id
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .ok()?;
-        self.answers.lock().ok()?.insert(id, answer);
+        self.answers.lock().ok()?.insert(id, (token, answer));
         Some(PendingPrompt {
             id,
             pending: Arc::clone(self),
@@ -77,6 +99,7 @@ impl Drop for PendingPrompt {
 }
 
 struct TauriPrompter {
+    connect_token: u32,
     pending: Arc<PendingPrompts>,
     channel: Channel<SshPrompt>,
 }
@@ -89,11 +112,12 @@ impl Prompter for TauriPrompter {
         key_type: String,
         fingerprint: String,
     ) -> PromptFuture<bool> {
+        let token = self.connect_token;
         let pending = Arc::clone(&self.pending);
         let channel = self.channel.clone();
         Box::pin(async move {
             let (sender, receiver) = oneshot::channel();
-            let Some(request) = pending.register(PendingAnswer::HostKey(sender)) else {
+            let Some(request) = pending.register(token, PendingAnswer::HostKey(sender)) else {
                 return false;
             };
             if channel
@@ -119,11 +143,12 @@ impl Prompter for TauriPrompter {
     }
 
     fn ask_secret(&self, kind: SecretKind, label: String) -> PromptFuture<Option<String>> {
+        let token = self.connect_token;
         let pending = Arc::clone(&self.pending);
         let channel = self.channel.clone();
         Box::pin(async move {
             let (sender, receiver) = oneshot::channel();
-            let request = pending.register(PendingAnswer::Secret(sender))?;
+            let request = pending.register(token, PendingAnswer::Secret(sender))?;
             let kind = match kind {
                 SecretKind::Password => "password",
                 SecretKind::Passphrase => "passphrase",
@@ -245,25 +270,39 @@ pub async fn available_shells() -> Result<Vec<ShellKind>, String> {
 }
 
 #[tauri::command]
+pub async fn ssh_cancel_connect(
+    state: State<'_, Arc<SshManager>>,
+    pending: State<'_, Arc<PendingPrompts>>,
+    connect_token: u32,
+) -> Result<(), String> {
+    state.cancel_connect(connect_token).await;
+    pending.cancel(connect_token);
+    Ok(())
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn ssh_connect(
     state: State<'_, Arc<SshManager>>,
     pending: State<'_, Arc<PendingPrompts>>,
     target: String,
+    connect_token: u32,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
     on_exit: Channel<Option<u32>>,
     on_prompt: Channel<SshPrompt>,
-) -> Result<u32, String> {
+) -> Result<SshConnection, String> {
     let target: SshTarget = target.parse()?;
     let prompter = Arc::new(TauriPrompter {
+        connect_token,
         pending: Arc::clone(pending.inner()),
         channel: on_prompt,
     });
     state
         .inner()
         .connect(
+            connect_token,
             target,
             cols,
             rows,
@@ -290,12 +329,15 @@ pub async fn ssh_answer_host_key(
             .answers
             .lock()
             .map_err(|_| "SSH-Rückfrage konnte nicht beantwortet werden".to_owned())?;
-        if !matches!(answers.get(&request_id), Some(PendingAnswer::HostKey(_))) {
+        if !matches!(
+            answers.get(&request_id),
+            Some((_, PendingAnswer::HostKey(_)))
+        ) {
             return Err("SSH-Hostkey-Rückfrage ist nicht mehr gültig".to_owned());
         }
         answers.remove(&request_id)
     };
-    if let Some(PendingAnswer::HostKey(sender)) = sender {
+    if let Some((_, PendingAnswer::HostKey(sender))) = sender {
         let _ = sender.send(accept);
     }
     Ok(())
@@ -312,7 +354,10 @@ pub async fn ssh_answer_secret(
             .answers
             .lock()
             .map_err(|_| "SSH-Rückfrage konnte nicht beantwortet werden".to_owned())?;
-        if !matches!(answers.get(&request_id), Some(PendingAnswer::Secret(_))) {
+        if !matches!(
+            answers.get(&request_id),
+            Some((_, PendingAnswer::Secret(_)))
+        ) {
             if let Some(secret) = secret.as_mut() {
                 secret.clear();
             }
@@ -320,7 +365,7 @@ pub async fn ssh_answer_secret(
         }
         answers.remove(&request_id)
     };
-    if let Some(PendingAnswer::Secret(sender)) = sender
+    if let Some((_, PendingAnswer::Secret(sender))) = sender
         && let Err(mut secret) = sender.send(secret)
         && let Some(secret) = secret.as_mut()
     {
@@ -401,10 +446,28 @@ mod tests {
     fn canceled_prompt_removes_pending_answer() {
         let pending = Arc::new(PendingPrompts::default());
         let (sender, receiver) = oneshot::channel();
-        let request = pending.register(PendingAnswer::HostKey(sender)).unwrap();
+        let request = pending.register(1, PendingAnswer::HostKey(sender)).unwrap();
         assert_eq!(pending.answers.lock().unwrap().len(), 1);
         drop(request);
         assert!(pending.answers.lock().unwrap().is_empty());
         assert!(receiver.blocking_recv().is_err());
+    }
+    #[test]
+    fn cancellation_rejects_only_prompts_for_its_connection() {
+        let pending = Arc::new(PendingPrompts::default());
+        let (host, host_answer) = oneshot::channel();
+        let (secret, secret_answer) = oneshot::channel();
+        let (other, mut other_answer) = oneshot::channel();
+        let _host = pending.register(7, PendingAnswer::HostKey(host)).unwrap();
+        let _secret = pending.register(7, PendingAnswer::Secret(secret)).unwrap();
+        let _other = pending.register(8, PendingAnswer::HostKey(other)).unwrap();
+        pending.cancel(7);
+        assert!(!host_answer.blocking_recv().unwrap());
+        assert_eq!(secret_answer.blocking_recv().unwrap(), None);
+        assert!(matches!(
+            other_answer.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(pending.answers.lock().unwrap().len(), 1);
     }
 }

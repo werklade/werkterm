@@ -1,20 +1,38 @@
-// Keep the leading space and literal backslash escapes for the remote shell.
-export const SSH_PROMPT_COMMAND = " export PROMPT_COMMAND='printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"'\"${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"\r";
+// LC_ALL=C makes Bash iterate UTF-8 bytes, matching URI percent encoding.
+export const SSH_PROMPT_COMMAND = String.raw` __linmoba_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${"${#p}"};i++)); do c="${"${p:i:1}"}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "$HOSTNAME" "$out"; }; export PROMPT_COMMAND="__linmoba_osc7${"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"}"` + "\r";
 
-/** Coordinates IPC data that can arrive before ssh_connect resolves. */
+/** Wait for a quiet prompt, bounding continuous login output to five seconds. */
 export function createPromptCommandSender(enabled: () => boolean, write: (id: number, data: string) => Promise<void>, report: (error: unknown) => void) {
   let sessionId: number | undefined;
   let receivedData = false;
+  let quiet = false;
+  let deadline = false;
   let sent = false;
   let stopped = false;
+  let quietTimer: ReturnType<typeof setTimeout> | undefined;
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const clear = () => { clearTimeout(quietTimer); clearTimeout(deadlineTimer); };
   const send = () => {
-    if (stopped || sent || !receivedData || sessionId === undefined || !enabled()) return;
+    if (stopped || sent || !receivedData || sessionId === undefined || (!quiet && !deadline) || !enabled()) return;
     sent = true;
+    clear();
     void write(sessionId, SSH_PROMPT_COMMAND).catch(report);
   };
   return {
-    receiveData() { receivedData = true; send(); },
-    connect(id: number) { sessionId = id; send(); },
-    dispose() { stopped = true; },
+    receiveData() {
+      if (stopped || sent) return;
+      receivedData = true;
+      quiet = false;
+      clearTimeout(quietTimer);
+      quietTimer = setTimeout(() => { quiet = true; send(); }, 400);
+      send();
+    },
+    connect(id: number) {
+      if (stopped || sessionId !== undefined) return;
+      sessionId = id;
+      deadlineTimer = setTimeout(() => { deadline = true; send(); }, 5000);
+      send();
+    },
+    dispose() { stopped = true; clear(); },
   };
 }

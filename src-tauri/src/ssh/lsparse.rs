@@ -46,6 +46,53 @@ pub fn mode_bits(mode: &str) -> Result<u32, String> {
     Ok(bits)
 }
 
+fn quoted(input: &mut &str) -> Result<String, String> {
+    if !input.starts_with('"') {
+        return Err(UNSUPPORTED.into());
+    }
+    let bytes = input.as_bytes();
+    let mut result = Vec::new();
+    let mut i = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                *input = &input[i + 1..];
+                return String::from_utf8(result).map_err(|_| UNSUPPORTED.into());
+            }
+            b'\\' => {
+                i += 1;
+                let byte = *bytes.get(i).ok_or(UNSUPPORTED)?;
+                match byte {
+                    b'"' | b'\\' => result.push(byte),
+                    b'n' => result.push(b'\n'),
+                    b't' => result.push(b'\t'),
+                    b'a' => result.push(7),
+                    b'b' => result.push(8),
+                    b'f' => result.push(12),
+                    b'r' => result.push(13),
+                    b'v' => result.push(11),
+                    b'0'..=b'7' => {
+                        let mut value = u16::from(byte - b'0');
+                        for _ in 0..2 {
+                            if let Some(next @ b'0'..=b'7') = bytes.get(i + 1) {
+                                i += 1;
+                                value = value * 8 + u16::from(*next - b'0');
+                            } else {
+                                break;
+                            }
+                        }
+                        result.push(u8::try_from(value).map_err(|_| UNSUPPORTED)?);
+                    }
+                    _ => return Err(UNSUPPORTED.into()),
+                }
+            }
+            byte => result.push(byte),
+        }
+        i += 1;
+    }
+    Err(UNSUPPORTED.into())
+}
+
 pub fn parse(output: &str) -> Result<Vec<DirEntry>, String> {
     let mut entries = Vec::new();
     for line in output.lines() {
@@ -79,12 +126,15 @@ pub fn parse(output: &str) -> Result<Vec<DirEntry>, String> {
             b'l' => "symlink",
             _ => "other",
         };
-        let name = rest.trim_start();
-        let name = if kind == "symlink" {
-            name.split_once(" -> ").ok_or(UNSUPPORTED)?.0
-        } else {
-            name
-        };
+        rest = rest.trim_start();
+        let name = quoted(&mut rest)?;
+        if kind == "symlink" {
+            rest = rest.strip_prefix(" -> ").ok_or(UNSUPPORTED)?;
+            quoted(&mut rest)?;
+        }
+        if !rest.is_empty() {
+            return Err(UNSUPPORTED.into());
+        }
         if name.is_empty() {
             return Err(UNSUPPORTED.into());
         }
@@ -92,7 +142,7 @@ pub fn parse(output: &str) -> Result<Vec<DirEntry>, String> {
             continue;
         }
         entries.push(DirEntry {
-            name: name.into(),
+            name,
             kind: kind.into(),
             size,
             permissions,
@@ -108,7 +158,16 @@ mod tests {
     use super::*;
     #[test]
     fn parses_gnu_listing() {
-        let entries = parse("total 4\ndrwxr-xr-x 2 user group 4096 123 folder name\n-rw-r----- 1 u g 12 124 file name\nlrwxrwxrwx 1 u g 4 125 link -> folder name\nbrw-rw---- 1 root disk 8, 1 126 disk\ndrwxr-xr-x 1 u g 0 127 .\n").unwrap();
+        let entries = parse(
+            r#"total 4
+drwxr-xr-x 2 user group 4096 123 "folder name"
+-rw-r----- 1 u g 12 124 "file name"
+lrwxrwxrwx 1 u g 4 125 "link" -> "folder name"
+brw-rw---- 1 root disk 8, 1 126 "disk"
+drwxr-xr-x 1 u g 0 127 "."
+"#,
+        )
+        .unwrap();
         assert_eq!(entries.len(), 4);
         assert_eq!(entries[0].name, "folder name");
         assert_eq!(entries[1].permissions, 0o640);
@@ -122,5 +181,21 @@ mod tests {
         assert!(parse("nonsense").is_err());
         assert!(parse("-rw-r--r-- 1 u g nope 123 name").is_err());
         assert!(mode_bits("-rZ-r--r--").is_err());
+    }
+    #[test]
+    fn preserves_c_quoted_names_and_symlink_arrows() {
+        let entries = parse(
+            r#"-rw-r--r-- 1 u g 0 1 " leading trailing "
+lrwxrwxrwx 1 u g 0 1 "a -> b" -> "target -> x"
+-rw-r--r-- 1 u g 0 1 "\303\244\040\042\134\n\t"
+-rw-r--r-- 1 u g 0 1 "日本語"
+"#,
+        )
+        .unwrap();
+        assert_eq!(entries[0].name, " leading trailing ");
+        assert_eq!(entries[1].name, "a -> b");
+        assert_eq!(entries[2].name, "ä \"\\\n\t");
+        assert_eq!(entries[3].name, "日本語");
+        assert!(parse(r#"-rw-r--r-- 1 u g 0 1 "bad\q""#).is_err());
     }
 }

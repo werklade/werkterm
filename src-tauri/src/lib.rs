@@ -19,6 +19,7 @@ pub fn run() {
             commands::pty_kill,
             commands::available_shells,
             commands::ssh_connect,
+            commands::ssh_cancel_connect,
             commands::ssh_answer_host_key,
             commands::ssh_answer_secret,
             commands::ssh_write,

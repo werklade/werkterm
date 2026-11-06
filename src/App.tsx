@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { MenuBar } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar, type BrowserTab } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
-import { TerminalView } from "./components/TerminalView";
 import { HostKeyDialog } from "./components/HostKeyDialog";
 import { SecretDialog } from "./components/SecretDialog";
 import { availableShells, type ShellKind } from "./lib/pty";
@@ -12,6 +11,8 @@ import { loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { parseQuickConnect } from "./lib/quickConnect";
 import "./styles/theme.css";
 import "./App.css";
+
+const TerminalView = lazy(() => import("./components/TerminalView").then(module => ({ default: module.TerminalView })));
 
 interface QueuedPrompt { tabId: number; prompt: SshPrompt }
 function localTitle() { return /Windows/i.test(navigator.userAgent) ? "PowerShell" : "Shell"; }
@@ -69,6 +70,7 @@ export default function App() {
     liveTabs.current.delete(id);
     removePrompts(id);
     const index = tabs.findIndex(tab => tab.id === id);
+    if (tabs[index]?.kind === "ssh" && tabs[index]?.sessionId === undefined && !tabs[index]?.exited) setStatus("Verbindungsaufbau abgebrochen");
     if (activeId === id) setActiveId(tabs[index + 1]?.id ?? tabs[index - 1]?.id ?? null);
     setTabs(current => current.filter(tab => tab.id !== id));
   };
@@ -128,9 +130,9 @@ export default function App() {
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <TabBar tabs={tabs} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
         <div className="terminal-stack">
-          {tabs.map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind} target={tab.target} active={tab.id === activeId}
+          <Suspense fallback={null}>{tabs.map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind} target={tab.target} active={tab.id === activeId}
             shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
-            onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} />)}
+            onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           {tabs.length === 0 && <div className="terminal-empty">Öffne ein Terminal über + oder die Werkzeugleiste.</div>}
         </div>
       </main>

@@ -66,9 +66,15 @@ fn operation(error: impl fmt::Display) -> PtyError {
     PtyError::Operation(error.to_string())
 }
 
-const POWERSHELL_OSC7: &str = r#"$Global:LinMobaOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $u = ([System.Uri]::new($p)).AbsoluteUri.Substring(7); if (-not $u.StartsWith('/')) { $u = '/' + $u }; [Console]::Write(([char]27 + ']7;file://' + $env:COMPUTERNAME + $u + [char]7)) }; if ($Global:LinMobaOriginalPrompt) { & $Global:LinMobaOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
-const WSL_OSC7: &str = r#"export PROMPT_COMMAND='printf "\033]7;file://%s%s\007" "$WSL_DISTRO_NAME" "$PWD"'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; exec bash -i"#;
-const BASH_OSC7: &str = r#"printf "\033]7;file://%s%s\007" "$HOSTNAME" "$PWD""#;
+const POWERSHELL_OSC7: &str = r#"$Global:LinMobaOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $uri = [System.Uri]::new($p); $u = $uri.AbsolutePath; $h = $env:COMPUTERNAME; if ($uri.IsUnc) { $u = '//' + $uri.Host + $u }; if (-not $u.StartsWith('/')) { $u = '/' + $u }; [Console]::Write(([char]27 + ']7;file://' + $h + $u + [char]7)) }; if ($Global:LinMobaOriginalPrompt) { & $Global:LinMobaOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
+// LC_ALL=C makes substring iteration operate on bytes, including UTF-8 paths.
+const BASH_OSC7_FUNCTION: &str = r#"__linmoba_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${#p};i++)); do c="${p:i:1}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "${WSL_DISTRO_NAME:-$HOSTNAME}" "$out"; }"#;
+
+fn bash_osc7_startup() -> String {
+    format!(
+        "{BASH_OSC7_FUNCTION}; export -f __linmoba_osc7; export PROMPT_COMMAND='__linmoba_osc7'\"${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\"; exec bash -i"
+    )
+}
 
 pub fn resolve_shell(
     kind: ShellKind,
@@ -108,11 +114,17 @@ pub fn resolve_shell(
             ));
         }
     };
-    let mut env = Vec::new();
+    let env = Vec::new();
     if shell_integration {
         match kind {
             ShellKind::Wsl => {
-                args = ["-e", "bash", "-c", WSL_OSC7].map(str::to_owned).to_vec();
+                args = [
+                    "-e".to_owned(),
+                    "bash".to_owned(),
+                    "-c".to_owned(),
+                    bash_osc7_startup(),
+                ]
+                .to_vec();
             }
             ShellKind::Local if !is_unix => {
                 args = ["-NoLogo", "-NoExit", "-Command", POWERSHELL_OSC7]
@@ -124,7 +136,7 @@ pub fn resolve_shell(
                     .file_name()
                     .is_some_and(|name| name == "bash") =>
             {
-                env.push(("PROMPT_COMMAND".to_owned(), BASH_OSC7.to_owned()));
+                args = vec!["-c".to_owned(), bash_osc7_startup()];
             }
             ShellKind::Local => {}
         }
@@ -356,14 +368,19 @@ mod tests {
             assert!(spec.args[3].contains("[Console]::Write"));
             assert!(spec.args[3].contains("$env:COMPUTERNAME"));
             assert!(!spec.args[3].contains("`e"));
+            assert!(spec.args[3].contains("$uri.AbsolutePath"));
+            assert!(spec.args[3].contains("if ($uri.IsUnc) { $u = '//' + $uri.Host + $u }"));
+            assert!(!spec.args[3].contains("Substring(7)"));
             assert!(spec.env.is_empty());
         }
         let spec = resolve_shell(ShellKind::Wsl, Platform::Windows, None, true, |_| true).unwrap();
         assert_eq!(spec.args[..3], ["-e", "bash", "-c"]);
-        assert_eq!(
-            spec.args[3],
-            r#"export PROMPT_COMMAND='printf "\033]7;file://%s%s\007" "$WSL_DISTRO_NAME" "$PWD"'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; exec bash -i"#
-        );
+        assert_eq!(spec.args[3], bash_osc7_startup());
+        assert!(spec.args[3].contains("export -f __linmoba_osc7"));
+        assert!(spec.args[3].contains("exec bash -i"));
+        assert!(spec.args[3].contains("local LC_ALL=C"));
+        assert!(spec.args[3].contains("[-_.~a-zA-Z0-9/]"));
+        assert!(spec.args[3].contains("printf -v c '%%%02X'"));
         for shell in ["/bin/bash", "bash"] {
             let spec = resolve_shell(
                 ShellKind::Local,
@@ -373,14 +390,8 @@ mod tests {
                 |_| false,
             )
             .unwrap();
-            assert_eq!(
-                spec.env,
-                [(
-                    "PROMPT_COMMAND".to_owned(),
-                    r#"printf "\033]7;file://%s%s\007" "$HOSTNAME" "$PWD""#.to_owned()
-                )]
-            );
-            assert!(spec.args.is_empty());
+            assert!(spec.env.is_empty());
+            assert_eq!(spec.args, ["-c", &bash_osc7_startup()]);
         }
         for shell in ["/bin/zsh", "/bin/sh"] {
             let spec = resolve_shell(
