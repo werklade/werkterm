@@ -112,7 +112,7 @@ pub fn program_in_path(name: &str) -> bool {
 
 struct Session {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
@@ -219,7 +219,7 @@ impl PtyManager {
             id,
             Session {
                 master: pair.master,
-                writer,
+                writer: Arc::new(Mutex::new(writer)),
                 killer: child.clone_killer(),
             },
         );
@@ -236,10 +236,14 @@ impl PtyManager {
     }
 
     pub fn write(&self, id: u32, data: &[u8]) -> Result<(), PtyError> {
-        let mut sessions = self.sessions()?;
-        let session = sessions.get_mut(&id).ok_or(PtyError::UnknownSession(id))?;
-        session.writer.write_all(data).map_err(operation)?;
-        session.writer.flush().map_err(operation)
+        let writer = {
+            let sessions = self.sessions()?;
+            let session = sessions.get(&id).ok_or(PtyError::UnknownSession(id))?;
+            Arc::clone(&session.writer)
+        };
+        let mut writer = writer.lock().map_err(|_| PtyError::Poisoned)?;
+        writer.write_all(data).map_err(operation)?;
+        writer.flush().map_err(operation)
     }
 
     pub fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), PtyError> {
@@ -339,6 +343,90 @@ mod tests {
     fn manager_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<PtyManager>();
+    }
+
+    #[test]
+    fn blocked_writer_does_not_block_other_sessions() {
+        let spec = ShellSpec {
+            program: if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }.to_owned(),
+            args: vec![],
+        };
+        let manager = Arc::new(PtyManager::default());
+        let (exit_tx, exit_rx) = mpsc::channel();
+        let on_exit = || {
+            let exit_tx = exit_tx.clone();
+            Box::new(move |_| {
+                let _ = exit_tx.send(());
+            }) as Box<dyn FnOnce(Option<u32>) + Send>
+        };
+        let first = manager
+            .spawn(&spec, 80, 24, Box::new(|_| {}), on_exit())
+            .unwrap();
+        let second = match manager.spawn(&spec, 80, 24, Box::new(|_| {}), on_exit()) {
+            Ok(id) => id,
+            Err(error) => {
+                let _ = manager.kill(first);
+                panic!("Could not spawn second PTY: {error}");
+            }
+        };
+        // ConPTY requests the initial cursor position from its terminal peer.
+        #[cfg(windows)]
+        for id in [first, second] {
+            let _ = manager.write(id, b"\x1b[1;1R");
+        }
+        let writer = {
+            let sessions = manager.sessions().unwrap();
+            Arc::clone(&sessions.get(&first).unwrap().writer)
+        };
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let _guard = writer.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        locked_rx.recv().unwrap();
+
+        let writing_manager = Arc::clone(&manager);
+        let (write_tx, write_rx) = mpsc::channel();
+        let writing = std::thread::spawn(move || {
+            let result = writing_manager.write(first, b"");
+            let _ = write_tx.send(result);
+        });
+        // Give write() time to reach the held writer mutex.
+        let write_waiting = matches!(
+            write_rx.recv_timeout(Duration::from_millis(100)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        );
+        let other_manager = Arc::clone(&manager);
+        let (other_tx, other_rx) = mpsc::channel();
+        let other = std::thread::spawn(move || {
+            let _ = other_tx.send(other_manager.resize(second, 100, 30));
+        });
+        let independent = other_rx.recv_timeout(Duration::from_secs(2));
+
+        // Release the blocked writer before joining and cleaning up, even on failure.
+        let _ = release_tx.send(());
+        let holder_result = holder.join();
+        let writing_result = writing.join();
+        let other_result = other.join();
+        // portable-pty 0.9.0 can report an error after a successful Windows kill;
+        // verify cleanup through the exit callbacks instead of the return value.
+        let _ = manager.kill(first);
+        let _ = manager.kill(second);
+        let first_exited = exit_rx.recv_timeout(Duration::from_secs(20));
+        let second_exited = exit_rx.recv_timeout(Duration::from_secs(20));
+
+        holder_result.unwrap();
+        writing_result.unwrap();
+        other_result.unwrap();
+        first_exited.unwrap();
+        second_exited.unwrap();
+        assert!(write_waiting, "write() did not wait for the writer mutex");
+        independent
+            .expect("Other session blocked for two seconds")
+            .unwrap();
+        write_rx.recv().unwrap().unwrap();
     }
 
     #[test]
