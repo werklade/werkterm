@@ -13,6 +13,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(editor::EditorDocs::default()))
         .setup(|app| {
+            sessions::migrate_config(app.handle());
             editor::init_cache(app.handle()).map_err(std::io::Error::other)?;
             Ok(())
         })

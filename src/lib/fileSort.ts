@@ -7,7 +7,7 @@ export interface FileSort {
 }
 
 export const defaultFileSort: FileSort = { column: "name", direction: "asc" };
-const storageKey = "linmoba.fileBrowser.sort";
+const storageKey = "werkterm.fileBrowser.sort";
 const directory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
 const compareName = (a: DirEntry, b: DirEntry) => a.name.localeCompare(b.name, "de", { numeric: true, sensitivity: "base" });
 
@@ -25,7 +25,7 @@ export function sortFileEntries(entries: readonly DirEntry[], sort: FileSort): D
 
 export function loadFileSort(): FileSort {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
+    const saved: unknown = JSON.parse((localStorage.getItem(storageKey) ?? localStorage.getItem(storageKey.replace(/^werkterm\./, "linmoba."))) ?? "null");
     if (saved && typeof saved === "object" && "column" in saved && "direction" in saved
       && (saved.column === "name" || saved.column === "size" || saved.column === "modified")
       && (saved.direction === "asc" || saved.direction === "desc")) {

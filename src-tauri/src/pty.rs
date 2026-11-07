@@ -66,13 +66,13 @@ fn operation(error: impl fmt::Display) -> PtyError {
     PtyError::Operation(error.to_string())
 }
 
-const POWERSHELL_OSC7: &str = r#"$Global:LinMobaOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $uri = [System.Uri]::new($p); $u = $uri.AbsolutePath; $h = $env:COMPUTERNAME; if ($uri.IsUnc) { $u = '//' + $uri.Host + $u }; if (-not $u.StartsWith('/')) { $u = '/' + $u }; [Console]::Write(([char]27 + ']7;file://' + $h + $u + [char]7)) }; if ($Global:LinMobaOriginalPrompt) { & $Global:LinMobaOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
+const POWERSHELL_OSC7: &str = r#"$Global:WerktermOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $uri = [System.Uri]::new($p); $u = $uri.AbsolutePath; $h = $env:COMPUTERNAME; if ($uri.IsUnc) { $u = '//' + $uri.Host + $u }; if (-not $u.StartsWith('/')) { $u = '/' + $u }; [Console]::Write(([char]27 + ']7;file://' + $h + $u + [char]7)) }; if ($Global:WerktermOriginalPrompt) { & $Global:WerktermOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
 // LC_ALL=C makes substring iteration operate on bytes, including UTF-8 paths.
-const BASH_OSC7_FUNCTION: &str = r#"__linmoba_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${#p};i++)); do c="${p:i:1}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "${WSL_DISTRO_NAME:-$HOSTNAME}" "$out"; }"#;
+const BASH_OSC7_FUNCTION: &str = r#"__werkterm_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${#p};i++)); do c="${p:i:1}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "${WSL_DISTRO_NAME:-$HOSTNAME}" "$out"; }"#;
 
 fn bash_osc7_startup() -> String {
     format!(
-        "{BASH_OSC7_FUNCTION}; export -f __linmoba_osc7; export PROMPT_COMMAND='__linmoba_osc7'\"${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\"; exec bash -i"
+        "{BASH_OSC7_FUNCTION}; export -f __werkterm_osc7; export PROMPT_COMMAND='__werkterm_osc7'\"${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\"; exec bash -i"
     )
 }
 
@@ -643,7 +643,7 @@ mod tests {
             })
             .unwrap();
             assert_eq!(spec.args[..3], ["-NoLogo", "-NoExit", "-Command"]);
-            assert!(spec.args[3].contains("$Global:LinMobaOriginalPrompt = $function:prompt"));
+            assert!(spec.args[3].contains("$Global:WerktermOriginalPrompt = $function:prompt"));
             assert!(spec.args[3].contains("function Global:prompt"));
             assert!(spec.args[3].contains("[char]27"));
             assert!(spec.args[3].contains("[char]7"));
@@ -658,7 +658,7 @@ mod tests {
         let spec = resolve_shell(ShellKind::Wsl, Platform::Windows, None, true, |_| true).unwrap();
         assert_eq!(spec.args[..3], ["-e", "bash", "-c"]);
         assert_eq!(spec.args[3], bash_osc7_startup());
-        assert!(spec.args[3].contains("export -f __linmoba_osc7"));
+        assert!(spec.args[3].contains("export -f __werkterm_osc7"));
         assert!(spec.args[3].contains("exec bash -i"));
         assert!(spec.args[3].contains("local LC_ALL=C"));
         assert!(spec.args[3].contains("[-_.~a-zA-Z0-9/]"));
@@ -828,13 +828,13 @@ mod tests {
         #[cfg(windows)]
         let spec = ShellSpec {
             program: "cmd.exe".to_owned(),
-            args: ["/C", "echo linmoba-ok"].map(str::to_owned).to_vec(),
+            args: ["/C", "echo werkterm-ok"].map(str::to_owned).to_vec(),
             env: vec![],
         };
         #[cfg(not(windows))]
         let spec = ShellSpec {
             program: "/bin/sh".to_owned(),
-            args: ["-c", "echo linmoba-ok"].map(str::to_owned).to_vec(),
+            args: ["-c", "echo werkterm-ok"].map(str::to_owned).to_vec(),
             env: vec![],
         };
         let manager = PtyManager::default();
@@ -858,7 +858,7 @@ mod tests {
             let _ = manager.kill(id);
         }
         assert_eq!(exit.unwrap(), Some(0));
-        assert!(String::from_utf8_lossy(&output.lock().unwrap()).contains("linmoba-ok"));
+        assert!(String::from_utf8_lossy(&output.lock().unwrap()).contains("werkterm-ok"));
         assert!(!manager.sessions().unwrap().contains_key(&id));
     }
 }

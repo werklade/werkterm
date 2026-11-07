@@ -34,13 +34,13 @@ interface Props {
 }
 export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-  const [width, setWidth] = useState(() => clampPanel(loadWidth("linmoba.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
+  const [width, setWidth] = useState(() => clampPanel(loadWidth("werkterm.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
   useEffect(() => {
     const resized = () => { setWindowWidth(window.innerWidth); setWidth(current => clampPanel(current, window.innerWidth)); };
     window.addEventListener("resize", resized);
     return () => window.removeEventListener("resize", resized);
   }, []);
-  const resize = (next: number) => { const value = clampPanel(next, window.innerWidth); setWidth(value); storeWidth("linmoba.sidebar.width", value); };
+  const resize = (next: number) => { const value = clampPanel(next, window.innerWidth); setWidth(value); storeWidth("werkterm.sidebar.width", value); };
   const [active, setActive] = useState(3);
   const [input, setInput] = useState("");
   const [invalid, setInvalid] = useState(false);

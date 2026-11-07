@@ -42,7 +42,7 @@ function EditorCloseDialog({ name, busy, onAnswer }: { name: string; busy: boole
 }
 function editorOpenError(reason: unknown): string {
   const message = String(reason);
-  const errors: Record<string, string> = { ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", BINARY: "Binärdateien können nicht im MobaTextEditor geöffnet werden.", TOO_LARGE: "Die Datei ist für den MobaTextEditor zu groß.", SESSION_CLOSED: "Die SSH-Sitzung wurde beendet. Der Editorinhalt bleibt erhalten.", CONFLICT: "Die Datei wurde außerhalb des Editors geändert." };
+  const errors: Record<string, string> = { ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", BINARY: "Binärdateien können nicht im Editor geöffnet werden.", TOO_LARGE: "Die Datei ist für den Editor zu groß.", SESSION_CLOSED: "Die SSH-Sitzung wurde beendet. Der Editorinhalt bleibt erhalten.", CONFLICT: "Die Datei wurde außerhalb des Editors geändert." };
   return errors[message.split(":", 1)[0]] ?? `Datei konnte nicht geöffnet werden: ${message}`;
 }
 
@@ -278,7 +278,7 @@ export default function App() {
           ? invoke<EditorDocument>("editor_open_remote", { id: source.sessionId, path })
           : invoke<EditorDocument>("editor_open_local", { path, wslDistro: source.kind === "wsl" ? source.cwd?.host ?? null : null }));
         const id = nextId.current++;
-        const editor: EditorTabState = { document, source: { ...source, browserPath: parentPath(path) }, sourceKey, dirty: false, status: "MobaTextEditor" };
+        const editor: EditorTabState = { document, source: { ...source, browserPath: parentPath(path) }, sourceKey, dirty: false, status: "Editor" };
         editorsRef.current = { ...editorsRef.current, [id]: editor };
         setEditors(editorsRef.current);
         setTabs(current => [...current, { id, kind: "editor", title: document.name, browserPath: parentPath(path), exited: false }]);
@@ -360,7 +360,7 @@ export default function App() {
           <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} active={tab.id === activeId}
             shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
-          <Suspense fallback={<div className="terminal-empty">MobaTextEditor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
+          <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
             return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
               onDirtyChange={dirty => setEditors(current => !current[id] || current[id].dirty === dirty ? current : { ...current, [id]: { ...current[id], dirty } })}

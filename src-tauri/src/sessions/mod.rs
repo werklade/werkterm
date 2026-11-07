@@ -204,6 +204,45 @@ fn write_atomic(path: &Path, sessions: Vec<SavedSession>) -> Result<(), String> 
     result.map_err(|_| "Sitzungsdatei konnte nicht atomar gespeichert werden".into())
 }
 
+/// Best-effort migration; the original file is never changed.
+pub fn migrate_config(app: &tauri::AppHandle) {
+    if let Ok(dir) = app.path().app_config_dir() {
+        let _ = migrate_config_dir(&dir);
+    }
+}
+
+fn migrate_config_dir(dir: &Path) -> std::io::Result<()> {
+    let target = dir.join("sessions.json");
+    if target.try_exists()? {
+        return Ok(());
+    }
+    let Some(parent) = dir.parent() else {
+        return Ok(());
+    };
+    let source = parent.join("de.marck.linmoba").join("sessions.json");
+    let bytes = match fs::read(&source) {
+        Ok(bytes) => bytes,
+        Err(_) => return Ok(()),
+    };
+    let Ok(file) = serde_json::from_slice::<SessionFile>(&bytes) else {
+        return Ok(());
+    };
+    if file.version != 1 || load(&source).is_err() {
+        return Ok(());
+    }
+    fs::create_dir_all(dir)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)?;
+    if let Err(error) = output.write_all(&bytes).and_then(|()| output.sync_all()) {
+        drop(output);
+        let _ = fs::remove_file(&target);
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
@@ -278,9 +317,7 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
     let _guard = STORAGE_LOCK.lock().await;
     let path = config_path(&app)?;
     let mut sessions = read_file(path.clone()).await?;
-    let delete_secret = sessions
-        .iter()
-        .any(|session| session.id == id && session.auth == SessionAuth::Password);
+    let delete_secret = sessions.iter().any(|session| session.id == id);
     sessions.retain(|session| session.id != id);
     persist(path, sessions).await?;
     if delete_secret {
@@ -665,7 +702,7 @@ mod tests {
     }
     #[test]
     fn roundtrip_atomic_and_corruption() {
-        let directory = std::env::temp_dir().join(format!("linmoba-test-{}", new_id()));
+        let directory = std::env::temp_dir().join(format!("werkterm-test-{}", new_id()));
         let path = directory.join("sessions.json");
         assert!(load(&path).unwrap().is_empty());
         write_atomic(&path, vec![sample()]).unwrap();
@@ -818,5 +855,30 @@ mod tests {
             expand_home("~/key", Path::new("home")),
             Path::new("home").join("key")
         );
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    #[test]
+    fn config_migration_preserves_original_and_existing_target() {
+        let root = std::env::temp_dir().join(format!("werkterm-migration-{}", new_id()));
+        let old = root.join("de.marck.linmoba");
+        let new = root.join("de.werklade.werkterm");
+        fs::create_dir_all(&old).unwrap();
+        let source = old.join("sessions.json");
+        fs::write(&source, b"broken").unwrap();
+        migrate_config_dir(&new).unwrap();
+        assert!(!new.join("sessions.json").exists());
+        let bytes = br#"{"version":1,"sessions":[]}"#;
+        fs::write(&source, bytes).unwrap();
+        migrate_config_dir(&new).unwrap();
+        assert_eq!(fs::read(new.join("sessions.json")).unwrap(), bytes);
+        assert_eq!(fs::read(&source).unwrap(), bytes);
+        fs::write(new.join("sessions.json"), b"existing").unwrap();
+        migrate_config_dir(&new).unwrap();
+        assert_eq!(fs::read(new.join("sessions.json")).unwrap(), b"existing");
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -275,7 +275,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   function button(icon: IconName, title: string, action: () => void, disabled = false, pressed?: boolean) {
     return <button type="button" title={title} aria-label={title} disabled={disabled} aria-pressed={pressed} onClick={action}><Icon name={icon} /></button>;
   }
-  return <section className="editor-view" aria-label={`MobaTextEditor: ${props.document.name}`}>
+  return <section className="editor-view" aria-label={`Editor: ${props.document.name}`}>
     <div className="editor-toolbar" role="toolbar" aria-label="Editor-Werkzeuge">
       {button("save", "Speichern (Strg+S)", () => { void saveRef.current(); }, busy || locked || loaded.current.readonly || !eol)}
       {button("undo", "Rückgängig (Strg+Z)", () => { if (view.current && !locks.current) undo(view.current); }, locked || loaded.current.readonly || !historyState.undo)}

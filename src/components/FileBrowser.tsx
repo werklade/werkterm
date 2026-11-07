@@ -54,7 +54,7 @@ const actions: { icon: IconName; label: string; action?: Action }[] = [
   { icon: "folder-new", label: "Neuer Ordner", action: "mkdir" },
   { icon: "file-new", label: "Neue Datei", action: "create" },
   { icon: "delete", label: "Löschen", action: "delete" },
-  { icon: "permissions", label: "SSH-Browser mit sudo-Rechten", action: "sudo" }, { icon: "edit", label: "Öffnen im MobaTextEditor", action: "edit" },
+  { icon: "permissions", label: "SSH-Browser mit sudo-Rechten", action: "sudo" }, { icon: "edit", label: "Öffnen im Editor", action: "edit" },
 ];
 const settingLabels: { key: keyof Settings; label: string; title: string }[] = [
   { key: "followTerminalFolder", label: "Follow Terminal Folder", title: "Browser folgt dem Terminalverzeichnis" },
@@ -65,9 +65,9 @@ const isDirectory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind ===
 
 export function FileBrowser({ tab, settings, onSettings, onPath, onAccess, onStatus, onOpenFile, transferQueue }: Props) {
   const [widths, setWidths] = useState<ColumnWidths>(() => ({
-    name: Math.max(100, loadWidth("linmoba.column.name", DEFAULT_COLUMNS.name)),
-    size: Math.max(55, loadWidth("linmoba.column.size", DEFAULT_COLUMNS.size)),
-    modified: Math.max(90, loadWidth("linmoba.column.modified", DEFAULT_COLUMNS.modified)),
+    name: Math.max(100, loadWidth("werkterm.column.name", DEFAULT_COLUMNS.name)),
+    size: Math.max(55, loadWidth("werkterm.column.size", DEFAULT_COLUMNS.size)),
+    modified: Math.max(90, loadWidth("werkterm.column.modified", DEFAULT_COLUMNS.modified)),
   }));
   const resizeColumn = (column: FileSortColumn, value: number) => {
     setWidths(current => {
@@ -76,9 +76,9 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onAccess, onSta
       if (column === "name") {
         const actual = listRef.current?.querySelector("th")?.getBoundingClientRect().width ?? current.name;
         next.size = Math.max(55, current.size + actual - value);
-        storeWidth("linmoba.column.size", next.size);
+        storeWidth("werkterm.column.size", next.size);
       }
-      storeWidth("linmoba.column." + column, value);
+      storeWidth("werkterm.column." + column, value);
       return next;
     });
   };

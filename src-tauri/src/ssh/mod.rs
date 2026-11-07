@@ -1522,7 +1522,7 @@ mod tests {
     fn temporary_path() -> PathBuf {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         std::env::temp_dir().join(format!(
-            "linmoba-known-hosts-{}-{}",
+            "werkterm-known-hosts-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ))
@@ -1614,17 +1614,17 @@ mod tests {
         fn ask_secret(&self, kind: SecretKind, _label: String) -> PromptFuture<Option<String>> {
             Box::pin(async move {
                 match kind {
-                    SecretKind::Password => std::env::var("LINMOBA_TEST_SSH_PASSWORD").ok(),
+                    SecretKind::Password => std::env::var("WERKTERM_TEST_SSH_PASSWORD").ok(),
                     SecretKind::Passphrase => None,
                 }
             })
         }
     }
     #[tokio::test]
-    #[ignore = "Requires LINMOBA_TEST_SSH and LINMOBA_TEST_SSH_PASSWORD"]
+    #[ignore = "Requires WERKTERM_TEST_SSH and WERKTERM_TEST_SSH_PASSWORD"]
     async fn ssh_shell_listing_and_close() {
-        let target = std::env::var("LINMOBA_TEST_SSH")
-            .expect("LINMOBA_TEST_SSH")
+        let target = std::env::var("WERKTERM_TEST_SSH")
+            .expect("WERKTERM_TEST_SSH")
             .parse()
             .unwrap();
         let manager = Arc::new(SshManager::default());
@@ -1649,14 +1649,14 @@ mod tests {
             .await
             .unwrap()
             .id;
-        manager.write(id, b"echo linmoba-ssh-ok\n").await.unwrap();
+        manager.write(id, b"echo werkterm-ssh-ok\n").await.unwrap();
         let output = tokio::time::timeout(Duration::from_secs(15), async {
             let mut output = Vec::new();
             while let Some(bytes) = data_rx.recv().await {
                 output.extend(bytes);
                 if String::from_utf8_lossy(&output)
                     .replace('\r', "")
-                    .contains("\nlinmoba-ssh-ok\n")
+                    .contains("\nwerkterm-ssh-ok\n")
                 {
                     return;
                 }

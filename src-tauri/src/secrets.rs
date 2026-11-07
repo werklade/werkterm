@@ -1,7 +1,8 @@
 //! OS-backed secrets. Never return provider text (which may contain secrets).
 use std::hash::BuildHasher;
 
-const SERVICE: &str = "de.marck.linmoba";
+const SERVICE: &str = "de.werklade.werkterm";
+const LEGACY_SERVICE: &str = "de.marck.linmoba";
 const FAILED: &str = "KEYRING_FAILED: Schlüsselbund-Operation fehlgeschlagen";
 const UNAVAILABLE: &str = "KEYRING_UNAVAILABLE: Kein Secret Service oder D-Bus verfügbar";
 static PROBE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -127,27 +128,63 @@ pub async fn set_password(account: String, password: String) -> Result<(), Strin
     .map_err(|_| FAILED.to_owned())?
 }
 
-pub async fn get_password(account: String) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        match keyring::Entry::new(SERVICE, &account).and_then(|entry| entry.get_password()) {
+trait SecretStore {
+    fn read(&self, service: &str, account: &str) -> Result<Option<String>, String>;
+    fn write(&self, service: &str, account: &str, password: &str) -> Result<(), String>;
+    fn delete(&self, service: &str, account: &str) -> Result<(), String>;
+}
+
+struct OsStore;
+impl SecretStore for OsStore {
+    fn read(&self, service: &str, account: &str) -> Result<Option<String>, String> {
+        match keyring::Entry::new(service, account).and_then(|entry| entry.get_password()) {
             Ok(password) => Ok(Some(password)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(operation_error(&error, false)),
         }
-    })
-    .await
-    .map_err(|_| FAILED.to_owned())?
-}
-
-pub async fn delete_password(account: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        match keyring::Entry::new(SERVICE, &account).and_then(|entry| entry.delete_credential()) {
+    }
+    fn write(&self, service: &str, account: &str, password: &str) -> Result<(), String> {
+        keyring::Entry::new(service, account)
+            .and_then(|entry| entry.set_password(password))
+            .map_err(|error| operation_error(&error, true))
+    }
+    fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+        match keyring::Entry::new(service, account).and_then(|entry| entry.delete_credential()) {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(operation_error(&error, false)),
         }
-    })
-    .await
-    .map_err(|_| FAILED.to_owned())?
+    }
+}
+
+fn read_migrating(store: &impl SecretStore, account: &str) -> Result<Option<String>, String> {
+    if let Some(password) = store.read(SERVICE, account)? {
+        return Ok(Some(password));
+    }
+    let password = store.read(LEGACY_SERVICE, account)?;
+    if let Some(value) = &password
+        && store.write(SERVICE, account, value).is_ok()
+    {
+        let _ = store.delete(LEGACY_SERVICE, account);
+    }
+    Ok(password)
+}
+
+fn delete_both(store: &impl SecretStore, account: &str) -> Result<(), String> {
+    let current = store.delete(SERVICE, account);
+    let legacy = store.delete(LEGACY_SERVICE, account);
+    current.and(legacy)
+}
+
+pub async fn get_password(account: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || read_migrating(&OsStore, &account))
+        .await
+        .map_err(|_| FAILED.to_owned())?
+}
+
+pub async fn delete_password(account: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || delete_both(&OsStore, &account))
+        .await
+        .map_err(|_| FAILED.to_owned())?
 }
 
 #[cfg(test)]
@@ -196,5 +233,77 @@ mod tests {
         ] {
             assert_eq!(error_message(&error), FAILED);
         }
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    #[derive(Default)]
+    struct FakeStore {
+        entries: RefCell<HashMap<String, String>>,
+        fail_write: bool,
+    }
+    impl SecretStore for FakeStore {
+        fn read(&self, service: &str, _: &str) -> Result<Option<String>, String> {
+            Ok(self.entries.borrow().get(service).cloned())
+        }
+        fn write(&self, service: &str, _: &str, password: &str) -> Result<(), String> {
+            if self.fail_write {
+                return Err(FAILED.into());
+            }
+            self.entries
+                .borrow_mut()
+                .insert(service.into(), password.into());
+            Ok(())
+        }
+        fn delete(&self, service: &str, _: &str) -> Result<(), String> {
+            self.entries.borrow_mut().remove(service);
+            Ok(())
+        }
+    }
+    #[test]
+    fn migrates_only_after_successful_write() {
+        for fail_write in [false, true] {
+            let store = FakeStore {
+                fail_write,
+                ..Default::default()
+            };
+            store
+                .entries
+                .borrow_mut()
+                .insert(LEGACY_SERVICE.into(), "test-secret".into());
+            assert_eq!(
+                read_migrating(&store, "session").unwrap().as_deref(),
+                Some("test-secret")
+            );
+            assert_eq!(
+                store.entries.borrow().contains_key(LEGACY_SERVICE),
+                fail_write
+            );
+            assert_eq!(store.entries.borrow().contains_key(SERVICE), !fail_write);
+        }
+    }
+    #[test]
+    fn missing_and_current_entries() {
+        let store = FakeStore::default();
+        assert_eq!(read_migrating(&store, "session").unwrap(), None);
+        store
+            .entries
+            .borrow_mut()
+            .insert(SERVICE.into(), "current".into());
+        store
+            .entries
+            .borrow_mut()
+            .insert(LEGACY_SERVICE.into(), "old".into());
+        assert_eq!(
+            read_migrating(&store, "session").unwrap().as_deref(),
+            Some("current")
+        );
+        assert_eq!(store.entries.borrow().get(LEGACY_SERVICE).unwrap(), "old");
+        delete_both(&store, "session").unwrap();
+        assert!(store.entries.borrow().is_empty());
     }
 }

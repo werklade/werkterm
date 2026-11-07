@@ -10,7 +10,7 @@ it("uses a single-line byte-encoding Bash hook", () => {
   expect(SSH_PROMPT_COMMAND).toContain('c="${p:i:1}"');
   expect(SSH_PROMPT_COMMAND).toContain("[-_.~a-zA-Z0-9/]");
   expect(SSH_PROMPT_COMMAND).toContain("printf -v c '%%%02X' \"'$c\"");
-  expect(SSH_PROMPT_COMMAND).toContain('__linmoba_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}');
+  expect(SSH_PROMPT_COMMAND).toContain('__werkterm_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}');
   expect(SSH_PROMPT_COMMAND.endsWith("\r")).toBe(true);
   expect(SSH_PROMPT_COMMAND).not.toContain("\n");
 });

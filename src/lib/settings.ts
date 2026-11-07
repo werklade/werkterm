@@ -9,11 +9,11 @@ export const defaultSettings: Settings = {
   shellIntegration: true,
   sshPromptCommand: true,
 };
-const storageKey = "linmoba.settings";
+const storageKey = "werkterm.settings";
 
 export function loadSettings(): Settings {
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
+    const stored: unknown = JSON.parse((localStorage.getItem(storageKey) ?? localStorage.getItem(storageKey.replace(/^werkterm\./, "linmoba."))) ?? "null");
     if (typeof stored !== "object" || stored === null) return { ...defaultSettings };
     const values = stored as Record<string, unknown>;
     return {

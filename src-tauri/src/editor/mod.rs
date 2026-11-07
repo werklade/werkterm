@@ -823,7 +823,7 @@ mod tests {
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             let base = std::env::temp_dir();
-            let dir = base.join("linmoba").join("editor-tests").join(format!(
+            let dir = base.join("werkterm").join("editor-tests").join(format!(
                 "{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)

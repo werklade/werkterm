@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "LinMoba",
+  "productName": "Werkterm",
+  "mainBinaryName": "werkterm",
   "version": "0.1.0",
-  "identifier": "de.marck.linmoba",
+  "identifier": "de.werklade.werkterm",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "LinMoba",
+        "title": "Werkterm",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
@@ -42,7 +43,7 @@
     "publisher": "Marc-Andre Kolski",
     "category": "Utility",
     "shortDescription": "SSH-Terminal mit SFTP-Browser und Editor für Linux",
-    "longDescription": "LinMoba ist ein SSH-Client nach dem Vorbild von MobaXterm: Terminal-Tabs (lokal und SSH), SFTP-Browser, der dem Terminal-Ordner folgt, gespeicherte Sitzungen mit Passwörtern im System-Schlüsselbund und ein Texteditor mit Farbcode-Vorschau und Zeilenende-Umschalter.",
+    "longDescription": "Werkterm ist ein SSH-Client nach dem Vorbild von MobaXterm: Terminal-Tabs (lokal und SSH), SFTP-Browser, der dem Terminal-Ordner folgt, gespeicherte Sitzungen mit Passwörtern im System-Schlüsselbund und ein Texteditor mit Farbcode-Vorschau und Zeilenende-Umschalter.",
     "linux": {
       "deb": {
         "section": "net",
@@ -50,7 +51,7 @@
           "gnome-keyring",
           "fonts-noto-color-emoji"
         ],
-        "desktopTemplate": "linux/linmoba.desktop.hbs"
+        "desktopTemplate": "linux/werkterm.desktop.hbs"
       }
     },
     "license": "GPL-3.0-or-later",

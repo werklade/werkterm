@@ -5,7 +5,7 @@ export function BrowserContextMenu({ entry, x, y, onAnswer }: { entry: DirEntry;
   const dialog = useModal();
   const file = entry.kind === "file" || (entry.kind === "symlink" && !entry.targetIsDir);
   const items: { action: ContextAction; label: string; disabled?: boolean }[] = [
-    ...(file ? [{ action: "edit" as const, label: "Öffnen im MobaTextEditor" }] : []),
+    ...(file ? [{ action: "edit" as const, label: "Öffnen im Editor" }] : []),
     { action: "download", label: "Herunterladen", disabled: !file },
     { action: "chmod", label: "Berechtigungen…", disabled: entry.kind === "symlink" },
     { action: "delete", label: "Löschen" },

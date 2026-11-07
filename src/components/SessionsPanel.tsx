@@ -15,7 +15,7 @@ interface Props {
 type Row = { key: string; depth: number; folder?: SessionFolder; session?: SavedSession; parent?: string };
 function loadExpanded(): Record<string, boolean> {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem("linmoba.sessionFolders") ?? "{}");
+    const parsed: unknown = JSON.parse((localStorage.getItem("werkterm.sessionFolders") ?? localStorage.getItem("linmoba.sessionFolders")) ?? "{}");
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"));
   } catch { /* Storage may be unavailable. */ }
   return {};
@@ -30,7 +30,7 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus 
   const [context, setContext] = useState<{ x: number; y: number; session: SavedSession } | null>(null);
   const contextRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
-  useEffect(() => { try { localStorage.setItem("linmoba.sessionFolders", JSON.stringify(expanded)); } catch { /* Storage may be unavailable. */ } }, [expanded]);
+  useEffect(() => { try { localStorage.setItem("werkterm.sessionFolders", JSON.stringify(expanded)); } catch { /* Storage may be unavailable. */ } }, [expanded]);
   useEffect(() => {
     if (!context) return;
     contextRef.current?.querySelector<HTMLButtonElement>("button")?.focus();

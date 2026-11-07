@@ -118,7 +118,7 @@ async fn cancellable<T>(
 }
 fn part_path(target: &Path) -> PathBuf {
     let mut name = target.as_os_str().to_os_string();
-    name.push(".linmoba-part");
+    name.push(".werkterm-part");
     PathBuf::from(name)
 }
 async fn finish_part(part: &Path, target: &Path, success: bool) -> Result<(), String> {
@@ -530,7 +530,7 @@ mod tests {
     #[tokio::test]
     async fn part_file_is_renamed_or_cleaned_without_touching_target() {
         let directory = std::env::temp_dir().join(format!(
-            "linmoba-transfer-{}-{}",
+            "werkterm-transfer-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

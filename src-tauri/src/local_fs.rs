@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn lists_and_sorts_temp_directory() {
         let directory = std::env::temp_dir().join(format!(
-            "linmoba-local-{}-{}",
+            "werkterm-local-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
