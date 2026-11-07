@@ -21,8 +21,9 @@ import "./FileBrowser.css";
 
 export interface BrowserTab {
   id: number;
-  kind: "local" | "wsl" | "ssh" | "editor";
+  kind: "local" | "wsl" | "ssh" | "telnet" | "serial" | "editor";
   title: string;
+  serial?: import("../lib/sessions").SerialConfig | null;
   target?: string;
   savedSessionId?: string;
   startCommand?: import("../lib/pty").StartCommand;

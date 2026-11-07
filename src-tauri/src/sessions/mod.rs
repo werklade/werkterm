@@ -27,6 +27,10 @@ pub enum SessionAuth {
     Ask,
 }
 
+fn default_telnet_port() -> u16 {
+    23
+}
+
 fn default_kind() -> String {
     "ssh".into()
 }
@@ -36,12 +40,17 @@ fn default_kind() -> String {
 pub struct SavedSession {
     #[serde(default = "default_kind")]
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<crate::serial::SerialConfig>,
     pub id: String,
     pub name: String,
     pub folder: String,
+    #[serde(default)]
     pub host: String,
+    #[serde(default = "default_telnet_port")]
     pub port: u16,
     pub user: Option<String>,
+    #[serde(default)]
     pub auth: SessionAuth,
     pub source: Option<String>,
     #[serde(default = "default_keepalive_interval")]
@@ -132,11 +141,23 @@ pub fn validate(session: &SavedSession) -> Result<(), String> {
     if session.keepalive_interval > 3600 || !(1..=100).contains(&session.keepalive_max) {
         return Err("Keepalive: Intervall 0–3600, Maximum 1–100".into());
     }
-    if session.kind != "ssh" {
+    if !matches!(session.kind.as_str(), "ssh" | "telnet" | "serial") {
         return Err("Unbekannter Sitzungstyp".into());
     }
     if session.name.trim().is_empty() {
         return Err("Sitzungsname darf nicht leer sein".into());
+    }
+    if session.kind != "ssh" {
+        if session.auth != SessionAuth::Default || session.jump_session_id.is_some() {
+            return Err("Anmeldung und Jump host sind nur für SSH erlaubt".into());
+        }
+        if session.kind == "serial" {
+            return session
+                .serial
+                .as_ref()
+                .ok_or("Serielle Parameter fehlen")?
+                .validate();
+        }
     }
     if session.host.is_empty()
         || session
@@ -223,6 +244,9 @@ pub fn validate_target(
     session: &SavedSession,
     target: &crate::ssh::SshTarget,
 ) -> Result<(), String> {
+    if session.kind != "ssh" {
+        return Err("Gespeicherte Sitzung ist keine SSH-Sitzung".into());
+    }
     if !session.host.eq_ignore_ascii_case(&target.host)
         || session.port != target.port
         || session
@@ -383,6 +407,12 @@ pub async fn sessions_save(
     mut session: SavedSession,
     password: Option<String>,
 ) -> Result<SavedSession, String> {
+    if session.kind != "ssh" {
+        session.auth = SessionAuth::Default;
+        if password.as_ref().is_some_and(|value| !value.is_empty()) {
+            return Err("Passwörter werden nur für SSH gespeichert".into());
+        }
+    }
     validate(&session)?;
     let _guard = STORAGE_LOCK.lock().await;
     let path = config_path(&app)?;
@@ -685,6 +715,7 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                 keepalive_interval: 30,
                 keepalive_max: 3,
                 jump_session_id: None,
+                serial: None,
                 log_always: false,
             };
             validate(&session)?;
@@ -971,6 +1002,7 @@ mod tests {
             keepalive_interval: 30,
             keepalive_max: 3,
             jump_session_id: None,
+            serial: None,
             log_always: false,
         }
     }
@@ -998,6 +1030,33 @@ mod tests {
         .await
         .unwrap_err();
         assert!(!error.contains("private"));
+    }
+
+    #[test]
+    fn telnet_and_serial_roundtrip_with_v1_defaults_and_no_authentication() {
+        let value = serde_json::json!({ "kind":"telnet", "id":"telnet", "name":"Router", "folder":"", "host":"router.test" });
+        let mut telnet: SavedSession = serde_json::from_value(value).unwrap();
+        assert_eq!(telnet.port, 23);
+        assert_eq!(telnet.auth, SessionAuth::Default);
+        assert!(validate(&telnet).is_ok());
+        telnet.auth = SessionAuth::Password;
+        assert!(validate(&telnet).is_err());
+        telnet.auth = SessionAuth::Default;
+        telnet.jump_session_id = Some("ssh".into());
+        assert!(validate(&telnet).is_err());
+        let value = serde_json::json!({ "kind":"serial", "id":"serial", "name":"Console", "folder":"", "serial":{"device":"/dev/ttyUSB0"} });
+        let serial: SavedSession = serde_json::from_value(value).unwrap();
+        assert!(validate(&serial).is_ok());
+        assert_eq!(serial.serial.as_ref().unwrap().baud, 115200);
+        assert_eq!(serial.serial.as_ref().unwrap().enter, "cr");
+        let file = SessionFile {
+            version: 1,
+            sessions: vec![serial.clone()],
+        };
+        let restored: SessionFile =
+            serde_json::from_slice(&serde_json::to_vec(&file).unwrap()).unwrap();
+        assert_eq!(restored.version, 1);
+        assert_eq!(restored.sessions, [serial]);
     }
 
     #[test]

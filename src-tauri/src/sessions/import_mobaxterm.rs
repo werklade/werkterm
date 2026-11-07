@@ -160,12 +160,20 @@ pub fn parse(text: &str, bases: &ImportBases) -> Result<ImportPreview, String> {
         let mut parts = value.split('#');
         if parts.next() != Some("") || parts.next() != Some("109") {
             result.skipped += 1;
+            result.warnings.push(format!("Nicht belegtes MobaXterm-Sitzungsformat für {name} wurde übersprungen (Telnet/Seriell werden nicht geraten)"));
             continue;
         }
         let Some(payload) = parts.next() else {
             result.skipped += 1;
             continue;
         };
+        if payload.split('%').next() != Some("0") {
+            result.skipped += 1;
+            result.warnings.push(format!(
+                "Nicht belegter MobaXterm-Sitzungstyp für {name} wurde übersprungen"
+            ));
+            continue;
+        }
         let fields: Vec<_> = payload.split('%').skip(1).collect();
         let host = fields.first().copied().unwrap_or("").trim();
         let port = fields
@@ -308,6 +316,17 @@ mod tests {
             preview.warnings,
             ["Gateway gateway.test für Target nicht zugeordnet"]
         );
+    }
+
+    #[test]
+    fn unknown_session_numbers_are_never_guessed_as_ssh() {
+        // Only #109#0 is evidenced by the existing SSH fixtures. These arbitrary
+        // unknown numbers deliberately make no claim about Telnet/serial codes.
+        let text = "[Bookmarks]\nUnknown=#109#999%host%23%\nOther=#999#0%COM3%115200%\n";
+        let parsed = parse(text, &bases()).unwrap();
+        assert!(parsed.candidates.is_empty());
+        assert_eq!(parsed.skipped, 2);
+        assert_eq!(parsed.warnings.len(), 2);
     }
 
     #[test]

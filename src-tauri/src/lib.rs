@@ -5,9 +5,11 @@ pub mod local_fs;
 mod local_ports;
 pub mod pty;
 pub mod secrets;
+pub mod serial;
 mod session_log;
 pub mod sessions;
 pub mod ssh;
+pub mod telnet;
 mod terminal_colors;
 pub mod tunnels;
 
@@ -30,6 +32,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            telnet::telnet_connect,
+            telnet::terminal_write,
+            telnet::terminal_resize,
+            telnet::terminal_close,
+            telnet::terminal_cancel_connect,
+            telnet::serial_break,
+            serial::serial_ports,
+            serial::serial_connect,
             local_fs::save_text_file,
             session_log::session_log_start,
             session_log::session_log_stop,
@@ -103,6 +113,7 @@ pub fn run() {
                 use tauri::Manager;
                 let manager = app.state::<Arc<tunnels::TunnelManager>>();
                 tauri::async_runtime::block_on(manager.stop_all());
+                telnet::stop_all();
                 session_log::stop_all();
                 editor::clear_cache();
             }

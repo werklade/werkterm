@@ -3,7 +3,7 @@ import appIcon from "../assets/app-icon.svg";
 import { KindIcon } from "./KindIcon";
 import { searchSessions, type Recent } from "../lib/history";
 import { parseQuickConnect } from "../lib/quickConnect";
-import { jumpHostHint, type SavedSession } from "../lib/sessions";
+import { sessionLabel, jumpHostHint, type SavedSession } from "../lib/sessions";
 export function Home({ sessions, recents, canRestore, onLocal, onRestore, onSaved, onQuick }: {
   sessions: SavedSession[]; recents: Recent[]; canRestore: boolean; onLocal(): void; onRestore(): void;
   onSaved(session: SavedSession): void; onQuick(target: string): void;
@@ -22,8 +22,8 @@ export function Home({ sessions, recents, canRestore, onLocal, onRestore, onSave
       if (e.key === "Enter" && count) { e.preventDefault(); choose(Math.min(selected, count - 1)); }
       if (e.key === "Escape") setQuery("");
     }}/>
-    {count > 0 && <div id="home-results" role="listbox" className="home-results">{results.map((s, i) => <button role="option" aria-selected={i === selected} title={jumpHostHint(s, sessions) || undefined} id={`home-result-${i}`} key={s.id} onClick={() => onSaved(s)}><KindIcon kind={s.kind}/>{s.name} · {s.user}@{s.host}</button>)}{quick && <button role="option" aria-selected={selected === results.length} id={`home-result-${results.length}`} onClick={() => onQuick(query.trim())}>Quick connect: {query.trim()}</button>}</div>}
-    <h2>Zuletzt verwendet</h2>{visible.length ? <div className="recent-grid">{visible.map((r, i) => <button key={i} title={r.kind === "saved" ? (() => { const s = sessions.find(s => s.id === r.sessionId); return s ? jumpHostHint(s, sessions) || undefined : undefined; })() : undefined} onClick={() => { if (r.kind === "quick") onQuick(r.target); else { const s = sessions.find(s => s.id === r.sessionId); if (s) onSaved(s); } }}><KindIcon kind={r.kind === "saved" ? sessions.find(s => s.id === r.sessionId)?.kind ?? "ssh" : "ssh"}/>{r.kind === "quick" ? r.target : sessions.find(s => s.id === r.sessionId)?.name}</button>)}</div> : <p>Noch keine Verbindungen verwendet.</p>}
+    {count > 0 && <div id="home-results" role="listbox" className="home-results">{results.map((s, i) => <button role="option" aria-selected={i === selected} title={jumpHostHint(s, sessions) || undefined} id={`home-result-${i}`} key={s.id} onClick={() => onSaved(s)}><KindIcon kind={s.kind}/>{s.name} · {sessionLabel(s)}</button>)}{quick && <button role="option" aria-selected={selected === results.length} id={`home-result-${results.length}`} onClick={() => onQuick(query.trim())}>Quick connect: {query.trim()}</button>}</div>}
+    <h2>Zuletzt verwendet</h2>{visible.length ? <div className="recent-grid">{visible.map((r, i) => <button key={i} title={r.kind === "saved" ? (() => { const s = sessions.find(s => s.id === r.sessionId); return s ? jumpHostHint(s, sessions) || undefined : undefined; })() : undefined} onClick={() => { if (r.kind === "quick") onQuick(r.target); else { const s = sessions.find(s => s.id === r.sessionId); if (s) onSaved(s); } }}><KindIcon kind={r.kind === "saved" ? sessions.find(s => s.id === r.sessionId)?.kind ?? "ssh" : parseQuickConnect(r.target)?.kind ?? "ssh"}/>{r.kind === "quick" ? r.target : sessions.find(s => s.id === r.sessionId)?.name}</button>)}</div> : <p>Noch keine Verbindungen verwendet.</p>}
     <p className="home-hint">Help → Tastenkürzel zeigt die verfügbaren Tastenkombinationen.</p></div>
   </section>;
 }

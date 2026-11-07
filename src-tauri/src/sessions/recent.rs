@@ -114,6 +114,22 @@ fn atomic(path: &Path, value: &impl Serialize) -> Result<(), String> {
     result.map_err(|e| e.to_string())
 }
 fn validate_target(target: &str) -> Result<(), String> {
+    if let Some(value) = target.strip_prefix("telnet://") {
+        let parsed = format!("history@{value}").parse::<crate::ssh::SshTarget>()?;
+        if parsed.port == 0 {
+            return Err("Ungültiges Telnet-Ziel".into());
+        }
+        return Ok(());
+    }
+    if let Some(value) = target.strip_prefix("serial://") {
+        let (device, baud) = value.rsplit_once('@').unwrap_or((value, "115200"));
+        return crate::serial::SerialConfig {
+            device: device.into(),
+            baud: baud.parse().map_err(|_| "Ungültige Baudrate")?,
+            ..Default::default()
+        }
+        .validate();
+    }
     let parsed = target.parse::<crate::ssh::SshTarget>()?;
     if parsed.user.contains([':', '/', '\\']) || target.chars().any(char::is_control) {
         return Err("Ungültiges Verbindungsziel".into());

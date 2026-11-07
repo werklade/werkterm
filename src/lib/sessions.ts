@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export interface SerialConfig { device: string; baud: number; data_bits: number; parity: "none" | "odd" | "even"; stop_bits: number; flow: "none" | "software" | "hardware"; enter: "cr" | "lf" | "crlf"; local_echo: boolean }
+export const defaultSerial: SerialConfig = { device: "", baud: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow: "none", enter: "cr", local_echo: false };
 export type ImportSource = "mobaxterm" | "windterm";
 export type SessionAuth =
   | { type: "default" }
@@ -9,6 +11,7 @@ export type SessionAuth =
 
 export interface SavedSession {
   kind: string;
+  serial?: SerialConfig | null;
   id: string;
   name: string;
   folder: string;
@@ -107,17 +110,21 @@ export function buildSessionTree(sessions: readonly SavedSession[]): SessionFold
 
 export function searchSessions(sessions: readonly SavedSession[], query: string): SavedSession[] {
   const term = query.trim().toLocaleLowerCase("de");
-  return sessions.filter(session => [session.name, session.host, session.user ?? ""]
+  return sessions.filter(session => [session.name, session.host, session.serial?.device ?? "", session.user ?? ""]
     .some(value => value.toLocaleLowerCase("de").includes(term)));
 }
 
-type SessionTarget = Pick<SavedSession, "host" | "port" | "user">;
+type SessionTarget = Pick<SavedSession, "host" | "port" | "user"> & Partial<Pick<SavedSession, "kind" | "serial">>;
 
-export function sessionLabel(session: Pick<SessionTarget, "host" | "user">): string {
+export function sessionLabel(session: Pick<SessionTarget, "host" | "user"> & Partial<Pick<SavedSession, "kind" | "serial" | "port">>): string {
+  if (session.kind === "serial") return `${session.serial?.device ?? ""}@${session.serial?.baud ?? 115200}`;
+  if (session.kind === "telnet") return `${session.host.includes(":") ? `[${session.host}]` : session.host}:${session.port ?? 23}`;
   return session.user ? `${session.user}@${session.host}` : session.host;
 }
 
 export function sessionTarget(session: SessionTarget, userOverride?: string): string {
+  if (session.kind === "serial") return `serial://${session.serial?.device ?? ""}@${session.serial?.baud ?? 115200}`;
+  if (session.kind === "telnet") return `telnet://${session.host.includes(":") ? `[${session.host}]` : session.host}:${session.port}`;
   const host = session.host.includes(":") && !session.host.startsWith("[")
     ? `[${session.host}]` : session.host;
   const user = userOverride ?? session.user;
@@ -168,6 +175,12 @@ export function deselectNewImportDuplicates(
 export function validateSession(session: SavedSession): string | null {
   if (!Number.isInteger(session.keepaliveInterval ?? 30) || (session.keepaliveInterval ?? 30) < 0 || (session.keepaliveInterval ?? 30) > 3600 || !Number.isInteger(session.keepaliveMax ?? 3) || (session.keepaliveMax ?? 3) < 1 || (session.keepaliveMax ?? 3) > 100) return "Keepalive: Intervall 0–3600, Maximum 1–100";
   if (!session.name.trim()) return "Sitzungsname darf nicht leer sein";
+  if (!["ssh", "telnet", "serial"].includes(session.kind)) return "Unbekannter Sitzungstyp";
+  if (session.kind !== "ssh" && (session.jumpSessionId || session.auth.type !== "default")) return "Anmeldung und Jump host sind nur für SSH erlaubt";
+  if (session.kind === "serial") {
+    const c = session.serial;
+    return !c || !c.device.trim() || /\p{Cc}/u.test(c.device) || !Number.isInteger(c.baud) || c.baud < 1 || c.baud > 4294967295 || ![5,6,7,8].includes(c.data_bits) || ![1,2].includes(c.stop_bits) || !["none","odd","even"].includes(c.parity) || !["none","software","hardware"].includes(c.flow) || !["cr","lf","crlf"].includes(c.enter) ? "Ungültige serielle Parameter" : null;
+  }
   if (!session.host || /[\s\p{Cc}]/u.test(session.host)) return "Host darf nicht leer sein oder Leerzeichen enthalten";
   if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535) return "Port muss zwischen 1 und 65535 liegen";
   if (session.auth.type === "keyFile" && !session.auth.path.trim()) return "Schlüsselpfad darf nicht leer sein";

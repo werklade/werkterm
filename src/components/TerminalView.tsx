@@ -34,7 +34,8 @@ interface Props {
   exited?: boolean;
   preferences: Settings;
   id: number;
-  kind: "local" | "wsl" | "ssh";
+  serial?: import("../lib/sessions").SerialConfig | null;
+  kind: "local" | "wsl" | "ssh" | "telnet" | "serial";
   target?: string;
   savedSessionId?: string;
   startCommand?: import("../lib/pty").StartCommand;
@@ -51,7 +52,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
   const [exportMenu, setExportMenu] = useState(false);
@@ -75,6 +76,7 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
   }, [pasteMenu, exportMenu]);
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
+  const wireSession = useRef<number | undefined>(undefined);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
   const inputRef = useRef(onInput); inputRef.current = onInput;
   const shownRef = useRef(visible ?? active); shownRef.current = visible ?? active;
@@ -100,17 +102,18 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
       runtime.current = { terminal, fit };
       let sessionId: number | undefined;
       const connectToken = nextConnectToken++ >>> 0;
-      let connecting = kind === "ssh";
+      let connecting = kind === "ssh" || kind === "telnet";
       let exited = false;
-      const write = kind === "ssh" ? writeSsh : writePty;
-      const resizeSession = kind === "ssh" ? resizeSsh : resizePty;
-      const close = kind === "ssh" ? closeSsh : killPty;
+      const wire = kind === "telnet" || kind === "serial";
+      const write = wire ? (id: number, data: string) => invoke<void>("terminal_write", { id, data }) : kind === "ssh" ? writeSsh : writePty;
+      const resizeSession = wire ? (id: number, cols: number, rows: number) => invoke<void>("terminal_resize", { id, cols, rows }) : kind === "ssh" ? resizeSsh : resizePty;
+      const close = wire ? (id: number) => invoke<void>("terminal_close", { id }) : kind === "ssh" ? closeSsh : killPty;
       const report = (error: unknown) => callbacks.current.onStatus(`Terminal: ${String(error)}`);
       const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report, () => ({ cols: terminal.cols, cursorX: terminal.buffer.active.cursorX }));
       const osc = terminal.parser.registerOscHandler(7, payload => {
         const cwd = parseOsc7(payload, kind === "local" && /Windows/i.test(navigator.userAgent));
         if (!cwd) return false;
-        if (!cancelled) callbacks.current.onCwd(id, cwd);
+        if (!cancelled && !wire) callbacks.current.onCwd(id, cwd);
         return true;
       });
       const fitVisible = () => { if (!cancelled && shownRef.current && element.clientWidth > 0 && element.clientHeight > 0) fit.fit(); };
@@ -173,7 +176,7 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
         promptCommand.receiveData();
       };
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh") callbacks.current.onStatus("SSH-Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh" || wire) callbacks.current.onStatus("Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);
@@ -191,6 +194,12 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
           catch (error) { report(error); }
         }
         if (cancelled) { await stopLog(id).catch(report); return undefined; }
+        if (kind === "serial") return invoke<number>("serial_connect", { ...dimensions, config: serial });
+        if (kind === "telnet") {
+          const parsed = parseQuickConnect(target ?? "");
+          if (!parsed) throw new Error("Ungültiges Telnet-Ziel");
+          return invoke<number>("telnet_connect", { ...dimensions, host: parsed.host, port: parsed.port, connectToken });
+        }
         return kind === "ssh"
         ? connectSsh({ ...dimensions, target: target ?? "", sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
         : spawnPty({ ...dimensions, kind, startCommand, shellIntegration: settings.current.shellIntegration });
@@ -200,7 +209,7 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
         if (result === undefined) return;
         const spawnedId = typeof result === "number" ? result : result.id;
         if (cancelled) { void close(spawnedId).catch(() => undefined); return; }
-        sessionId = spawnedId;
+        sessionId = spawnedId; wireSession.current = spawnedId;
         callbacks.current.onClearPrompts(id);
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
@@ -222,14 +231,14 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
         if (cancelled) return;
         exited = true;
         void stopLog(id).catch(report); logRef.current.onLog(id, null);
-        terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${String(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
+        terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : wire ? "Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${String(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
         callbacks.current.onSession(id, null);
         callbacks.current.onExit(id);
         report(error);
       });
       cleanup = () => {
         callbacks.current.onClearPrompts(id);
-        if (connecting) void cancelSshConnect(connectToken).catch(() => undefined);
+        if (connecting) void (kind === "telnet" ? invoke<void>("terminal_cancel_connect", { connectToken }) : cancelSshConnect(connectToken)).catch(() => undefined);
         terminalPasteRequests.delete(id);
         if (sessionId === undefined) void stopLog(id).catch(report);
         logRef.current.onLog(id, null);
@@ -243,7 +252,7 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
         onExitChannel.onmessage = () => undefined;
         onPromptChannel.onmessage = rejectPrompt;
         if (sessionId !== undefined) void close(sessionId).catch(() => undefined);
-        runtime.current = null;
+        runtime.current = null; wireSession.current = undefined;
         terminal.dispose();
       };
     });
@@ -304,6 +313,7 @@ export function TerminalView({ logPath, connected, onLogToggle, title, logAlways
       }
     }}>
       {exportMenu ? <>{(["txt", "html", "rtf"] as const).map(format => <button key={format} role="menuitem" onClick={() => { void saveContent(format); }}>{format.toUpperCase()} speichern…</button>)}<button role="menuitem" onClick={() => setExportMenu(false)}>Zurück</button></> : <>
+        {kind === "serial" && <button role="menuitem" disabled={processExited || !connected} onClick={() => { void invoke("serial_break", { id: wireSession.current }).catch(error => onStatus(String(error))); closeMenu(); }}>Break senden</button>}
         <button role="menuitem" disabled={!runtime.current?.terminal.getSelection()} onClick={() => copy(false)}>Kopieren</button>
         <button role="menuitem" disabled={processExited} onClick={() => { closeMenu(); terminalPasteRequests.get(id)?.(); }}>Einfügen</button>
         <button role="menuitem" onClick={() => { runtime.current?.terminal.selectAll(); closeMenu(); }}>Alles auswählen</button>

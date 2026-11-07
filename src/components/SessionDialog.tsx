@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { defaultSerial, validateSession, type SerialConfig } from "../lib/sessions";
 import { useEffect, useId, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { initialSessionAuthType, jumpHostOptions, sessionLabel, keyringAvailable, saveSession, type SavedSession, type SessionAuth } from "../lib/sessions";
@@ -17,6 +19,11 @@ interface Props {
 export function SessionDialog({ session, preferPassword = false, sessions, onClose, onSaved }: Props) {
   const dialog = useModal();
   const id = useId();
+  const [kind, setKind] = useState(session?.kind ?? "ssh");
+  const [serial, setSerial] = useState<SerialConfig>(session?.serial ?? { ...defaultSerial });
+  const [ports, setPorts] = useState<{ name: string; description: string }[]>([]);
+  const refreshPorts = () => { void invoke<{ name: string; description: string }[]>("serial_ports").then(setPorts, reason => setError(String(reason))); };
+  useEffect(() => { if (kind === "serial") refreshPorts(); }, [kind]);
   const [logAlways, setLogAlways] = useState(session?.log_always ?? false);
   const [name, setName] = useState(session?.name ?? "");
   const [folder, setFolder] = useState(session?.folder ?? "");
@@ -53,12 +60,12 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
     const parts = saved.folder.split("/").filter(Boolean);
     for (let i = 1; i <= parts.length; i++) folders.add(parts.slice(0, i).join("/"));
   }
-  const validPort = /^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535;
-  const valid = name.trim().length > 0 && host.length > 0 && !/[\s\p{Cc}]/u.test(host)
-    && Number.isInteger(keepaliveInterval) && keepaliveInterval >= 0 && keepaliveInterval <= 3600
-    && Number.isInteger(keepaliveMax) && keepaliveMax >= 1 && keepaliveMax <= 100
-    && (!jumpSessionId || jumpOptions.some(hop => hop.id === jumpSessionId))
-    && validPort && (authType !== "keyFile" || keyPath.trim().length > 0);
+  const draft: SavedSession = { kind, id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host: kind === "serial" ? "" : host,
+    port: kind === "serial" ? 23 : Number(port), user: user.trim() || null, serial: kind === "serial" ? serial : null,
+    keepaliveInterval: kind === "ssh" ? keepaliveInterval : 30, keepaliveMax: kind === "ssh" ? keepaliveMax : 3,
+    jumpSessionId: kind === "ssh" ? jumpSessionId || null : null, log_always: logAlways,
+    auth: kind !== "ssh" ? { type: "default" } : authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType }, source: session?.source ?? null };
+  const valid = validateSession(draft) === null && (kind !== "ssh" || !jumpSessionId || jumpOptions.some(hop => hop.id === jumpSessionId));
   const clearPassword = () => {
     password.reset();
     const input = dialog.current?.querySelector<HTMLInputElement>('.password-field input');
@@ -75,26 +82,38 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();
       if (!valid || busy) return;
-      const secret = authType === "password" && password.value !== "" ? password.value : null;
+      const secret = kind === "ssh" && authType === "password" && password.value !== "" ? password.value : null;
       clearPassword();
       setBusy(true); setError("");
-      void saveSession({ kind: session?.kind ?? "ssh", id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host,
-        port: Number(port), log_always: logAlways, keepaliveInterval, keepaliveMax, jumpSessionId: jumpSessionId || null, user: user.trim() || null,
-        auth: authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType },
-        source: session?.source ?? null }, secret).then(onSaved, reason => {
+      void saveSession(draft, secret).then(onSaved, reason => {
         setError(sessionSaveError(reason));
         setBusy(false);
       });
     }}>
       <h2 id={`${id}-title`}>{session?.id ? "Sitzung bearbeiten" : "Neue Sitzung"}</h2>
       <fieldset disabled={busy} className="session-fields">
+        <label>Art<select value={kind} onChange={event => { const next = event.target.value; setKind(next); setPort(next === "telnet" ? "23" : "22"); clearPassword(); }}><option value="ssh">SSH</option><option value="telnet">Telnet</option><option value="serial">Seriell</option></select></label>
         <label>Name<input autoFocus required value={name} onChange={event => setName(event.target.value)} /></label>
         <label>Ordner<input list={`${id}-folders`} value={folder} onChange={event => setFolder(event.target.value)} placeholder="z. B. Arbeit/Server" /></label>
         <datalist id={`${id}-folders`}>{[...folders].sort().map(path => <option key={path} value={path} />)}</datalist>
-        <div className="session-target-fields"><label>Host<input required value={host} onChange={event => setHost(event.target.value)} /></label>
+        {kind !== "serial" && <><div className="session-target-fields"><label>Host<input required value={host} onChange={event => setHost(event.target.value)} /></label>
           <label>Port<input required type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} /></label></div>
         <label>Benutzer<input value={user} onChange={event => setUser(event.target.value)} placeholder="Beim Verbinden eingeben" /></label>
-        <label>Anmeldung<select value={authType} onChange={event => { authChanged.current = true; setAuthType(event.target.value as SessionAuth["type"]); clearPassword(); }}>
+        </>}
+        {kind === "telnet" && <p role="note" className="session-hint">Telnet ist unverschlüsselt – Passwörter werden im Klartext übertragen.</p>}
+        {kind === "serial" && <>
+          <label>Port<div className="session-path-field"><input required list={`${id}-ports`} value={serial.device} placeholder="/dev/ttyUSB0 oder COM3" onChange={e => setSerial({ ...serial, device: e.target.value })}/><button type="button" onClick={refreshPorts}>Aktualisieren</button></div></label>
+          <datalist id={`${id}-ports`}>{ports.map(port => <option key={port.name} value={port.name}>{port.description}</option>)}</datalist>
+          <label>Baudrate<input required type="number" min={1} max={4294967295} list={`${id}-bauds`} value={serial.baud} onChange={e => setSerial({ ...serial, baud: Number(e.target.value) })}/></label>
+          <datalist id={`${id}-bauds`}>{[300,600,1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600].map(n => <option key={n} value={n}/>)}</datalist>
+          <label>Datenbits<select value={serial.data_bits} onChange={e => setSerial({ ...serial, data_bits: Number(e.target.value) })}>{[5,6,7,8].map(n => <option key={n}>{n}</option>)}</select></label>
+          <label>Parität<select value={serial.parity} onChange={e => setSerial({ ...serial, parity: e.target.value as SerialConfig["parity"] })}><option value="none">Keine</option><option value="odd">Ungerade</option><option value="even">Gerade</option></select></label>
+          <label>Stoppbits<select value={serial.stop_bits} onChange={e => setSerial({ ...serial, stop_bits: Number(e.target.value) })}><option>1</option><option>2</option></select></label>
+          <label>Flusskontrolle<select value={serial.flow} onChange={e => setSerial({ ...serial, flow: e.target.value as SerialConfig["flow"] })}><option value="none">Keine</option><option value="software">Software (XON/XOFF)</option><option value="hardware">Hardware (RTS/CTS)</option></select></label>
+          <label>Enter sendet<select value={serial.enter} onChange={e => setSerial({ ...serial, enter: e.target.value as SerialConfig["enter"] })}><option value="cr">CR</option><option value="lf">LF</option><option value="crlf">CRLF</option></select></label>
+          <label><input type="checkbox" checked={serial.local_echo} onChange={e => setSerial({ ...serial, local_echo: e.target.checked })}/>Lokales Echo</label>
+        </>}
+        {kind === "ssh" && <><label>Anmeldung<select value={authType} onChange={event => { authChanged.current = true; setAuthType(event.target.value as SessionAuth["type"]); clearPassword(); }}>
           <option value="default">Standard (Agent/~/.ssh)</option><option value="keyFile">Schlüsseldatei</option>
           <option value="password" disabled={keyring !== true}>Passwort (im Schlüsselbund)</option><option value="ask">Beim Verbinden fragen</option>
         </select></label>
@@ -102,12 +121,12 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {authType === "keyFile" && <label>Schlüsseldatei<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></label>}
         {authType === "password" && <label>Passwort<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
-        <details><summary>Erweitert</summary><label><input type="checkbox" checked={logAlways} onChange={e => setLogAlways(e.target.checked)} />Diese Sitzung immer protokollieren</label>
-          <label>Jump host<select value={jumpSessionId} onChange={event => setJumpSessionId(event.target.value)}>
+        </>}<details><summary>Erweitert</summary><label><input type="checkbox" checked={logAlways} onChange={e => setLogAlways(e.target.checked)} />Diese Sitzung immer protokollieren</label>
+          {kind === "ssh" && <><label>Jump host<select value={jumpSessionId} onChange={event => setJumpSessionId(event.target.value)}>
             <option value="">(keiner)</option>
             {jumpOptions.map(hop => <option key={hop.id} value={hop.id}>{hop.name} ({sessionLabel(hop)})</option>)}
           </select></label>
-          <small className="session-hint">Verbindung läuft über diese Sitzung (wie ssh -J).</small><p>Keepalive erkennt unterbrochene Verbindungen. Intervall 0 schaltet es aus.</p><label>Intervall (Sekunden)<input type="number" required min={0} max={3600} value={keepaliveInterval} onChange={e => setKeepaliveInterval(Number(e.target.value))} /></label><label>Unbeantwortete Keepalives<input type="number" required min={1} max={100} value={keepaliveMax} onChange={e => setKeepaliveMax(Number(e.target.value))} /></label></details>
+          <small className="session-hint">Verbindung läuft über diese Sitzung (wie ssh -J).</small><p>Keepalive erkennt unterbrochene Verbindungen. Intervall 0 schaltet es aus.</p><label>Intervall (Sekunden)<input type="number" required min={0} max={3600} value={keepaliveInterval} onChange={e => setKeepaliveInterval(Number(e.target.value))} /></label><label>Unbeantwortete Keepalives<input type="number" required min={1} max={100} value={keepaliveMax} onChange={e => setKeepaliveMax(Number(e.target.value))} /></label></>}</details>
       </fieldset>
       {error && <p role="alert" className="session-error">{error}</p>}
       <div className="dialog-actions"><button type="submit" disabled={!valid || busy}>{busy ? "Speichern…" : "Speichern"}</button><button type="button" disabled={busy} onClick={cancel}>Abbrechen</button></div>

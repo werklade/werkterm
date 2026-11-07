@@ -79,7 +79,7 @@ describe("password dialog lifecycle", () => {
     await Promise.resolve();
   });
   it("clears and hides the input when the authentication option changes", () => {
-    const select = find(sessionDialog(), element => element.type === "select");
+    const select = find(sessionDialog(), element => element.type === "select" && element.props.value === "password");
     (select.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "ask" } });
     expectReset();
   });
@@ -107,5 +107,24 @@ describe("password field accessibility and errors", () => {
       "KEYRING_LOCKED: Schlüsselbund ist gesperrt. Tipp: Anmeldung 'Beim Verbinden fragen' wählen",
     );
     expect(sessionSaveError(new Error("Sitzungsdatei konnte nicht gespeichert werden"))).toBe("Sitzungsdatei konnte nicht gespeichert werden");
+  });
+});
+
+
+describe("connection kind dialog", () => {
+  const saved = (kind: string): SavedSession => ({ kind, id: "existing", name: "Console", folder: "", host: "router.test", port: 23, user: null, auth: { type: "default" }, source: null, serial: { device: "COM3", baud: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow: "none", enter: "cr", local_echo: false } });
+  it.each(["telnet", "serial"])("never submits a password for %s", kind => {
+    const dialog = SessionDialog({ session: saved(kind), sessions: [], onClose: host.answer, onSaved: vi.fn() });
+    submit(dialog);
+    expect(host.save).toHaveBeenCalledWith(expect.objectContaining({ kind, auth: { type: "default" }, jumpSessionId: null }), null);
+  });
+  it("rejects a missing serial device before saving", () => {
+    const session = saved("serial"); session.serial!.device = "";
+    submit(SessionDialog({ session, sessions: [], onClose: host.answer, onSaved: vi.fn() }));
+    expect(host.save).not.toHaveBeenCalled();
+  });
+  it("renders the Telnet plaintext warning", () => {
+    const dialog = SessionDialog({ session: saved("telnet"), sessions: [], onClose: host.answer, onSaved: vi.fn() });
+    expect(find(dialog, element => element.props.role === "note").props.children).toContain("Telnet ist unverschlüsselt");
   });
 });

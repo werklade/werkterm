@@ -7,7 +7,7 @@ export const recentList = () => invoke<Recent[]>("recent_list");
 export const lastTabsList = () => invoke<LastTab[]>("last_tabs_list");
 export function searchSessions(items: SavedSession[], query: string): SavedSession[] {
   const needle = query.trim().toLocaleLowerCase();
-  return needle ? items.filter(s => [s.name, s.host, s.user ?? ""].some(value => value.toLocaleLowerCase().includes(needle))) : [];
+  return needle ? items.filter(s => [s.name, s.host, s.serial?.device ?? "", s.user ?? ""].some(value => value.toLocaleLowerCase().includes(needle))) : [];
 }
 
 /** Persist only connection descriptors, never runtime IDs, editor contents or authentication. */
@@ -16,7 +16,7 @@ export function terminalDescriptors(tabs: readonly BrowserTab[]): LastTab[] {
     switch (tab.kind) {
       case "editor": return [];
       case "local": case "wsl": return [{ type: tab.kind }];
-      case "ssh": return tab.savedSessionId ? [{ type: "saved", sessionId: tab.savedSessionId }] : [{ type: "quick", target: tab.target ?? "" }];
+      case "telnet": case "serial": case "ssh": return tab.savedSessionId ? [{ type: "saved", sessionId: tab.savedSessionId }] : [{ type: "quick", target: tab.target ?? "" }];
     }
   });
 }

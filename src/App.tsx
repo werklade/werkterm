@@ -1,3 +1,5 @@
+import { connectionTitle, connectionStatus } from "./lib/connection";
+import { defaultSerial } from "./lib/sessions";
 import { TunnelDialog, TunnelConfirmDialog } from "./components/TunnelDialog";
 import { isLoopback, type Tunnel, type TunnelStatus } from "./lib/tunnels";
 import { listen } from "@tauri-apps/api/event";
@@ -272,21 +274,21 @@ export default function App() {
     if (windowClosing.current) return;
     const parsed = parseQuickConnect(target);
     if (!parsed) return;
-    if (!parsed.user) { setQuickUserTarget(target.trim()); return; }
+    if (!parsed.kind && !parsed.user) { setQuickUserTarget(target.trim()); return; }
     const id = nextId.current++;
     liveTabs.current.add(id);
     sshTabs.current.add(id);
-    setTabs(current => [...current, { id, kind: "ssh", target: target.trim(), title: `${parsed.user}@${parsed.host}`, exited: false, browserPath: "" }]);
+    setTabs(current => [...current, { id, kind: parsed.kind ?? "ssh", serial: parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined, target: target.trim(), title: connectionTitle(parsed.kind ?? "ssh", target, parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined), exited: false, browserPath: "" }]);
     setActiveId(id);
-    setStatus(`Verbinde mit ${parsed.user}@${parsed.host}…`);
+    setStatus(`Verbinde mit ${connectionTitle(parsed.kind ?? "ssh", target, parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined)}…`);
   };
   const connectSaved = (session: SavedSession, userOverride?: string) => {
     if (windowClosing.current) return;
-    if (!session.user && !userOverride) { setUserSession(session); return; }
+    if (session.kind === "ssh" && !session.user && !userOverride) { setUserSession(session); return; }
     const id = nextId.current++;
     liveTabs.current.add(id);
     sshTabs.current.add(id);
-    setTabs(current => [...current, { id, kind: "ssh", target: sessionTarget(session, userOverride), savedSessionId: session.id, title: session.name, exited: false, browserPath: "" }]);
+    setTabs(current => [...current, { id, kind: session.kind as "ssh" | "telnet" | "serial", serial: session.serial, target: sessionTarget(session, userOverride), savedSessionId: session.id, title: session.name, exited: false, browserPath: "" }]);
     setActiveId(id);
     setStatus(`Verbinde mit ${session.name}…`);
   };
@@ -356,10 +358,9 @@ export default function App() {
     const tunnelCount = ids ? 0 : (await invoke<TunnelStatus[]>("tunnel_list_status").catch(() => tunnelStatuses)).filter(s => ["running", "connecting", "reconnecting"].includes(s.state)).length;
     if (!shouldConfirmSsh(candidates, settingsRef.current.confirmCloseSsh) && !(tunnelCount && settingsRef.current.confirmCloseSsh)) return true;
     const active = activeSshTabs(candidates);
-    const transfers = active.reduce((count, tab) => count + transferQueue.countSession(tab.sessionId!), 0);
-    const target = parseQuickConnect(active[0]?.target ?? "");
-    const destination = target ? `${target.user}@${target.host}` : active[0]?.title ?? "SSH";
-    const message = ids ? `Verbindung zu ${destination} ist aktiv. Wirklich trennen?` : `${active.length} aktive SSH-Verbindung(en) werden getrennt und ${tunnelCount} Tunnel werden gestoppt. Beenden?`;
+    const transfers = active.reduce((count, tab) => count + (tab.kind === "ssh" ? transferQueue.countSession(tab.sessionId!) : 0), 0);
+    const destination = active[0] ? connectionTitle(active[0].kind, active[0].target ?? "", active[0].serial) : "Verbindung";
+    const message = ids ? `Verbindung zu ${destination} ist aktiv. Wirklich trennen?` : `${active.length} aktive Verbindung(en) werden getrennt und ${tunnelCount} Tunnel werden gestoppt. Beenden?`;
     return new Promise(resolve => setSshClose({ message, transfers, quitting: !ids, answer: (accepted, never) => {
       if (never) changeSettings({ ...settingsRef.current, confirmCloseSsh: false });
       setSshClose(null); resolve(accepted);
@@ -402,7 +403,7 @@ export default function App() {
   const openEditor = (browserSource: BrowserTab, path: string) => {
     if (windowClosing.current) return;
     const source = sourceForEditorOpen(browserSource, editorsRef.current[browserSource.id]?.source);
-    if (source.kind === "editor") return;
+    if (["editor", "telnet", "serial"].includes(source.kind)) return;
     const sourceKey = editorFileKey(source, path);
     const existing = Object.entries(editorsRef.current).find(([, editor]) => editor.sourceKey === sourceKey);
     if (existing) { setActiveId(Number(existing[0])); return; }
@@ -432,8 +433,8 @@ export default function App() {
   const setSession = useCallback((id: number, sessionId: number | null) => {
     if (sessionId === null) cancelTabTransfers(id);
     else if (liveTabs.current.has(id) && sshTabs.current.has(id)) {
-      sessions.current.set(id, sessionId);
       const tab = tabsRef.current.find(t => t.id === id);
+      if (tab?.kind === "ssh") sessions.current.set(id, sessionId);
       if (tab) {
         const at = Date.now();
         const item: Recent = tab.savedSessionId ? { kind: "saved", sessionId: tab.savedSessionId, name: tab.title, at } : { kind: "quick", target: tab.target ?? "", at };
@@ -614,7 +615,7 @@ export default function App() {
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={tab.id} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
@@ -632,7 +633,7 @@ export default function App() {
         </div>
       </main>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
     {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} onAnswer={text => {
       if (text !== null) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(text, true); });
       setPasteRequest(null);

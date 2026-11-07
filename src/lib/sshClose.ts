@@ -1,6 +1,6 @@
 export interface CloseTab { kind: string; exited: boolean; sessionId?: number }
 export function activeSshTabs<T extends CloseTab>(tabs: readonly T[]): T[] {
-  return tabs.filter(tab => tab.kind === "ssh" && !tab.exited && tab.sessionId !== undefined);
+  return tabs.filter(tab => ["ssh", "telnet", "serial"].includes(tab.kind) && !tab.exited && tab.sessionId !== undefined);
 }
 export function shouldConfirmSsh(tabs: readonly CloseTab[], enabled: boolean): boolean {
   return enabled && activeSshTabs(tabs).length > 0;
