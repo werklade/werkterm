@@ -311,18 +311,26 @@ async fn authenticate(
     handle: &mut Handle,
     target: &SshTarget,
     prompter: &dyn Prompter,
+    session: Option<&crate::sessions::SavedSession>,
 ) -> Result<(), String> {
     if agent_auth(handle, &target.user).await {
         return Ok(());
     }
-    let directory = ssh_dir()?;
-    for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
-        let path = directory.join(name);
+    let auth = session
+        .map(|session| &session.auth)
+        .cloned()
+        .unwrap_or_default();
+    let paths = auth_key_paths(&auth)?;
+    for path in paths {
         let key_path = path.clone();
         let initial = tokio::task::spawn_blocking(move || {
             if std::fs::read_to_string(&key_path).is_ok_and(|text| {
                 text.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----")
                     || text.contains("Proc-Type: 4,ENCRYPTED")
+                    || (text.starts_with("PuTTY-User-Key-File-")
+                        && !text
+                            .lines()
+                            .any(|line| line.trim_end() == "Encryption: none"))
             }) {
                 return Err(keys::Error::KeyIsEncrypted);
             }
@@ -377,6 +385,17 @@ async fn authenticate(
             }
         }
     }
+    if let Some(session) =
+        session.filter(|session| session.auth == crate::sessions::SessionAuth::Password)
+        && let Ok(Some(secret)) =
+            crate::secrets::get_password(format!("session:{}", session.id)).await
+    {
+        let result = handle.authenticate_password(&target.user, &secret).await;
+        drop(secret);
+        if result.is_ok_and(|result| result.success()) {
+            return Ok(());
+        }
+    }
     for _ in 0..3 {
         let Some(secret) = prompter
             .ask_secret(
@@ -397,6 +416,61 @@ async fn authenticate(
         }
     }
     Err("SSH-Anmeldung fehlgeschlagen".into())
+}
+
+fn auth_key_paths(auth: &crate::sessions::SessionAuth) -> Result<Vec<PathBuf>, String> {
+    use crate::sessions::SessionAuth;
+    match auth {
+        SessionAuth::Default => {
+            let directory = ssh_dir()?;
+            Ok(["id_ed25519", "id_ecdsa", "id_rsa"]
+                .into_iter()
+                .map(|name| directory.join(name))
+                .collect())
+        }
+        SessionAuth::KeyFile { path } => {
+            if path == "~" || path.starts_with("~/") || path.starts_with("~\\") {
+                let home = ssh_dir()?
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+                    .ok_or_else(|| "Home-Verzeichnis nicht gefunden".to_owned())?;
+                Ok(vec![crate::sessions::expand_home(path, &home)])
+            } else {
+                Ok(vec![PathBuf::from(path)])
+            }
+        }
+        SessionAuth::Password | SessionAuth::Ask => Ok(Vec::new()),
+    }
+}
+
+#[cfg(test)]
+mod saved_auth_tests {
+    use super::*;
+    use crate::sessions::SessionAuth;
+    #[test]
+    fn saved_auth_selects_only_the_requested_key_files() {
+        assert!(auth_key_paths(&SessionAuth::Password).unwrap().is_empty());
+        assert!(auth_key_paths(&SessionAuth::Ask).unwrap().is_empty());
+        assert_eq!(
+            auth_key_paths(&SessionAuth::KeyFile {
+                path: "test-key.ppk".into()
+            })
+            .unwrap(),
+            vec![PathBuf::from("test-key.ppk")]
+        );
+        let directory = ssh_dir().unwrap();
+        assert_eq!(
+            auth_key_paths(&SessionAuth::Default).unwrap(),
+            ["id_ed25519", "id_ecdsa", "id_rsa"].map(|name| directory.join(name))
+        );
+        assert_eq!(
+            auth_key_paths(&SessionAuth::KeyFile {
+                path: "~/.ssh/test.ppk".into()
+            })
+            .unwrap(),
+            vec![directory.join("test.ppk")]
+        );
+    }
 }
 
 async fn reply(channel: &mut russh::Channel<client::Msg>) -> Result<(), String> {
@@ -547,6 +621,33 @@ impl SshManager {
         on_data: Box<dyn FnMut(Vec<u8>) + Send>,
         on_exit: Box<dyn FnOnce(Option<u32>) + Send>,
     ) -> Result<SshConnection, String> {
+        self.connect_with_session(
+            connect_token,
+            target,
+            None,
+            cols,
+            rows,
+            known_hosts_path,
+            prompter,
+            on_data,
+            on_exit,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn connect_with_session(
+        self: &Arc<Self>,
+        connect_token: u32,
+        target: SshTarget,
+        session: Option<crate::sessions::SavedSession>,
+        cols: u16,
+        rows: u16,
+        known_hosts_path: PathBuf,
+        prompter: Arc<dyn Prompter>,
+        on_data: Box<dyn FnMut(Vec<u8>) + Send>,
+        on_exit: Box<dyn FnOnce(Option<u32>) + Send>,
+    ) -> Result<SshConnection, String> {
         let (cancel, mut canceled) = watch::channel(false);
         {
             let mut connections = self.connections.lock().await;
@@ -570,6 +671,7 @@ impl SshManager {
         let result = self
             .connect_inner(
                 target,
+                session,
                 cols,
                 rows,
                 known_hosts_path,
@@ -612,6 +714,7 @@ impl SshManager {
     async fn connect_inner(
         self: &Arc<Self>,
         target: SshTarget,
+        session: Option<crate::sessions::SavedSession>,
         cols: u16,
         rows: u16,
         known_hosts_path: PathBuf,
@@ -697,7 +800,7 @@ impl SshManager {
         )
         .await?;
         if let Err(error) = phase(
-            authenticate(&mut handle, &target, prompter.as_ref()),
+            authenticate(&mut handle, &target, prompter.as_ref(), session.as_ref()),
             canceled,
             prompts,
         )

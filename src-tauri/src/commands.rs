@@ -283,9 +283,11 @@ pub async fn ssh_cancel_connect(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn ssh_connect(
+    app: tauri::AppHandle,
     state: State<'_, Arc<SshManager>>,
     pending: State<'_, Arc<PendingPrompts>>,
     target: String,
+    session_id: Option<String>,
     connect_token: u32,
     cols: u16,
     rows: u16,
@@ -294,6 +296,13 @@ pub async fn ssh_connect(
     on_prompt: Channel<SshPrompt>,
 ) -> Result<SshConnection, String> {
     let target: SshTarget = target.parse()?;
+    let session = match session_id {
+        Some(id) => Some(crate::sessions::find(&app, &id).await?),
+        None => None,
+    };
+    if let Some(session) = &session {
+        crate::sessions::validate_target(session, &target)?;
+    }
     let prompter = Arc::new(TauriPrompter {
         connect_token,
         pending: Arc::clone(pending.inner()),
@@ -301,9 +310,10 @@ pub async fn ssh_connect(
     });
     state
         .inner()
-        .connect(
+        .connect_with_session(
             connect_token,
             target,
+            session,
             cols,
             rows,
             ssh_dir()?.join("known_hosts"),

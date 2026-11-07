@@ -1,6 +1,8 @@
 mod commands;
 pub mod local_fs;
 pub mod pty;
+pub mod secrets;
+pub mod sessions;
 pub mod ssh;
 
 use std::sync::Arc;
@@ -34,7 +36,14 @@ pub fn run() {
             commands::ssh_create_file,
             commands::ssh_count_entries,
             commands::ssh_delete,
-            commands::local_list_dir
+            commands::local_list_dir,
+            sessions::sessions_list,
+            sessions::sessions_save,
+            sessions::sessions_delete,
+            sessions::sessions_keyring_available,
+            sessions::sessions_import_default_path,
+            sessions::sessions_import_preview,
+            sessions::sessions_import_commit
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| {
