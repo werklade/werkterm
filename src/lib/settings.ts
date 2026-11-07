@@ -1,5 +1,6 @@
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 export interface Settings {
+  tuxEnabled: boolean; tuxIdleMinutes: number;
   logFolder: string; logAllSessions: boolean; logStripAnsi: boolean; pasteConfirm: import("./paste").PasteConfirm;
   copyOnSelect: boolean; rightClick: "menu" | "paste";
   confirmCloseSsh: boolean;
@@ -12,6 +13,7 @@ export interface Settings {
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
 }
 export const defaultSettings: Settings = {
+  tuxEnabled: true, tuxIdleMinutes: 10,
   logFolder: "", logAllSessions: false, logStripAnsi: true, pasteConfirm: "multiline",
   copyOnSelect: true, rightClick: "menu",
   confirmCloseSsh: true,
@@ -26,8 +28,8 @@ const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
   const v = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const result = { ...defaultSettings };
-  for (const key of ["copyOnSelect", "logAllSessions", "logStripAnsi", "confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
-  for (const [key, min, max] of [["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
+  for (const key of ["tuxEnabled", "copyOnSelect", "logAllSessions", "logStripAnsi", "confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
+  for (const [key, min, max] of [["tuxIdleMinutes", 1, 120], ["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
     const value = v[key]; if (typeof value === "number" && Number.isFinite(value)) result[key] = Math.max(min, Math.min(max, key === "lineHeight" ? value : Math.round(value)));
   }
   if (v.rightClick === "menu" || v.rightClick === "paste") result.rightClick = v.rightClick;

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultSettings, loadSettings, normalizeSettings, saveSettings, selectedTheme } from "./settings";
+it("normalizes Tux settings with defaults and finite minute bounds", () => {
+  expect(normalizeSettings({})).toMatchObject({ tuxEnabled: true, tuxIdleMinutes: 10 });
+  expect(normalizeSettings({ tuxEnabled: false, tuxIdleMinutes: 121 })).toMatchObject({ tuxEnabled: false, tuxIdleMinutes: 120 });
+  expect(normalizeSettings({ tuxIdleMinutes: -1 }).tuxIdleMinutes).toBe(1);
+  expect(normalizeSettings({ tuxIdleMinutes: 1.6 }).tuxIdleMinutes).toBe(2);
+  for (const value of [NaN, Infinity, "5", null]) expect(normalizeSettings({ tuxEnabled: "false", tuxIdleMinutes: value })).toMatchObject({ tuxEnabled: true, tuxIdleMinutes: 10 });
+});
 describe("settings validation and migration", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("defaults invalid and old settings without losing existing booleans", () => {

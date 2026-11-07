@@ -1,3 +1,4 @@
+import { TuxOverlay } from "./TuxOverlay";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { readTerminal, exportText, exportHtml, exportRtf } from "../lib/terminalExport";
@@ -53,6 +54,7 @@ let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
 export function TerminalView({ serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+  const [tuxTerminal, setTuxTerminal] = useState<Terminal | null>(null);
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
   const [exportMenu, setExportMenu] = useState(false);
@@ -100,6 +102,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
       terminal.loadAddon(fit);
       terminal.open(element);
       runtime.current = { terminal, fit };
+      setTuxTerminal(terminal);
       let sessionId: number | undefined;
       const connectToken = nextConnectToken++ >>> 0;
       let connecting = kind === "ssh" || kind === "telnet";
@@ -117,7 +120,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         return true;
       });
       const fitVisible = () => { if (!cancelled && shownRef.current && element.clientWidth > 0 && element.clientHeight > 0) fit.fit(); };
-      const send = (data: string) => { if (sessionId !== undefined && !exited && !cancelled) void write(sessionId, data).catch(report); };
+      const send = (data: string) => { terminal.element?.dispatchEvent(new Event("tux-activity")); if (sessionId !== undefined && !exited && !cancelled) void write(sessionId, data).catch(report); };
       const provenance = inputProvenance(terminal);
       let keyboardInput = false;
       let deliveringPaste = false;
@@ -172,6 +175,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
       const onData = new Channel<ArrayBuffer>();
       onData.onmessage = buffer => {
         if (cancelled) return;
+        terminal.element?.dispatchEvent(new Event("tux-activity"));
         terminal.write(new Uint8Array(buffer));
         promptCommand.receiveData();
       };
@@ -302,7 +306,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
     if (preferencesRef.current.rightClick === "paste" && !event.shiftKey) { terminalPasteRequests.get(id)?.(); return; }
     setExportMenu(false); setPasteMenu({ x: event.clientX, y: event.clientY });
   }} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}>
-    <div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}
+    <div style={{ position: "relative", flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}><div className="terminal-container" ref={container} style={{ height: "100%" }} /><TuxOverlay terminal={tuxTerminal} enabled={preferences.tuxEnabled} minutes={preferences.tuxIdleMinutes} visible={visible ?? active} active={active} /></div>{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}
     {pasteMenu && <div ref={pasteMenuRef} role="menu" aria-label="Terminalaktionen" className="session-context" style={{ left: pasteMenu.x, top: pasteMenu.y, maxHeight: "100vh", maxWidth: "100vw", overflowY: "auto" }} onKeyDown={event => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeMenu(); }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
