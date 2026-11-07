@@ -52,7 +52,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         const pixel = Math.max(1, Math.floor(cellHeight * 2 / 16));
         const size = pixel * 16;
         const x = tux.x * cellWidth, y = (tux.y + (tux.state === "dig" ? Math.min(1, tux.age / .9) : 0)) * cellHeight;
-        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "walk" ? (Math.floor(tux.age * 7) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
+        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
         if (tux.state === "dig") hole(digSpan(tux), Math.min(1, tux.age / .9));
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
