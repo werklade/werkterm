@@ -43,6 +43,10 @@ pub struct SavedSession {
     pub user: Option<String>,
     pub auth: SessionAuth,
     pub source: Option<String>,
+    #[serde(default = "default_keepalive_interval")]
+    pub keepalive_interval: u32,
+    #[serde(default = "default_keepalive_max")]
+    pub keepalive_max: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -102,7 +106,16 @@ fn new_id() -> String {
     )
 }
 
+pub fn default_keepalive_interval() -> u32 {
+    30
+}
+pub fn default_keepalive_max() -> u32 {
+    3
+}
 pub fn validate(session: &SavedSession) -> Result<(), String> {
+    if session.keepalive_interval > 3600 || !(1..=100).contains(&session.keepalive_max) {
+        return Err("Keepalive: Intervall 0–3600, Maximum 1–100".into());
+    }
     if session.kind != "ssh" {
         return Err("Unbekannter Sitzungstyp".into());
     }
@@ -574,6 +587,8 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                     selection.auth
                 },
                 source: Some(source),
+                keepalive_interval: 30,
+                keepalive_max: 3,
             };
             validate(&session)?;
             Ok(session)
@@ -658,6 +673,8 @@ mod tests {
             user: Some("alice".into()),
             auth: SessionAuth::Password,
             source: None,
+            keepalive_interval: 30,
+            keepalive_max: 3,
         }
     }
 
@@ -880,5 +897,32 @@ mod migration_tests {
         migrate_config_dir(&new).unwrap();
         assert_eq!(fs::read(new.join("sessions.json")).unwrap(), b"existing");
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod keepalive_tests {
+    use super::*;
+    #[test]
+    fn old_sessions_default_and_ranges_are_validated() {
+        let mut value = serde_json::json!({"id":"old","name":"Old","folder":"","host":"host","port":22,"user":null,"auth":{"type":"default"},"source":null});
+        let mut session: SavedSession = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!((session.keepalive_interval, session.keepalive_max), (30, 3));
+        for interval in [0, 30, 3600] {
+            for max in [1, 3, 100] {
+                session.keepalive_interval = interval;
+                session.keepalive_max = max;
+                assert!(validate(&session).is_ok());
+            }
+        }
+        session.keepalive_interval = 3601;
+        assert!(validate(&session).is_err());
+        session.keepalive_interval = 30;
+        for max in [0, 101] {
+            session.keepalive_max = max;
+            assert!(validate(&session).is_err());
+        }
+        value["keepaliveInterval"] = serde_json::json!(-1);
+        assert!(serde_json::from_value::<SavedSession>(value).is_err());
     }
 }

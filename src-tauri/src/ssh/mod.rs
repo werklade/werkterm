@@ -1,5 +1,6 @@
 mod actions;
 pub mod lsparse;
+pub mod monitor;
 pub mod permissions;
 mod sudo;
 pub use actions::TransferProgress;
@@ -238,6 +239,8 @@ impl client::Handler for Handler {
 
 type Handle = client::Handle<Handler>;
 struct Session {
+    monitor: Mutex<Option<monitor::MonitorTask>>,
+    monitor_closed: std::sync::atomic::AtomicBool,
     socket: SetupSocket,
     handle: Arc<Handle>,
     writer: Arc<ChannelWriteHalf<client::Msg>>,
@@ -813,7 +816,11 @@ impl SshManager {
         let mut setup_socket = SetupSocket(Some(stream.try_clone().map_err(ssh_error)?));
         let stream = tokio::net::TcpStream::from_std(stream).map_err(ssh_error)?;
         let config = Arc::new(client::Config {
-            keepalive_interval: Some(Duration::from_secs(30)),
+            keepalive_interval: {
+                let seconds = session.as_ref().map_or(30, |s| s.keepalive_interval);
+                (seconds != 0).then(|| Duration::from_secs(u64::from(seconds)))
+            },
+            keepalive_max: session.as_ref().map_or(3, |s| s.keepalive_max as usize),
             inactivity_timeout: None,
             ..Default::default()
         });
@@ -885,6 +892,8 @@ impl SshManager {
         let (stop, mut stopped) = oneshot::channel();
         let (replies, mut responses) = mpsc::unbounded_channel();
         let session = Arc::new(Session {
+            monitor: Mutex::new(None),
+            monitor_closed: std::sync::atomic::AtomicBool::new(false),
             socket: SetupSocket(setup_socket.0.take()),
             handle: Arc::new(handle),
             writer: Arc::new(writer),
@@ -900,6 +909,8 @@ impl SshManager {
         tokio::spawn(async move {
             let session = reader_session;
             let code = pump_terminal(&mut reader, &mut stopped, on_data.as_mut(), &replies).await;
+            session.monitor_closed.store(true, Ordering::Release);
+            monitor::stop_session(&session).await;
             // Wake setup immediately if the shell ends while SFTP is negotiated.
             drop(replies);
             let _ = tokio::time::timeout(PHASE_TIMEOUT, session.writer.close()).await;

@@ -17,6 +17,8 @@ export interface SavedSession {
   user: string | null;
   auth: SessionAuth;
   source: ImportSource | null;
+  keepaliveInterval?: number;
+  keepaliveMax?: number;
 }
 
 export interface ImportCandidate {
@@ -159,6 +161,7 @@ export function deselectNewImportDuplicates(
 
 /** Matches the persisted backend validation before attempting an IPC call. */
 export function validateSession(session: SavedSession): string | null {
+  if (!Number.isInteger(session.keepaliveInterval ?? 30) || (session.keepaliveInterval ?? 30) < 0 || (session.keepaliveInterval ?? 30) > 3600 || !Number.isInteger(session.keepaliveMax ?? 3) || (session.keepaliveMax ?? 3) < 1 || (session.keepaliveMax ?? 3) > 100) return "Keepalive: Intervall 0–3600, Maximum 1–100";
   if (!session.name.trim()) return "Sitzungsname darf nicht leer sein";
   if (!session.host || /[\s\p{Cc}]/u.test(session.host)) return "Host darf nicht leer sein oder Leerzeichen enthalten";
   if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535) return "Port muss zwischen 1 und 65535 liegen";

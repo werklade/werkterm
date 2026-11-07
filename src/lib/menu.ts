@@ -1,5 +1,6 @@
 export interface ShortcutEvent { key: string; code: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
 export const shortcuts = [
+  { action: "multiexec", label: "MultiExec", shortcut: "Strg+Umschalt+M" },
   { action: "local", label: "Neues lokales Terminal", shortcut: "Strg+Umschalt+T" },
   { action: "close", label: "Tab schließen", shortcut: "Strg+Umschalt+W" },
   { action: "larger", label: "Schrift größer", shortcut: "Strg+Umschalt+Plus" },
@@ -13,6 +14,7 @@ export function shortcutAction(e: ShortcutEvent, terminal: boolean): string | nu
   if (e.key === "F11" && !e.ctrlKey && !e.shiftKey) return "fullscreen";
   if (!e.ctrlKey) return null;
   if (!e.shiftKey) return e.key === "," && !terminal ? "settings" : null;
+  if (e.key.toLowerCase() === "m") return "multiexec";
   if (e.key.toLowerCase() === "t") return "local";
   if (e.key.toLowerCase() === "w") return "close";
   if (e.key === "+" || e.code === "NumpadAdd") return "larger";

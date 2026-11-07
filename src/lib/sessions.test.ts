@@ -136,3 +136,13 @@ describe("session IPC wrappers", () => {
     ]);
   });
 });
+
+it("validates keepalive boundaries with legacy defaults", () => {
+  expect(validateSession(sample())).toBeNull();
+  for (const keepaliveInterval of [0, 30, 3600]) for (const keepaliveMax of [1, 3, 100])
+    expect(validateSession(sample({ keepaliveInterval, keepaliveMax }))).toBeNull();
+  for (const keepaliveInterval of [-1, 3601, 1.5, NaN])
+    expect(validateSession(sample({ keepaliveInterval }))).toContain("Keepalive");
+  for (const keepaliveMax of [0, 101, 1.5, NaN])
+    expect(validateSession(sample({ keepaliveMax }))).toContain("Keepalive");
+});

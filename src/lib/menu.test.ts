@@ -22,6 +22,7 @@ describe("shortcuts", () => {
       [{ key: "+", ctrlKey: true, shiftKey: true }, "larger"], [{ key: "_", ctrlKey: true, shiftKey: true }, "smaller"],
       [{ key: "=", code: "Digit0", ctrlKey: true, shiftKey: true }, "resetFont"], [{ key: "F11" }, "fullscreen"],
       [{ key: ",", ctrlKey: true }, "settings"],
+      [{ key: "M", ctrlKey: true, shiftKey: true }, "multiexec"],
     ];
     expect(new Set(shortcuts.map(s => s.shortcut)).size).toBe(shortcuts.length);
     expect(new Set(shortcuts.map(s => s.action)).size).toBe(shortcuts.length);

@@ -11,7 +11,15 @@ import { createPromptCommandSender } from "../lib/promptCommand";
 import { selectedTheme, type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
 
+import { terminalWriters } from "../lib/multiExec";
+import { MonitorBar } from "./MonitorBar";
+
 interface Props {
+  visible?: boolean;
+  monitoringSession?: number;
+  onInput?: (id: number, data: string, pasted: boolean) => void;
+  gridFooter?: React.ReactNode;
+  exited?: boolean;
   preferences: Settings;
   id: number;
   kind: "local" | "wsl" | "ssh";
@@ -30,10 +38,12 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ preferences, id, kind, target, savedSessionId, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
+  const inputRef = useRef(onInput); inputRef.current = onInput;
+  const shownRef = useRef(visible ?? active); shownRef.current = visible ?? active;
   const activeRef = useRef(active);
   activeRef.current = active;
   const callbacks = useRef({ onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts });
@@ -69,8 +79,19 @@ export function TerminalView({ preferences, id, kind, target, savedSessionId, ac
         if (!cancelled) callbacks.current.onCwd(id, cwd);
         return true;
       });
-      const fitVisible = () => { if (!cancelled && activeRef.current && element.clientWidth > 0 && element.clientHeight > 0) fit.fit(); };
-      const input = terminal.onData(data => { if (sessionId !== undefined && !exited) void write(sessionId, data).catch(report); });
+      const fitVisible = () => { if (!cancelled && shownRef.current && element.clientWidth > 0 && element.clientHeight > 0) fit.fit(); };
+      const send = (data: string) => { if (sessionId !== undefined && !exited && !cancelled) void write(sessionId, data).catch(report); };
+      let pasting = false;
+      const paste = (event: ClipboardEvent) => {
+        const text = event.clipboardData?.getData("text/plain");
+        if (text === undefined) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        pasting = true;
+        try { terminal.paste(text); } finally { pasting = false; }
+      };
+      element.addEventListener("paste", paste, true);
+      const input = terminal.onData(data => { if (inputRef.current) inputRef.current(id, data, pasting); else send(data); });
       const resize = terminal.onResize(({ cols, rows }) => { if (sessionId !== undefined && !exited) void resizeSession(sessionId, cols, rows).catch(report); });
       const observer = new ResizeObserver(fitVisible);
       observer.observe(element);
@@ -81,7 +102,7 @@ export function TerminalView({ preferences, id, kind, target, savedSessionId, ac
         promptCommand.receiveData();
       };
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; if (kind === "ssh") callbacks.current.onStatus("SSH-Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; terminalWriters.delete(id); if (kind === "ssh") callbacks.current.onStatus("SSH-Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);
@@ -105,6 +126,7 @@ export function TerminalView({ preferences, id, kind, target, savedSessionId, ac
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
         if (!exited) {
+          terminalWriters.set(id, send);
           callbacks.current.onSession(id, spawnedId);
           void resizeSession(spawnedId, terminal.cols, terminal.rows).catch(report);
           promptCommand.connect(spawnedId);
@@ -122,6 +144,8 @@ export function TerminalView({ preferences, id, kind, target, savedSessionId, ac
       cleanup = () => {
         callbacks.current.onClearPrompts(id);
         if (connecting) void cancelSshConnect(connectToken).catch(() => undefined);
+        element.removeEventListener("paste", paste, true);
+        terminalWriters.delete(id);
         observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); promptCommand.dispose();
         onData.onmessage = () => undefined;
         onExitChannel.onmessage = () => undefined;
@@ -138,7 +162,7 @@ export function TerminalView({ preferences, id, kind, target, savedSessionId, ac
     const current = runtime.current;
     if (!current) return;
     Object.assign(current.terminal.options, { fontFamily: preferences.fontFamily + emojiFallback, fontSize: preferences.fontSize, lineHeight: preferences.lineHeight, cursorStyle: preferences.cursorStyle, cursorBlink: preferences.cursorBlink, scrollback: preferences.scrollback, theme: selectedTheme(preferences) });
-    if (activeRef.current) current.fit.fit();
+    if (shownRef.current) current.fit.fit();
   }, [preferences]);
 
   useEffect(() => {
@@ -147,5 +171,7 @@ export function TerminalView({ preferences, id, kind, target, savedSessionId, ac
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
-  return <section id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""}`} hidden={!active}><div className="terminal-container" ref={container} /></section>;
+  useEffect(() => { if (visible ?? active) { const frame = requestAnimationFrame(() => runtime.current?.fit.fit()); return () => cancelAnimationFrame(frame); } }, [visible, active, monitoringSession, gridFooter]);
+
+  return <section id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}><div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}</section>;
 }

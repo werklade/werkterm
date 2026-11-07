@@ -30,6 +30,7 @@ import { browserForEditor, editorFileKey, sourceForEditorOpen } from "./lib/tabS
 import { useModal } from "./components/useModal";
 import "./styles/theme.css";
 import "./App.css";
+import { gridColumns, inputTargets, pasteLines, requiresPasteConfirmation, terminalWriters } from "./lib/multiExec";
 
 const TerminalView = lazy(() => import("./components/TerminalView").then(module => ({ default: module.TerminalView })));
 
@@ -58,6 +59,10 @@ function declinePrompt(prompt: SshPrompt) {
 }
 
 export default function App() {
+  const [multiExec, setMultiExec] = useState(false);
+  const beforeMultiExec = useRef<number | null>(null);
+  const [unchecked, setUnchecked] = useState<Set<number>>(() => new Set());
+  const [pasteRequest, setPasteRequest] = useState<{ lines: number; targets: number[]; data: string } | null>(null);
   const [tabs, setTabs] = useState<BrowserTab[]>(() => [{ id: 1, kind: "local", title: `${localTitle()} 1`, exited: false, browserPath: "" }]);
   const [editors, setEditors] = useState<Record<number, EditorTabState>>({});
   const editorsRef = useRef(editors);
@@ -362,6 +367,16 @@ export default function App() {
   const dismissSave = (tabId: number) => setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, saveDismissed: true } : tab));
 
   const showPanel = (index: number) => { setSidebarVisible(true); setSidebarPanel(index); };
+  const toggleMultiExec = () => {
+    if (multiExec) {
+      setMultiExec(false);
+      if (tabs.some(tab => tab.id === beforeMultiExec.current)) setActiveId(beforeMultiExec.current);
+    } else {
+      beforeMultiExec.current = activeId;
+      setUnchecked(new Set());
+      setMultiExec(true);
+    }
+  };
   const action = (name: string) => {
     switch (name) {
       case "local": openTab("local"); break;
@@ -374,6 +389,7 @@ export default function App() {
       case "mobaxterm": case "windterm": setImportSource(name); break;
       case "sidebar": setSidebarVisible(value => !value); break;
       case "browser": showPanel(3); break;
+      case "multiexec": toggleMultiExec(); break;
       case "monitoring": changeSettings({ ...settings, monitoring: !settings.monitoring }); break;
       case "larger": case "smaller": case "resetFont": {
         const delta = name === "larger" ? 1 : -1;
@@ -390,6 +406,16 @@ export default function App() {
       case "about": setHelp("about"); break;
     }
   };
+  const terminals = tabs.filter(tab => tab.kind !== "editor");
+  const gridVisible = multiExec && activeTab?.kind !== "editor";
+  const receiveInput = (focused: number, data: string, pasted: boolean) => {
+    const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
+    const targets = multiExec ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
+    if (!targets.length) return;
+    const lines = pasteLines(data);
+    if (requiresPasteConfirmation(multiExec, pasted, data)) { setPasteRequest(current => current ?? { lines, targets, data }); return; }
+    targets.forEach(id => terminalWriters.get(id)?.(data));
+  };
   const menus: AppMenu[] = [
     { label: "Terminal", mnemonic: 0, items: [
       { label: "Neues lokales Terminal", action: "local", shortcut: "Strg+Umschalt+T" },
@@ -398,19 +424,22 @@ export default function App() {
     ] },
     { label: "Sessions", mnemonic: 0, items: [{ label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungen anzeigen", action: "sessions" }, { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" }] },
     { label: "View", mnemonic: 0, items: [{ label: "Seitenleiste", action: "sidebar", checked: sidebarVisible }, { label: "SSH-Browser anzeigen", action: "browser" }, { label: "Monitoring-Leiste", action: "monitoring", checked: settings.monitoring }, { label: "Schrift größer", action: "larger", shortcut: "Strg+Umschalt+Plus" }, { label: "Schrift kleiner", action: "smaller", shortcut: "Strg+Umschalt+Minus" }, { label: "Schrift Standard", action: "resetFont", shortcut: "Strg+Umschalt+0" }, { label: "Vollbild", action: "fullscreen", shortcut: "F11" }] },
-    { label: "Tools", mnemonic: 1, items: [{ label: "MultiExec", action: "multiexec", disabled: true, tooltip: "folgt" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," }] },
+    { label: "Tools", mnemonic: 1, items: [{ label: "MultiExec", action: "multiexec", checked: multiExec, shortcut: "Strg+Umschalt+M" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," }] },
     { label: "Help", mnemonic: 0, items: [{ label: "Tastenkürzel", action: "shortcuts" }, { label: "Über Werkterm", action: "about" }] },
   ];
   return <div className="app-shell">
     <MenuBar menus={menus} onAction={action} />
     <Toolbar hasWsl={hasWsl} onOpen={openTab} onSession={() => setSessionDialog({})} onTools={() => showPanel(1)} />
     <div className="workspace">
-      {sidebarVisible && <Sidebar active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      {sidebarVisible && <Sidebar onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <TabBar tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
-        <div className="terminal-stack">
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} active={tab.id === activeId}
+        {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
+        <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} active={tab.id === activeId} visible={gridVisible || tab.id === activeId} exited={tab.exited}
+            onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
+            gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
@@ -424,7 +453,11 @@ export default function App() {
         </div>
       </main>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite"><span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    {pasteRequest && <MultiPasteDialog lines={pasteRequest.lines} count={pasteRequest.targets.length} onAnswer={send => {
+      if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data); });
+      setPasteRequest(null);
+    }} />}
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClose={() => setSettingsOpen(false)} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
     {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
@@ -436,4 +469,13 @@ export default function App() {
     {currentPrompt?.prompt.type === "hostKey" && <HostKeyDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
     {currentPrompt?.prompt.type === "secret" && <SecretDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
   </div>;
+}
+
+function MultiPasteDialog({ lines, count, onAnswer }: { lines: number; count: number; onAnswer: (send: boolean) => void }) {
+  const dialog = useModal();
+  useEffect(() => { dialog.current?.querySelector<HTMLButtonElement>("[autofocus]")?.focus(); }, [dialog]);
+  return <dialog ref={dialog} className="ssh-dialog" aria-modal="true" aria-labelledby="multi-paste-title" onCancel={e => { e.preventDefault(); onAnswer(false); }}>
+    <h2 id="multi-paste-title">{lines} Zeilen an {count} Terminals senden?</h2>
+    <div className="dialog-actions"><button autoFocus onClick={() => onAnswer(false)}>Abbrechen</button><button onClick={() => onAnswer(true)}>Senden</button></div>
+  </dialog>;
 }

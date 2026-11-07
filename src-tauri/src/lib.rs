@@ -35,6 +35,8 @@ pub fn run() {
             commands::pty_resize,
             commands::pty_kill,
             commands::available_shells,
+            ssh::monitor::ssh_monitor_start,
+            ssh::monitor::ssh_monitor_stop,
             commands::ssh_connect,
             commands::ssh_cancel_connect,
             commands::ssh_answer_host_key,
