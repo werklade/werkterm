@@ -32,8 +32,12 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
     const element = bar.current, box = diskBox.current;
     if (!element || !box) return;
     for (const child of Array.from(box.children) as HTMLElement[]) if (child.dataset.mount) widths.current.set(child.dataset.mount, child.offsetWidth + 12);
-    const others = element.scrollWidth - box.offsetWidth;
-    const available = element.clientWidth - others - 8;
+    // Space left for disks = bar width minus padding, the other fields and the gaps between them.
+    const style = getComputedStyle(element);
+    const gap = parseFloat(style.columnGap) || 0;
+    const fields = Array.from(element.children) as HTMLElement[];
+    const others = fields.filter(child => child !== box).reduce((sum, child) => sum + child.offsetWidth, 0) + gap * Math.max(0, fields.length - 1);
+    const available = element.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0) - others - 4;
     const next = fittingCount(disks.map(d => widths.current.get(d.mount) ?? 150), available);
     if (next !== shown) setShown(next);
   });
