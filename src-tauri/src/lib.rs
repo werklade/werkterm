@@ -8,12 +8,14 @@ pub mod secrets;
 pub mod sessions;
 pub mod ssh;
 mod terminal_colors;
+pub mod tunnels;
 
 use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Arc::new(tunnels::TunnelManager::default()))
         .manage(Arc::new(keygen::KeygenState::default()))
         .manage(Arc::new(editor::EditorDocs::default()))
         .setup(|app| {
@@ -27,6 +29,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            tunnels::tunnels_list,
+            tunnels::tunnel_save,
+            tunnels::tunnel_delete,
+            tunnels::tunnel_start,
+            tunnels::tunnel_stop,
+            tunnels::tunnel_list_status,
+            tunnels::tunnel_autostart,
             keygen::keygen_begin,
             keygen::keygen_generate,
             keygen::keygen_save,
@@ -84,9 +93,26 @@ pub fn run() {
             eprintln!("error while running tauri application: {error}");
             std::process::exit(1);
         })
-        .run(|_, event| {
+        .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                use tauri::Manager;
+                let manager = app.state::<Arc<tunnels::TunnelManager>>();
+                tauri::async_runtime::block_on(manager.stop_all());
                 editor::clear_cache();
             }
         });
+}
+
+// The unit-test executable does not inherit Tauri's Windows application manifest.
+// Native dialog symbols pulled in by the prompt lifecycle need Common Controls v6.
+#[cfg(all(test, windows))]
+mod windows_test_manifest {
+    macro_rules! manifest_dependency {
+        ($directive:literal) => {
+            #[used]
+            #[unsafe(link_section = ".drectve")]
+            static MANIFEST_DEPENDENCY: [u8; $directive.len()] = *$directive;
+        };
+    }
+    manifest_dependency!(b" /MANIFESTDEPENDENCY:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\" ");
 }

@@ -1,0 +1,13 @@
+.tunnel-dialog { width: min(1200px, 95vw); max-width: 95vw; }
+.tunnel-dialog td { max-width: 240px; overflow-wrap: anywhere; }
+.tunnel-dialog td button { margin: 2px; }
+.tunnel-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.tunnel-editor > h3, .tunnel-editor > p, .tunnel-editor > .dialog-actions, .tunnel-warning { grid-column: 1 / -1; }
+.tunnel-editor label { display: flex; gap: 8px; align-items: center; }
+.tunnel-editor input:not([type=checkbox]), .tunnel-editor select { flex: 1; min-width: 0; }
+.tunnel-warning { padding: 12px; border: 1px solid #e6a23c; background: #e6a23c22; }
+.tunnel-warning label { margin-top: 8px; }
+.tunnel-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #888; margin-right: 6px; }
+.tunnel-dot.running { background: #52bd73; }
+.tunnel-dot.connecting, .tunnel-dot.reconnecting { background: #e6a23c; }
+.tunnel-dot.error { background: #ed6464; }

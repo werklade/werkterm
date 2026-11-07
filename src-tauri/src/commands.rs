@@ -81,27 +81,34 @@ impl PendingPrompts {
         Some(PendingPrompt {
             id,
             pending: Arc::clone(self),
+            closed: None,
         })
     }
 }
 
 struct PendingPrompt {
+    closed: Option<tauri::AppHandle>,
     id: u32,
     pending: Arc<PendingPrompts>,
 }
 
 impl Drop for PendingPrompt {
     fn drop(&mut self) {
+        if let Some(app) = &self.closed {
+            use tauri::Emitter;
+            let _ = app.emit("tunnel-prompt-closed", self.id);
+        }
         if let Ok(mut answers) = self.pending.answers.lock() {
             answers.remove(&self.id);
         }
     }
 }
 
-struct TauriPrompter {
-    connect_token: u32,
-    pending: Arc<PendingPrompts>,
-    channel: Channel<SshPrompt>,
+pub(crate) struct TauriPrompter {
+    pub(crate) closed: Option<tauri::AppHandle>,
+    pub(crate) connect_token: u32,
+    pub(crate) pending: Arc<PendingPrompts>,
+    pub(crate) channel: Channel<SshPrompt>,
 }
 
 impl Prompter for TauriPrompter {
@@ -115,11 +122,13 @@ impl Prompter for TauriPrompter {
         let token = self.connect_token;
         let pending = Arc::clone(&self.pending);
         let channel = self.channel.clone();
+        let closed = self.closed.clone();
         Box::pin(async move {
             let (sender, receiver) = oneshot::channel();
-            let Some(request) = pending.register(token, PendingAnswer::HostKey(sender)) else {
+            let Some(mut request) = pending.register(token, PendingAnswer::HostKey(sender)) else {
                 return false;
             };
+            request.closed = closed;
             if channel
                 .send(SshPrompt::HostKey {
                     request_id: request.id,
@@ -146,9 +155,11 @@ impl Prompter for TauriPrompter {
         let token = self.connect_token;
         let pending = Arc::clone(&self.pending);
         let channel = self.channel.clone();
+        let closed = self.closed.clone();
         Box::pin(async move {
             let (sender, receiver) = oneshot::channel();
-            let request = pending.register(token, PendingAnswer::Secret(sender))?;
+            let mut request = pending.register(token, PendingAnswer::Secret(sender))?;
+            request.closed = closed;
             let kind = match kind {
                 SecretKind::Username => "username",
                 SecretKind::Password => "password",
@@ -311,6 +322,7 @@ pub async fn ssh_connect(
         crate::sessions::validate_target(session, &target)?;
     }
     let prompter = Arc::new(TauriPrompter {
+        closed: None,
         connect_token,
         pending: Arc::clone(pending.inner()),
         channel: on_prompt,

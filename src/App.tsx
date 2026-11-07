@@ -1,3 +1,6 @@
+import { TunnelDialog, TunnelConfirmDialog } from "./components/TunnelDialog";
+import { isLoopback, type Tunnel, type TunnelStatus } from "./lib/tunnels";
+import { listen } from "@tauri-apps/api/event";
 import { SshCloseDialog } from "./components/SshCloseDialog";
 import { activeSshTabs, shouldConfirmSsh, closeAfterSsh } from "./lib/sshClose";
 import { shouldFocusMenu } from "./lib/menu";
@@ -108,6 +111,29 @@ export default function App() {
   const [hasWsl, setHasWsl] = useState(false);
   const [shellsLoaded, setShellsLoaded] = useState(false);
   const [transfer, setTransfer] = useState<QueueState>(null);
+  const [tunnelConfirmation, setTunnelConfirmation] = useState<((accepted: boolean) => void) | null>(null);
+  const [tunnelsOpen, setTunnelsOpen] = useState(false);
+  const [tunnels, setTunnels] = useState<Tunnel[]>([]);
+  const [tunnelStatuses, setTunnelStatuses] = useState<TunnelStatus[]>([]);
+  const tunnelAutostart = useRef(false);
+  const activeTunnels = tunnelStatuses.filter(s => ["running", "connecting", "reconnecting"].includes(s.state)).length;
+  const reloadTunnels = async () => { setTunnels(await invoke<Tunnel[]>("tunnels_list")); setTunnelStatuses(await invoke<TunnelStatus[]>("tunnel_list_status")); };
+  const tunnelPromptChannel = () => { const channel = new Channel<SshPrompt>(); channel.onmessage = prompt => queuePrompt(-1, prompt); return channel; };
+  const startTunnel = async (t: Tunnel) => {
+    const allowPublic = !isLoopback(t.bind_address) ? await new Promise<boolean>(resolve => setTunnelConfirmation(() => resolve)) : false;
+    if (!isLoopback(t.bind_address) && !allowPublic) return;
+    await invoke("tunnel_start", { id: t.id, allowPublic, onPrompt: tunnelPromptChannel() });
+  };
+  useEffect(() => {
+    let disposed = false;
+    const subscription = listen<TunnelStatus>("tunnel-status", event => { if (!disposed) setTunnelStatuses(current => [...current.filter(s => s.id !== event.payload.id), event.payload]); });
+    void subscription.then(async () => {
+      if (disposed) return;
+      await reloadTunnels();
+      if (!tunnelAutostart.current) { tunnelAutostart.current = true; await invoke("tunnel_autostart", { onPrompt: tunnelPromptChannel() }); }
+    }).catch(reason => setStatus(String(reason)));
+    return () => { disposed = true; void subscription.then(unlisten => unlisten()); };
+  }, []);
   const [status, setStatus] = useState("Bereit");
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [sessionDialog, setSessionDialog] = useState<{ session?: SavedSession; tabId?: number; preferPassword?: boolean } | null>(null);
@@ -310,12 +336,13 @@ export default function App() {
   };
   const askSshClose = async (ids?: number[]): Promise<boolean> => {
     const candidates = tabsRef.current.filter(tab => !ids || ids.includes(tab.id));
-    if (!shouldConfirmSsh(candidates, settingsRef.current.confirmCloseSsh)) return true;
+    const tunnelCount = ids ? 0 : (await invoke<TunnelStatus[]>("tunnel_list_status").catch(() => tunnelStatuses)).filter(s => ["running", "connecting", "reconnecting"].includes(s.state)).length;
+    if (!shouldConfirmSsh(candidates, settingsRef.current.confirmCloseSsh) && !(tunnelCount && settingsRef.current.confirmCloseSsh)) return true;
     const active = activeSshTabs(candidates);
     const transfers = active.reduce((count, tab) => count + transferQueue.countSession(tab.sessionId!), 0);
-    const target = parseQuickConnect(active[0].target ?? "");
-    const destination = target ? `${target.user}@${target.host}` : active[0].title;
-    const message = ids ? `Verbindung zu ${destination} ist aktiv. Wirklich trennen?` : `${active.length} aktive SSH-Verbindung(en) werden getrennt. Beenden?`;
+    const target = parseQuickConnect(active[0]?.target ?? "");
+    const destination = target ? `${target.user}@${target.host}` : active[0]?.title ?? "SSH";
+    const message = ids ? `Verbindung zu ${destination} ist aktiv. Wirklich trennen?` : `${active.length} aktive SSH-Verbindung(en) werden getrennt und ${tunnelCount} Tunnel werden gestoppt. Beenden?`;
     return new Promise(resolve => setSshClose({ message, transfers, quitting: !ids, answer: (accepted, never) => {
       if (never) changeSettings({ ...settingsRef.current, confirmCloseSsh: false });
       setSshClose(null); resolve(accepted);
@@ -422,7 +449,7 @@ export default function App() {
     }
   };
   const queuePrompt = useCallback((tabId: number, prompt: SshPrompt) => {
-    if (!liveTabs.current.has(tabId)) {
+    if (tabId !== -1 && !liveTabs.current.has(tabId)) {
       void declinePrompt(prompt).catch(() => undefined);
       return;
     }
@@ -439,6 +466,13 @@ export default function App() {
       : answerSecret(item.prompt.requestId, typeof value === "string" ? value : null);
     void pending.catch(() => setStatus("SSH-Rückfrage konnte nicht beantwortet werden."));
   };
+  useEffect(() => {
+    const subscription = listen<number>("tunnel-prompt-closed", event => {
+      promptQueue.current = promptQueue.current.filter(item => item.prompt.requestId !== event.payload);
+      setPrompts([...promptQueue.current]);
+    });
+    return () => { void subscription.then(unlisten => unlisten()); };
+  }, []);
   const currentPrompt = prompts[0];
   const activeTab = tabs.find(tab => tab.id === activeId) ?? null;
   const activeEditor = activeId === null ? undefined : editors[activeId];
@@ -486,6 +520,7 @@ export default function App() {
       case "wsl": if (hasWsl) openTab("wsl"); break;
       case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Quick connect"]')?.focus()); break;
       case "close": if (activeId !== null) closeTab(activeId); break;
+      case "tunnels": setTunnelsOpen(true); void reloadTunnels().catch(reason => setStatus(String(reason))); break;
       case "quit": void closeRequest.current(); break;
       case "newSession": setSessionDialog({}); break;
       case "sessions": showPanel(0); break;
@@ -567,11 +602,13 @@ export default function App() {
         </div>
       </main>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
     {pasteRequest && <MultiPasteDialog lines={pasteRequest.lines} count={pasteRequest.targets.length} onAnswer={send => {
       if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data, true); });
       setPasteRequest(null);
     }} />}
+    {tunnelsOpen && <TunnelDialog sessions={savedSessions} tunnels={tunnels} statuses={tunnelStatuses} reload={reloadTunnels} start={startTunnel} onClose={() => setTunnelsOpen(false)} />}
+    {tunnelConfirmation && <TunnelConfirmDialog onAnswer={accepted => { setTunnelConfirmation(null); tunnelConfirmation(accepted); }} />}
     {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}

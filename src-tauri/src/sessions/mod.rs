@@ -13,7 +13,7 @@ use std::{
 use tauri::Manager;
 
 static SERIAL: AtomicU64 = AtomicU64::new(0);
-static STORAGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static STORAGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -108,7 +108,7 @@ struct SessionFile {
     sessions: Vec<SavedSession>,
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -420,6 +420,7 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
     let path = config_path(&app)?;
     let mut sessions = read_file(path.clone()).await?;
     validate_delete(&id, &sessions)?;
+    crate::tunnels::protect_session(&app, &id)?;
     let delete_secret = sessions.iter().any(|session| session.id == id);
     sessions.retain(|session| session.id != id);
     persist(path, sessions).await?;
