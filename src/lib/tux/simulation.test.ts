@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createTux, IdleClock, platformsFromLines, stepTux } from "./simulation";
+import { groundAhead, MAX_FALL, createTux, IdleClock, platformsFromLines, stepTux } from "./simulation";
 import { sprites } from "./sprites";
 it("extracts contiguous non-space platforms and empty rows", () => {
   expect(platformsFromLines(["  abc d ", "   ", "x"])).toEqual([{ start: 2, end: 5, y: 0 }, { start: 6, end: 7, y: 0 }, { start: 0, end: 1, y: 2 }]);
@@ -55,4 +55,18 @@ it("resets inactivity for input and output", () => {
 });
 it("keeps every sprite on the same 16 by 16 raster", () => {
   for (const sprite of Object.values(sprites)) { expect(sprite).toHaveLength(16); for (const row of sprite) expect(row).toHaveLength(16); }
+});
+it("flaps to cap the fall speed", () => {
+  const tux = createTux(1);
+  for (let i = 0; i < 20; i++) stepTux(tux, .1, [], 100);
+  expect(tux.vy).toBe(MAX_FALL);
+});
+it("slides on the belly across long stretches and stands up before the edge", () => {
+  const platforms = platformsFromLines(["x".repeat(40)]);
+  expect(groundAhead(platforms, [], 0, 5, 1)).toBe(34);
+  const tux = createTux(2, 1); Object.assign(tux, { state: "walk", y: 0, floor: 0 });
+  stepTux(tux, .05, platforms, 10, () => 1);
+  expect(tux.sliding).toBe(true);
+  for (let i = 0; i < 200 && tux.state === "walk" && tux.sliding; i++) stepTux(tux, .05, platforms, 10, () => 1);
+  expect(tux.sliding).toBe(false); expect(tux.state).toBe("walk"); expect(tux.x).toBeGreaterThan(30);
 });
