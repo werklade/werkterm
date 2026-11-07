@@ -1,4 +1,4 @@
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -153,7 +153,73 @@ pub fn program_in_path(name: &str) -> bool {
 struct Session {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    #[cfg(not(unix))]
+    killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    #[cfg(unix)]
+    control: Arc<UnixControl>,
+}
+
+#[cfg(unix)]
+#[derive(Default)]
+struct UnixControl {
+    stop: std::sync::atomic::AtomicBool,
+    kill: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(unix)]
+fn signal_shell_group(pid: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> {
+    // The unreaped child owns this PID. Never target our own or an unrelated group.
+    unsafe {
+        if pid <= 1 || libc::getpgid(pid) != pid || libc::getpgrp() == pid {
+            return Err(std::io::Error::other("Invalid PTY shell process group"));
+        }
+        if libc::kill(-pid, signal) == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_unix(mut reader: std::fs::File, control: &UnixControl, on_data: &mut dyn FnMut(Vec<u8>)) {
+    use std::os::fd::AsRawFd;
+    use std::time::{Duration, Instant};
+    let mut deadline = None;
+    let mut buffer = [0; 8192];
+    loop {
+        if control.stop.load(Ordering::Acquire) && deadline.is_none() {
+            deadline = Some(Instant::now() + Duration::from_millis(200));
+        }
+        if deadline.is_some_and(|end| Instant::now() >= end) {
+            break;
+        }
+        let mut fd = libc::pollfd {
+            fd: reader.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // Only this thread reads the duplicated master, so readiness cannot be
+        // consumed by another reader between poll and read.
+        let ready = unsafe { libc::poll(&mut fd, 1, 20) };
+        if ready < 0 {
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            break;
+        }
+        if ready == 0 {
+            continue;
+        }
+        if fd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
+            break;
+        }
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => on_data(buffer[..count].to_vec()),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
 }
 
 pub struct PtyManager {
@@ -202,7 +268,27 @@ impl PtyManager {
             .map_err(|_| PtyError::IdExhausted)?;
         let mut sessions = self.sessions()?;
         let pair = native_pty_system().openpty(size).map_err(operation)?;
+        #[cfg(not(unix))]
         let mut reader = pair.master.try_clone_reader().map_err(operation)?;
+        #[cfg(unix)]
+        let reader = {
+            use std::os::fd::BorrowedFd;
+            let fd = pair
+                .master
+                .as_raw_fd()
+                .ok_or_else(|| operation("Missing PTY FD"))?;
+            // Duplicate ownership: dropping the session cannot invalidate the reader FD.
+            let owned = unsafe { BorrowedFd::borrow_raw(fd) }
+                .try_clone_to_owned()
+                .map_err(operation)?;
+            std::fs::File::from(owned)
+        };
+        #[cfg(unix)]
+        let control = Arc::new(UnixControl::default());
+        #[cfg(unix)]
+        let reader_control = Arc::clone(&control);
+        #[cfg(unix)]
+        let waiter_control = Arc::clone(&control);
         let writer = pair.master.take_writer().map_err(operation)?;
         let mut command = CommandBuilder::new(&spec.program);
         command.args(&spec.args);
@@ -219,11 +305,16 @@ impl PtyManager {
         let reader_thread = std::thread::Builder::new()
             .name(format!("pty-reader-{id}"))
             .spawn(move || {
-                let mut buffer = [0; 8192];
-                loop {
-                    match reader.read(&mut buffer) {
-                        Ok(0) | Err(_) => break,
-                        Ok(count) => on_data(buffer[..count].to_vec()),
+                #[cfg(unix)]
+                read_unix(reader, &reader_control, &mut on_data);
+                #[cfg(not(unix))]
+                {
+                    let mut buffer = [0; 8192];
+                    loop {
+                        match reader.read(&mut buffer) {
+                            Ok(0) | Err(_) => break,
+                            Ok(count) => on_data(buffer[..count].to_vec()),
+                        }
                     }
                 }
                 let _ = reader_done.send(());
@@ -236,8 +327,52 @@ impl PtyManager {
             .name(format!("pty-waiter-{id}"))
             .spawn(move || {
                 let Ok(mut child) = child_receiver.recv() else {
+                    #[cfg(unix)]
+                    {
+                        waiter_control.stop.store(true, Ordering::Release);
+                        let _ = reader_thread.join();
+                    }
                     return;
                 };
+                #[cfg(unix)]
+                let status = {
+                    let mut kill_deadline = None;
+                    loop {
+                        // Signals are sent before try_wait can reap and release the PID.
+                        if waiter_control.kill.load(Ordering::Acquire)
+                            && let Some(pid) = child
+                                .process_id()
+                                .and_then(|pid| libc::pid_t::try_from(pid).ok())
+                        {
+                            if kill_deadline.is_none() {
+                                let _ = signal_shell_group(pid, libc::SIGHUP);
+                                kill_deadline = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(2),
+                                );
+                            } else if kill_deadline
+                                .is_some_and(|end| std::time::Instant::now() >= end)
+                            {
+                                let _ = signal_shell_group(pid, libc::SIGKILL);
+                            }
+                        }
+                        match child.try_wait() {
+                            Ok(Some(status)) => break Some(status.exit_code()),
+                            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                            Err(_) => {
+                                if let Some(pid) = child
+                                    .process_id()
+                                    .and_then(|pid| libc::pid_t::try_from(pid).ok())
+                                {
+                                    let _ = signal_shell_group(pid, libc::SIGKILL);
+                                }
+                                break child.wait().ok().map(|status| status.exit_code());
+                            }
+                        }
+                    }
+                };
+                #[cfg(unix)]
+                waiter_control.stop.store(true, Ordering::Release);
+                #[cfg(not(unix))]
                 let status = child.wait().ok().map(|status| status.exit_code());
                 // Close ConPTY outside the lock while the reader drains its pipe.
                 let removed = match session_map.lock() {
@@ -246,15 +381,25 @@ impl PtyManager {
                 };
                 drop(removed);
                 // Descendants may retain the Unix slave after the shell has exited.
+                #[cfg(not(unix))]
                 if reader_finished
                     .recv_timeout(std::time::Duration::from_secs(1))
                     .is_ok()
                 {
                     let _ = reader_thread.join();
                 }
+                #[cfg(unix)]
+                {
+                    let _ = reader_finished.recv();
+                    let _ = reader_thread.join();
+                }
                 on_exit(status);
             })
-            .map_err(operation)?;
+            .map_err(|error| {
+                #[cfg(unix)]
+                control.stop.store(true, Ordering::Release);
+                operation(error)
+            })?;
         let result = pair.slave.spawn_command(command);
         drop(pair.slave);
         let child = result.map_err(operation)?;
@@ -263,7 +408,10 @@ impl PtyManager {
             Session {
                 master: pair.master,
                 writer: Arc::new(Mutex::new(writer)),
+                #[cfg(not(unix))]
                 killer: child.clone_killer(),
+                #[cfg(unix)]
+                control,
             },
         );
         drop(sessions);
@@ -298,11 +446,22 @@ impl PtyManager {
     }
 
     pub fn kill(&self, id: u32) -> Result<(), PtyError> {
-        let mut session = self
-            .sessions()?
-            .remove(&id)
-            .ok_or(PtyError::UnknownSession(id))?;
-        session.killer.kill().map_err(operation)
+        #[cfg(unix)]
+        {
+            let sessions = self.sessions()?;
+            let session = sessions.get(&id).ok_or(PtyError::UnknownSession(id))?;
+            session.control.stop.store(true, Ordering::Release);
+            session.control.kill.store(true, Ordering::Release);
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            let mut session = self
+                .sessions()?
+                .remove(&id)
+                .ok_or(PtyError::UnknownSession(id))?;
+            session.killer.kill().map_err(operation)
+        }
     }
 }
 
@@ -311,6 +470,129 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[cfg(unix)]
+    struct UnixTestCleanup {
+        manager: Arc<PtyManager>,
+        id: u32,
+        output: Arc<Mutex<Vec<u8>>>,
+    }
+
+    #[cfg(unix)]
+    impl Drop for UnixTestCleanup {
+        fn drop(&mut self) {
+            let _ = self.manager.kill(self.id);
+            // The background test prints its child PID before exiting. Clean it
+            // even if a timeout assertion fails; it is not our waitable child.
+            let output = self.output.lock().unwrap();
+            for line in String::from_utf8_lossy(&output).lines() {
+                if let Some(pid) = line
+                    .trim()
+                    .strip_prefix("background=")
+                    .and_then(|pid| pid.parse::<libc::pid_t>().ok())
+                    .filter(|pid| *pid > 1)
+                {
+                    unsafe {
+                        libc::kill(pid, libc::SIGKILL);
+                    }
+                }
+            }
+            drop(output);
+            let deadline = std::time::Instant::now() + Duration::from_secs(4);
+            while self.manager.sessions().unwrap().contains_key(&self.id)
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn unix_test_session(script: &str) -> (UnixTestCleanup, mpsc::Receiver<Option<u32>>) {
+        let manager = Arc::new(PtyManager::default());
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let received = Arc::clone(&output);
+        let (tx, rx) = mpsc::channel();
+        let id = manager
+            .spawn(
+                &ShellSpec {
+                    program: "/bin/sh".to_owned(),
+                    args: vec!["-c".to_owned(), script.to_owned()],
+                    env: vec![],
+                },
+                80,
+                24,
+                Box::new(move |bytes| received.lock().unwrap().extend(bytes)),
+                Box::new(move |status| {
+                    let _ = tx.send(status);
+                }),
+            )
+            .unwrap();
+        (
+            UnixTestCleanup {
+                manager,
+                id,
+                output,
+            },
+            rx,
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_escalates_when_shell_ignores_hup() {
+        let (cleanup, exit) = unix_test_session("trap '' HUP; echo ready; while :; do :; done");
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !String::from_utf8_lossy(&cleanup.output.lock().unwrap()).contains("ready") {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Shell did not become ready"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started = std::time::Instant::now();
+        cleanup.manager.kill(cleanup.id).unwrap();
+        exit.recv_timeout(Duration::from_secs(4))
+            .expect("SIGHUP-ignoring shell survived escalation");
+        assert!(started.elapsed() >= Duration::from_secs(2));
+        assert!(
+            !cleanup
+                .manager
+                .sessions()
+                .unwrap()
+                .contains_key(&cleanup.id)
+        );
+        assert!(matches!(
+            exit.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_exit_joins_reader_with_background_slave_open() {
+        let (cleanup, exit) =
+            unix_test_session("trap '' HUP; sleep 30 & echo background=$!; exit 0");
+        // The production watcher joins the reader before invoking on_exit. This
+        // timeout therefore also checks that the reader join completes.
+        assert_eq!(
+            exit.recv_timeout(Duration::from_secs(3))
+                .expect("Reader failed to join"),
+            Some(0)
+        );
+        assert!(String::from_utf8_lossy(&cleanup.output.lock().unwrap()).contains("background="));
+        assert!(
+            !cleanup
+                .manager
+                .sessions()
+                .unwrap()
+                .contains_key(&cleanup.id)
+        );
+        assert!(matches!(
+            exit.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
 
     #[test]
     fn resolves_all_shell_combinations() {
