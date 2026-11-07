@@ -16,11 +16,13 @@ interface Props {
   onSaved: (session: SavedSession) => void;
 }
 
+const standardBauds = [300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 export function SessionDialog({ session, preferPassword = false, sessions, onClose, onSaved }: Props) {
   const dialog = useModal();
   const id = useId();
   const [kind, setKind] = useState(session?.kind ?? "ssh");
   const [serial, setSerial] = useState<SerialConfig>(session?.serial ?? { ...defaultSerial });
+  const [baudCustom, setBaudCustom] = useState(() => !standardBauds.includes(serial.baud));
   const [ports, setPorts] = useState<{ name: string; description: string }[]>([]);
   const refreshPorts = () => { void invoke<{ name: string; description: string }[]>("serial_ports").then(setPorts, reason => setError(String(reason))); };
   useEffect(() => { if (kind === "serial") refreshPorts(); }, [kind]);
@@ -104,8 +106,9 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {kind === "serial" && <>
           <label>Port<div className="session-path-field"><input required list={`${id}-ports`} value={serial.device} placeholder="/dev/ttyUSB0 oder COM3" onChange={e => setSerial({ ...serial, device: e.target.value })}/><button type="button" onClick={refreshPorts}>Aktualisieren</button></div></label>
           <datalist id={`${id}-ports`}>{ports.map(port => <option key={port.name} value={port.name}>{port.description}</option>)}</datalist>
-          <label>Baudrate<input required type="number" min={1} max={4294967295} list={`${id}-bauds`} value={serial.baud} onChange={e => setSerial({ ...serial, baud: Number(e.target.value) })}/></label>
-          <datalist id={`${id}-bauds`}>{[300,600,1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600].map(n => <option key={n} value={n}/>)}</datalist>
+          <label>Baudrate<select value={baudCustom ? "custom" : String(serial.baud)} onChange={e => { const custom = e.target.value === "custom"; setBaudCustom(custom); if (!custom) setSerial({ ...serial, baud: Number(e.target.value) }); }}>
+            {standardBauds.map(n => <option key={n} value={n}>{n}</option>)}<option value="custom">Andere…</option></select></label>
+          {baudCustom && <label>Eigene Baudrate<input required type="number" min={1} max={4294967295} value={serial.baud} onChange={e => setSerial({ ...serial, baud: Number(e.target.value) })}/></label>}
           <label>Datenbits<select value={serial.data_bits} onChange={e => setSerial({ ...serial, data_bits: Number(e.target.value) })}>{[5,6,7,8].map(n => <option key={n}>{n}</option>)}</select></label>
           <label>Parität<select value={serial.parity} onChange={e => setSerial({ ...serial, parity: e.target.value as SerialConfig["parity"] })}><option value="none">Keine</option><option value="odd">Ungerade</option><option value="even">Gerade</option></select></label>
           <label>Stoppbits<select value={serial.stop_bits} onChange={e => setSerial({ ...serial, stop_bits: Number(e.target.value) })}><option>1</option><option>2</option></select></label>
