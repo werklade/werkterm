@@ -27,6 +27,17 @@ it("digs into the line below and lands on its text", () => {
   stepTux(tux, .05, platforms, 10); expect(tux.state).toBe("fall");
   stepTux(tux, .05, platforms, 10); expect(tux.state).toBe("walk"); expect(tux.floor).toBe(1);
 });
+it("leaves a hole that later walkers fall through", () => {
+  const platforms = platformsFromLines(["abcdefghijk"]);
+  const holes: import("./simulation").Hole[] = [];
+  const digger = createTux(4); Object.assign(digger, { state: "dig", y: 0, floor: 0, age: .95 });
+  stepTux(digger, .05, platforms, 10, Math.random, holes);
+  expect(holes).toEqual([{ row: 0, start: 3, end: 6 }]);
+  expect(platforms).toHaveLength(1);
+  const walker = createTux(2); Object.assign(walker, { state: "walk", y: 0, floor: 0, direction: 1 });
+  for (let i = 0; i < 10 && walker.state === "walk"; i++) stepTux(walker, .1, platforms, 10, () => 1, holes);
+  expect(walker.state).toBe("fall"); expect(walker.x).toBeLessThan(6);
+});
 it("resets inactivity for input and output", () => {
   const clock = new IdleClock(0);
   expect(clock.remaining(60000, 60000)).toBe(0);

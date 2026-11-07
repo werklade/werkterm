@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { createTux, IdleClock, platformsFromLines, stepTux } from "../lib/tux/simulation";
+import { createTux, IdleClock, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
@@ -20,6 +20,7 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
     let last = 0;
     let tuxes = [createTux(0)];
     let platforms = platformsFromLines([]);
+    let holes: Hole[] = [];
     let width = 0, height = 0, cellWidth = 0, cellHeight = 0;
     const available = () => visible && document.visibilityState === "visible" && target.getClientRects().length > 0 && target.clientWidth > 0 && target.clientHeight > 0;
     const clear = () => { running = false; cancelAnimationFrame(frame); clearTimeout(timer); context.clearRect(0, 0, surface.width, surface.height); };
@@ -28,15 +29,31 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
       if (now - last < 1000 / 30) { frame = requestAnimationFrame(draw); return; }
       const dt = Math.min((now - last) / 1000, .1); last = now;
       context.clearRect(0, 0, width, height);
+      const ground = terminal.options.theme?.background ?? "#000000";
+      // Dug holes hide the text beneath them with ragged, dirt-lined edges.
+      const hole = (h: Hole, depth: number) => {
+        const left = Math.max(0, h.start) * cellWidth, right = Math.min(terminal.cols, h.end) * cellWidth, top = h.row * cellHeight;
+        if (right <= left) return;
+        context.fillStyle = ground; context.fillRect(left, top, right - left, cellHeight * depth);
+        context.fillStyle = "#7a5a36";
+        for (let px = left; px < right; px += 3) {
+          const bite = ((Math.floor(px) * 7 + h.row * 13) % 5) / 5;
+          context.fillRect(px, top + cellHeight * depth - 2 - bite * 2, 2, 2);
+          if (bite > .5) context.fillRect(px, top, 2, 2);
+        }
+        context.fillRect(left, top, 2, cellHeight * depth); context.fillRect(right - 2, top, 2, cellHeight * depth);
+      };
+      holes.forEach(h => hole(h, 1));
       for (let i = 0; i < tuxes.length; i++) {
         const tux = tuxes[i];
         if (motion.matches) { tux.x = terminal.cols / 2; tux.y = terminal.rows; tux.state = "walk"; }
-        else stepTux(tux, dt, platforms, terminal.rows);
+        else stepTux(tux, dt, platforms, terminal.rows, Math.random, holes);
         if (tux.wait > 0) continue;
         const pixel = Math.max(1, Math.floor(cellHeight * 2 / 16));
         const size = pixel * 16;
         const x = tux.x * cellWidth, y = (tux.y + (tux.state === "dig" ? Math.min(1, tux.age / .9) : 0)) * cellHeight;
         const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "walk" ? (Math.floor(tux.age * 7) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
+        if (tux.state === "dig") { const col = Math.floor(tux.x); hole({ row: tux.floor, start: col - 1, end: col + 2 }, Math.min(1, tux.age / .9)); }
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
         sprite.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
@@ -72,6 +89,7 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
       context.setTransform(ratio, 0, 0, ratio, 0, 0); context.imageSmoothingEnabled = false;
       cellWidth = width / terminal.cols; cellHeight = height / terminal.rows;
       platforms = platformsFromLines(Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? ""));
+      holes = [];
       tuxes = Array.from({ length: motion.matches ? 1 : 1 + Math.floor(Math.random() * 3) }, (_, index) => createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, index * (1 + Math.random() * 2)));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);
     };
