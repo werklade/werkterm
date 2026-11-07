@@ -33,3 +33,6 @@ logs/
 # Claude Code (lokal)
 .claude/settings.local.json
 .claude/worktrees/
+
+# Created by the ChatGPT desktop app; Codex instructions live in prompts/
+AGENTS.md
