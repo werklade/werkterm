@@ -3,6 +3,7 @@ name = "linmoba"
 version = "0.1.0"
 description = "LinMoba - SSH/SFTP terminal for Linux"
 authors = ["Marc-Andre Kolski <344019908+Elaktyl@users.noreply.github.com>"]
+license = "GPL-3.0-or-later"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
