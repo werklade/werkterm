@@ -3,6 +3,7 @@ pub mod editor;
 mod keygen;
 pub mod local_fs;
 mod local_ports;
+mod macros;
 pub mod pty;
 pub mod secrets;
 pub mod serial;
@@ -32,6 +33,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            macros::macros_list,
+            macros::macro_save,
+            macros::macro_delete,
             telnet::telnet_connect,
             telnet::terminal_write,
             telnet::terminal_resize,

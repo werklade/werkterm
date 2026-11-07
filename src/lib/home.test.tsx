@@ -58,12 +58,13 @@ describe("View preferences and shared action definitions", () => {
     for (const action of ["ascii", "ports", "keygen"]) expect(menus.flatMap(menu => menu.items).find(item => item.action === action)?.disabled).not.toBe(true);
     expect(menus.flatMap(menu => menu.items).filter(item => ["ascii", "ports", "keygen"].includes(item.action))).toHaveLength(3);
   });
-  it("renders toolbar order, pressed state, placeholders and shell tooltip", () => {
+  it("renders toolbar order, pressed state, enabled macro menu and shell tooltip", () => {
     const html = renderToStaticMarkup(<Toolbar hasWsl={false} menus={definitions()} shellName="zsh" multiExec={true} onAction={noop}/>);
     const labels = ["Session", "Sessions", "Lokales Terminal", "Tools", "View", "Split", "MultiExec", "Settings", "Help", "Macros", "Beenden"];
     const positions = labels.map(label => html.indexOf(`>${label}</span>`));
     expect(positions.every(i => i >= 0)).toBe(true); expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(html).toContain('title="zsh"'); expect(html).toContain('aria-pressed="true"'); expect(html).toContain('title="Makros folgen" disabled=""');
+    expect(html).toContain('title="zsh"'); expect(html).toContain('aria-pressed="true"'); expect(html).toContain('title="Macros"'); expect(html).not.toContain("Makros folgen");
+    expect(definitions().find(menu => menu.label === "Makros")?.items.map(item => item.action)).toContain("macro:record");
   });
 });
 

@@ -1,9 +1,10 @@
+import type { Macro } from "./macros";
 import type { AppMenu } from "../components/MenuBar";
 import { Icon } from "../components/Icon";
 import type { Settings } from "./settings";
 import type { SavedSession } from "./sessions";
-export function createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux }: {
-  savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
+export function createMenus({ macros = [], recording = false, savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux }: {
+  macros?: Macro[]; recording?: boolean; savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
 }): AppMenu[] {
   const sidebarVisible = settings.sidebarVisible;
   const heading = (label: string) => ({ label, action: `heading:${label}`, heading: true });
@@ -22,6 +23,14 @@ export function createMenus({ savedSessions, settings, hasWsl, activeId, multiEx
       ...folders.flatMap(folder => [heading(folder), ...savedSessions.filter(s => (s.folder || "Ohne Ordner") === folder).map(s => ({ label: `  ${s.name}`, action: `saved:${s.id}`, icon: <Icon name={s.kind === "ssh" ? "ssh" : "terminal"}/> }))]),
       { label: "", action: "sessions-separator", separator: true },
       { label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungs-Panel anzeigen", action: "sessions" }, { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" },
+    ] },
+    { label: "Makros", mnemonic: 0, items: [
+      { label: recording ? "Aufnahme stoppen" : "Aufnahme starten", action: "macro:record" },
+      { label: "Neues Makro…", action: "macro:new" },
+      { label: "", action: "macro:separator1", separator: true },
+      ...macros.map(item => ({ label: item.name, action: `macro:play:${item.id}`, shortcut: item.shortcut ?? undefined })),
+      { label: "", action: "macro:separator2", separator: true },
+      { label: "Makros verwalten", action: "macros" },
     ] },
     { label: "View", mnemonic: 0, items: [
       heading("Menü und Werkzeugleiste"), radio("Menüleiste anzeigen", "bars:menu", settings.bars === "menu"), radio("Werkzeugleiste anzeigen", "bars:toolbar", settings.bars === "toolbar"), radio("Beides", "bars:both", settings.bars === "both"),

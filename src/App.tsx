@@ -1,3 +1,4 @@
+import { useMacros } from "./components/Macros";
 import { DiffDialog } from "./components/DiffDialog";
 import { comparisonSources, rememberedSource, diffTitle, diffError, loadDiffPair, type DiffSource, type DiffPair } from "./lib/diff";
 import { connectionTitle, connectionStatus } from "./lib/connection";
@@ -565,6 +566,7 @@ export default function App() {
   };
   const action = (name: string) => {
     setTemporaryMenu(false);
+    if (macros.action(name)) return;
     if (name.startsWith("split:")) {
       if (multiExec) return;
       const mode = name.slice(6) as SplitMode;
@@ -639,22 +641,26 @@ export default function App() {
     setActiveId(id);
   };
   const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff";
+  const macroRecipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
+  const macros = useMacros({ activeId, recipients: macroRecipients, multiExec: gridVisible, report: setStatus, showPanel: () => { showPanel(2); collapseSidebar(false); } });
+  const pendingPasteSource = useRef<number | null>(null);
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
     const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
     if (!targets.length) return;
-    if (pasted && shouldConfirmPaste(data, settings.pasteConfirm)) { setPasteRequest(current => current ?? { targets, data, multiExec: gridVisible }); return; }
+    if (pasted && shouldConfirmPaste(data, settings.pasteConfirm)) { if (!pasteRequest) pendingPasteSource.current = focused; setPasteRequest(current => current ?? { targets, data, multiExec: gridVisible }); return; }
+    macros.capture(focused, pasted ? data.replace(/\r\n|\n/g, "\r") : data);
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus = createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
-      {sidebarVisible && <Sidebar markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      {sidebarVisible && <Sidebar macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
-        <div className={`tab-row ${settings.sidebarRight ? "reverse" : ""}`}>{sidebarVisible && sidebarCollapsed && <QuickConnect className="in-tabbar" onConnect={connect} onStatus={reportStatus} />}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
+        <div className={`tab-row ${settings.sidebarRight ? "reverse" : ""}`}>{sidebarVisible && sidebarCollapsed && <QuickConnect className="in-tabbar" onConnect={connect} onStatus={reportStatus} />}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
@@ -678,8 +684,11 @@ export default function App() {
         </div>
       </main>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>Makro abbrechen</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    {macros.dialogs}
     {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} onAnswer={text => {
+      if (text !== null && pendingPasteSource.current !== null && tabsRef.current.some(t => t.id === pendingPasteSource.current && !t.exited)) macros.capture(pendingPasteSource.current, text.replace(/\r\n|\n/g, "\r"));
+      pendingPasteSource.current = null;
       if (text !== null) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(text, true); });
       setPasteRequest(null);
       requestAnimationFrame(() => document.querySelector<HTMLElement>(`#terminal-${activeId} .xterm-helper-textarea`)?.focus());

@@ -1,0 +1,15 @@
+.macros-panel { padding: 8px; overflow: auto; }
+.macro-add, .macro-step-heading { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+.macro-list { list-style: none; padding: 0; }
+.macro-list button { width: 100%; text-align: left; padding: 10px; }
+.macro-list small { display: block; opacity: .75; margin-top: 4px; }
+.macro-editor { width: min(800px, 90vw); max-height: 90vh; overflow: auto; }
+.macro-editor > label { display: block; margin: 8px 0; }
+.macro-editor > label input { display: block; width: 100%; box-sizing: border-box; }
+.macro-steps { max-height: 45vh; overflow: auto; }
+.macro-steps section { border: 1px solid var(--border); padding: 8px; margin: 8px 0; }
+.macro-steps section.selected { border-color: var(--accent, #58a6ff); }
+.macro-steps textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
+.macro-step-heading strong { margin-right: auto; }
+.macro-hint { font-family: monospace; }
+.record-indicator { color: #f33; }
