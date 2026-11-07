@@ -410,11 +410,11 @@ export default function App() {
   const gridVisible = multiExec && activeTab?.kind !== "editor";
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
-    const targets = multiExec ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
+    const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
     if (!targets.length) return;
     const lines = pasteLines(data);
-    if (requiresPasteConfirmation(multiExec, pasted, data)) { setPasteRequest(current => current ?? { lines, targets, data }); return; }
-    targets.forEach(id => terminalWriters.get(id)?.(data));
+    if (requiresPasteConfirmation(gridVisible, pasted, data)) { setPasteRequest(current => current ?? { lines, targets, data }); return; }
+    targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
   const menus: AppMenu[] = [
     { label: "Terminal", mnemonic: 0, items: [
@@ -429,7 +429,7 @@ export default function App() {
   ];
   return <div className="app-shell">
     <MenuBar menus={menus} onAction={action} />
-    <Toolbar hasWsl={hasWsl} onOpen={openTab} onSession={() => setSessionDialog({})} onTools={() => showPanel(1)} />
+    <Toolbar hasWsl={hasWsl} onOpen={openTab} onSession={() => setSessionDialog({})} multiExec={multiExec} onAction={action} />
     <div className="workspace">
       {sidebarVisible && <Sidebar onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
@@ -455,7 +455,7 @@ export default function App() {
     </div>
     <footer className="statusbar" role="status" aria-live="polite">{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
     {pasteRequest && <MultiPasteDialog lines={pasteRequest.lines} count={pasteRequest.targets.length} onAnswer={send => {
-      if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data); });
+      if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data, true); });
       setPasteRequest(null);
     }} />}
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClose={() => setSettingsOpen(false)} />}

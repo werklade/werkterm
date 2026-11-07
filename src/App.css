@@ -122,3 +122,6 @@ input::placeholder { color: var(--fg-muted); }
 .multiexec-footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .multiexec-footer label { white-space: nowrap; }
 .terminal-panel.is-exited { opacity: .5; }
+
+.toolbar-menu { display: flex; align-items: stretch; }
+.app-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }

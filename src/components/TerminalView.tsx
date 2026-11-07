@@ -11,7 +11,7 @@ import { createPromptCommandSender } from "../lib/promptCommand";
 import { selectedTheme, type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
 
-import { terminalWriters } from "../lib/multiExec";
+import { encodePaste, inputProvenance, terminalWriters } from "../lib/multiExec";
 import { MonitorBar } from "./MonitorBar";
 
 interface Props {
@@ -81,17 +81,29 @@ export function TerminalView({ visible, monitoringSession, onInput, gridFooter, 
       });
       const fitVisible = () => { if (!cancelled && shownRef.current && element.clientWidth > 0 && element.clientHeight > 0) fit.fit(); };
       const send = (data: string) => { if (sessionId !== undefined && !exited && !cancelled) void write(sessionId, data).catch(report); };
-      let pasting = false;
+      const provenance = inputProvenance(terminal);
+      let keyboardInput = false;
+      terminal.attachCustomKeyEventHandler(() => { keyboardInput = true; return true; });
+      const markTextInput = () => { keyboardInput = true; };
+      const markOtherInput = () => { keyboardInput = false; };
+      const textEvents = ["compositionstart", "compositionupdate", "compositionend", "beforeinput", "input"];
+      const otherEvents = ["mousedown", "mouseup", "mousemove", "wheel", "focusout"];
+      textEvents.forEach(type => element.addEventListener(type, markTextInput, true));
+      otherEvents.forEach(type => element.addEventListener(type, markOtherInput, true));
+      const canDistribute = () => shownRef.current && element.contains(document.activeElement);
       const paste = (event: ClipboardEvent) => {
         const text = event.clipboardData?.getData("text/plain");
         if (text === undefined) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        pasting = true;
-        try { terminal.paste(text); } finally { pasting = false; }
+        if (canDistribute() && inputRef.current) inputRef.current(id, text, true);
+        else send(encodePaste(text, terminal.modes.bracketedPasteMode));
       };
       element.addEventListener("paste", paste, true);
-      const input = terminal.onData(data => { if (inputRef.current) inputRef.current(id, data, pasting); else send(data); });
+      const input = terminal.onData(data => {
+        if (provenance.isUserInput() && keyboardInput && canDistribute() && inputRef.current) inputRef.current(id, data, false);
+        else send(data);
+      });
       const resize = terminal.onResize(({ cols, rows }) => { if (sessionId !== undefined && !exited) void resizeSession(sessionId, cols, rows).catch(report); });
       const observer = new ResizeObserver(fitVisible);
       observer.observe(element);
@@ -126,7 +138,7 @@ export function TerminalView({ visible, monitoringSession, onInput, gridFooter, 
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
         if (!exited) {
-          terminalWriters.set(id, send);
+          terminalWriters.set(id, (data, pasted) => send(pasted ? encodePaste(data, terminal.modes.bracketedPasteMode) : data));
           callbacks.current.onSession(id, spawnedId);
           void resizeSession(spawnedId, terminal.cols, terminal.rows).catch(report);
           promptCommand.connect(spawnedId);
@@ -145,8 +157,10 @@ export function TerminalView({ visible, monitoringSession, onInput, gridFooter, 
         callbacks.current.onClearPrompts(id);
         if (connecting) void cancelSshConnect(connectToken).catch(() => undefined);
         element.removeEventListener("paste", paste, true);
+        textEvents.forEach(type => element.removeEventListener(type, markTextInput, true));
+        otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
         terminalWriters.delete(id);
-        observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); promptCommand.dispose();
+        provenance.dispose(); observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); promptCommand.dispose();
         onData.onmessage = () => undefined;
         onExitChannel.onmessage = () => undefined;
         onPromptChannel.onmessage = rejectPrompt;

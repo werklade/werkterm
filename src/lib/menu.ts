@@ -30,3 +30,14 @@ export function menuMove(index: number, key: string, disabled: boolean[]): numbe
   for (let i = 0; i < n; i++) { next = (next + step + n) % n; if (!disabled[next]) return next; }
   return -1;
 }
+
+export function allowMenuMnemonic(e: ShortcutEvent, terminalOrEditor: boolean): boolean {
+  return e.altKey && !e.ctrlKey && !e.metaKey && !terminalOrEditor;
+}
+export const toolsMenuItems = (multiExec: boolean) => [
+  { label: "MultiExec", action: "multiexec", shortcut: "Strg+Umschalt+M", checked: multiExec },
+  { label: "Einstellungen…", action: "settings", shortcut: "Strg+," },
+  { label: "", action: "separator", separator: true },
+  { label: "Tunnel-Manager", action: "tunnels", disabled: true, tooltip: "folgt" },
+  { label: "Jump host", action: "jump", disabled: true, tooltip: "folgt" },
+];

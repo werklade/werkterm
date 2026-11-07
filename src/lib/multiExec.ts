@@ -11,4 +11,25 @@ export function pasteLines(data: string): number {
 }
 export const requiresPasteConfirmation = (multiExec: boolean, pasted: boolean, data: string): boolean =>
   multiExec && pasted && pasteLines(data) > 0;
-export const terminalWriters = new Map<number, (data: string) => void>();
+export const terminalWriters = new Map<number, (data: string, pasted?: boolean) => void>();
+
+export function encodePaste(text: string, bracketed: boolean): string {
+  const normalized = text.replace(/\r\n|\n/g, "\r");
+  return bracketed ? `\x1b[200~${normalized}\x1b[201~` : normalized;
+}
+
+// xterm 6's public onData omits provenance. Keep this version-specific bridge
+// isolated: the core marks keyboard/IME input synchronously, even for delayed IME.
+// Unknown future implementations fail closed (all data stays in its own session).
+export function inputProvenance(terminal: unknown) {
+  const core = (terminal as { _core?: { coreService?: { triggerDataEvent(data: string, user?: boolean): void } } })._core?.coreService;
+  let userInput = false;
+  const original = core?.triggerDataEvent;
+  const wrapped = function (this: NonNullable<typeof core>, data: string, user = false) {
+    const previous = userInput;
+    userInput = user;
+    try { original!.call(this, data, user); } finally { userInput = previous; }
+  };
+  if (core && original) core.triggerDataEvent = wrapped;
+  return { isUserInput: () => userInput, dispose: () => { if (core && original && core.triggerDataEvent === wrapped) core.triggerDataEvent = original; } };
+}
