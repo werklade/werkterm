@@ -11,8 +11,8 @@ const profile = [
   "...kkkkkwwww....", "...kkkkwwwwww...", "..kkkkkwwwwww...", "..kkkkkwwwwww...", "..kkkkkwwwwww...", "...kkkkwwwwww...", "....kkkkwwww....",
 ];
 function side(feet: [string, string]): string[] { return [...profile, ...feet]; }
-/** Yellow hard hat drawn over the head while digging (rows 0-2 of the side view). */
-export const helmet = [".....hhhhhh.....", "....hhHhhhhh....", "....hhhhhhhhhh.."];
+/** Yellow hard hat drawn over the head while digging (rows 0-2, front view). */
+export const helmet = [".....hhhhhh.....", "....hhHhhhhh....", "...hhhhhhhhhh..."];
 export const sprites = {
   stand: body,
   blink: frame({ 3: "....kkkkkkkk....", 4: "....kk-kk-kk...." }),
