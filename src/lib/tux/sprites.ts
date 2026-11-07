@@ -21,9 +21,10 @@ export const sprites = {
   flapUp: frame({ 5: "k...kkoyyokk...k", 6: "kk..kkkyykkk..kk", 7: ".kkkkwwwwwwkkkk.", 8: "...kwwwwwwwwk...", 9: "...kwwwwwwwwk...", 10: "...kwwwwwwwwk...", 11: "...kwwwwwwwwk...", 14: "....yy....yy....", 15: "....yy....yy...." }),
   flapDown: frame({ 9: "...kwwwwwwwwk...", 10: "k..kwwwwwwwwk..k", 11: "kk.kwwwwwwwwk.kk", 12: ".kkkkwwwwwwkkkk.", 14: "....yy....yy....", 15: "....yy....yy...." }),
   // Belly slide on long stretches, head first (facing right; mirrored for left).
+  // Round body, black back and flippers on the sides, one row of white belly.
   slide: [
-    "................", "................", "................", "................", "................", "................", "................", "................", "................",
-    "..........kkkk..", "...kkkkkkkkkwkk.", "yykkwwwwwwwkkkoy", "yykwwwwwwwwwkkk.", ".kkwwwwwwwwwkk..", "..kkkkkkkkkkk...", "................",
+    "................", "................", "................", "................", "................", "................", "................", "................",
+    ".....kkkkkk.....", "...kkkkkkkkkkk..", "yykkkkkkkkkkwkk.", "yykkkkkkkkkkkkyy", ".kkkwwwwwwwwkkk.", "...kkkkkkkkkk...", "................", "................",
   ],
   wave: frame({ 6: ".kk.kkkyykkk....", 7: ".kkkkwwwwwwkk..." }),
 };

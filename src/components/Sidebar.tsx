@@ -4,7 +4,7 @@ import { clampPanel, DEFAULT_PANEL_WIDTH, loadWidth, storeWidth } from "../lib/b
 import { SessionsPanel } from "./SessionsPanel";
 import type { SavedSession } from "../lib/sessions";
 import { Icon, type IconName } from "./Icon";
-import { parseQuickConnect } from "../lib/quickConnect";
+import { QuickConnect } from "./QuickConnect";
 import { FileBrowser, type BrowserTab } from "./FileBrowser";
 import type { TransferQueueHandle } from "../lib/transferQueue";
 import type { Settings } from "../lib/settings";
@@ -23,6 +23,8 @@ const toolIcons: Partial<Record<string, IconName>> = {
   keygen: "permissions", ports: "globe", tunnels: "jump", multiexec: "multiexec", settings: "settings",
 };
 interface Props {
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
   /** Entries of the Tools menu, shown as the Tools panel. */
   toolItems?: MenuItem[];
   onToolAction?: (action: string) => void;
@@ -42,7 +44,7 @@ interface Props {
   onAccess: (id: number, sessionId: number, mode: "sftp" | "exec" | "local", sudo: boolean) => void;
   onPath: (id: number, path: string) => void;
 }
-export function Sidebar({ toolItems = [], onToolAction, onMultiExec, active, onActive: setActive, onOpenSettings, onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
+export function Sidebar({ collapsed, onCollapsedChange: collapse, toolItems = [], onToolAction, onMultiExec, active, onActive: setActive, onOpenSettings, onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [width, setWidth] = useState(() => clampPanel(loadWidth("werkterm.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
   useEffect(() => {
@@ -51,17 +53,10 @@ export function Sidebar({ toolItems = [], onToolAction, onMultiExec, active, onA
     return () => window.removeEventListener("resize", resized);
   }, []);
   const resize = (next: number) => { const value = clampPanel(next, window.innerWidth); setWidth(value); storeWidth("werkterm.sidebar.width", value); };
-  const [input, setInput] = useState("");
   // Clicking the active section again collapses the panel to the icon strip, like MobaXterm.
-  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("werkterm.sidebar.collapsed") === "1"; } catch { return false; } });
-  const collapse = (value: boolean) => { setCollapsed(value); try { localStorage.setItem("werkterm.sidebar.collapsed", value ? "1" : "0"); } catch { /* storage unavailable */ } };
   const choose = (index: number) => { if (index === active && !collapsed) collapse(true); else { collapse(false); setActive(index); } };
-  const [invalid, setInvalid] = useState(false);
-  const error = "Ungültige Adresse. Erwartet: [user@]host[:port], IPv6 in […], Port 1–65535.";
   return <aside className={`sidebar ${collapsed ? "collapsed" : ""}`} style={{ "--sidebar-width": width + "px" } as CSSProperties} aria-label="Sitzungen und SSH-Browser">
-    <form className="quick-connect" onSubmit={event => { event.preventDefault(); const valid = parseQuickConnect(input) !== null; setInvalid(!valid); if (valid) { onConnect(input.trim()); setInput(""); } else onStatus(error); }}>
-      <input aria-label="Quick connect" placeholder="Quick connect..." value={input} aria-invalid={invalid} title={invalid ? error : "[user@]host[:port]"} onChange={event => { setInput(event.target.value); setInvalid(false); }} />
-    </form>
+    {!collapsed && <QuickConnect onConnect={onConnect} onStatus={onStatus} />}
     <div className="sidebar-content"><nav className="sidebar-icons" aria-label="Seitenbereiche">{panels.map((panel, index) => <button type="button" key={panel.name} aria-label={panel.name} aria-pressed={!collapsed && active === index} aria-expanded={!collapsed} title={collapsed || active !== index ? panel.name : `${panel.name} (einklappen)`} onClick={() => choose(index)}><Icon name={panel.icon} /></button>)}</nav>
       {!collapsed && <section className="sidebar-panel" aria-label={panels[active].name}><h2>{panels[active].name}</h2>
         {active === 0 ? <SessionsPanel sessions={savedSessions} onConnect={onSavedConnect} onEdit={onEditSession} onReload={onReloadSessions} onStatus={onStatus} /> : active === 3 ? (tab?.kind === "telnet" || tab?.kind === "serial") ? <p className="empty-state">Für Telnet/Seriell nicht verfügbar</p> : <FileBrowser onOpenFile={onOpenFile} key={tab?.id ?? "none"} tab={tab} settings={settings} onSettings={onSettings} onPath={onPath} onAccess={onAccess} onStatus={onStatus} transferQueue={transferQueue} /> : active === 1 ? <div className="tools-panel" role="menu" aria-label="Tools">{toolItems.length ? toolItems.map(item => item.separator ? <hr key={item.action} /> : item.heading ? <div key={item.action} className="tools-heading">{item.label}</div> : <button key={item.action} role="menuitem" disabled={item.disabled} title={item.tooltip ?? item.shortcut} onClick={() => onToolAction?.(item.action)}>{toolIcons[item.action] ? <Icon name={toolIcons[item.action]!} /> : <span className="tools-icon-space" />}<span className="tools-label">{item.label}</span>{item.checked && <span className="tools-check" aria-label="aktiv">✓</span>}</button>) : <><button onClick={onOpenSettings}>Einstellungen…</button><button onClick={onMultiExec}>MultiExec</button></>}</div> : <p className="empty-state">{panels[active].placeholder}</p>}

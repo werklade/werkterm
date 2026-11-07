@@ -29,7 +29,11 @@ input::placeholder { color: var(--fg-muted); }
 .quick-connect input[aria-invalid="true"] { border-color: var(--danger); outline-color: var(--danger); }
 .sidebar-content { display: flex; flex: 1; min-height: 0; }
 .sidebar.collapsed { width: var(--sidebar-icon-width); }
-.sidebar.collapsed .quick-connect { display: none; }
+.tab-row { display: flex; flex: none; min-width: 0; background: var(--bg-panel-alt); border-bottom: 1px solid var(--border-strong); }
+.tab-row.reverse { flex-direction: row-reverse; }
+.tab-row.reverse .quick-connect.in-tabbar { border-right: none; border-left: 1px solid var(--border-strong); }
+.tab-row > .tabbar { flex: 1; min-width: 0; border-bottom: none; }
+.quick-connect.in-tabbar { flex: none; width: var(--quick-connect-width, 240px); padding: 0 6px; display: flex; align-items: center; height: var(--tabbar-height); box-sizing: border-box; border-right: 1px solid var(--border-strong); }
 .sidebar-icons { width: var(--sidebar-icon-width); flex: none; display: flex; flex-direction: column; background: var(--bg-panel-alt); border-right: 1px solid var(--border-strong); }
 .sidebar-icons button { width: 100%; min-height: 42px; display: grid; place-items: center; border-left: 3px solid var(--bg-panel-alt); }
 .sidebar-icons button[aria-pressed="true"] { background: var(--bg-active); color: var(--accent-hover); border-left-color: var(--accent); }
