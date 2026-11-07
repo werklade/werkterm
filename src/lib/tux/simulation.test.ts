@@ -18,19 +18,19 @@ it("digs through a platform without changing it", () => {
   const platforms = platformsFromLines(["abcdefghijk"]);
   const tux = createTux(1); Object.assign(tux, { state: "walk", y: 0, floor: 0, age: 3 });
   stepTux(tux, .1, platforms, 10, () => 0); expect(tux.state).toBe("dig");
-  for (let i = 0; i < 10; i++) stepTux(tux, .1, platforms, 10);
+  for (let i = 0; i < 16; i++) stepTux(tux, .1, platforms, 10);
   expect(tux.state).toBe("fall"); expect(tux.y).toBeGreaterThanOrEqual(1); expect(platforms[0].y).toBe(0);
 });
 it("digs into the line below and lands on its text", () => {
   const platforms = platformsFromLines(["abcdefghijk", "abcdefghijk"]);
-  const tux = createTux(4); Object.assign(tux, { state: "dig", y: 0, floor: 0, age: .95 });
+  const tux = createTux(4); Object.assign(tux, { state: "dig", y: 0, floor: 0, age: 1.55 });
   stepTux(tux, .05, platforms, 10); expect(tux.state).toBe("fall");
   stepTux(tux, .05, platforms, 10); expect(tux.state).toBe("walk"); expect(tux.floor).toBe(1);
 });
 it("leaves a hole that later walkers fall through", () => {
   const platforms = platformsFromLines(["abcdefghijk"]);
   const holes: import("./simulation").Hole[] = [];
-  const digger = createTux(4); Object.assign(digger, { state: "dig", y: 0, floor: 0, age: .95 });
+  const digger = createTux(4); Object.assign(digger, { state: "dig", y: 0, floor: 0, age: 1.55 });
   stepTux(digger, .05, platforms, 10, Math.random, holes);
   expect(holes).toEqual([{ row: 0, start: 1, end: 8 }]);
   expect(platforms).toHaveLength(1);

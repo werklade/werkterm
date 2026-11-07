@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { createTux, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
+import { createTux, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
@@ -21,6 +21,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
     let tuxes = [createTux(0)];
     let platforms = platformsFromLines([]);
     let holes: Hole[] = [];
+    let lines: string[] = [];
     let width = 0, height = 0, cellWidth = 0, cellHeight = 0;
     const available = () => visible && document.visibilityState === "visible" && target.getClientRects().length > 0 && target.clientWidth > 0 && target.clientHeight > 0;
     const clear = () => { running = false; cancelAnimationFrame(frame); clearTimeout(timer); context.clearRect(0, 0, surface.width, surface.height); };
@@ -51,10 +52,15 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         if (tux.wait > 0) continue;
         const pixel = Math.max(1, Math.floor(cellHeight * 2 / 16));
         const size = pixel * 16;
-        const x = tux.x * cellWidth, y = (tux.y + (tux.state === "dig" ? Math.min(1, tux.age / .9) : 0)) * cellHeight;
-        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
+        const digProgress = tux.state === "dig" ? Math.min(1, tux.age / DIG_TIME) : 0;
+        // Sink in steps, one per scoop, with a small wobble while digging.
+        const scoop = Math.floor(tux.age * 6) % 4;
+        const sink = Math.min(1, Math.floor(digProgress * 5) / 5 + (scoop === 1 ? .06 : 0));
+        const wobble = tux.state === "dig" ? (scoop === 1 ? 1 : scoop === 3 ? -1 : 0) * Math.max(1, cellWidth / 8) : 0;
+        const x = tux.x * cellWidth + wobble, y = (tux.y + (tux.state === "dig" ? sink : 0)) * cellHeight;
+        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? [sprites.digUp, sprites.digDown, sprites.digCrouch, sprites.digDown][scoop] : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
         const hidden = tux.state === "gone" || (tux.state === "exit" && tux.leave > LEAVE.wave + LEAVE.slip);
-        if (tux.state === "dig") hole(digSpan(tux), Math.min(1, tux.age / .9));
+        if (tux.state === "dig") hole(digSpan(tux), sink);
         const corner = () => {
           if (tux.state !== "exit" || tux.leave < 0) return;
           const edge = tux.direction > 0 ? width : 0;
@@ -74,8 +80,32 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         context.restore();
         }
         if (tux.state === "dig") {
-          context.fillStyle = "#c4a67d";
-          for (let p = 0; p < 7; p++) { const phase = (tux.age * 3 + p / 7) % 1; context.fillRect(x + (p - 3) * phase * 13, y - Math.sin(phase * Math.PI) * 16, 3, 3); }
+          // Dirt and letters from the dug line fly off in arcs to both sides.
+          const span = digSpan(tux), text = lines[tux.floor] ?? "", unit = cellHeight / 16, groundY = tux.floor * cellHeight;
+          const letters = text.slice(Math.max(0, span.start), Math.max(0, span.end)).replace(/\s/g, "");
+          context.font = `bold ${Math.round(cellHeight * .8)}px monospace`; context.textAlign = "center"; context.textBaseline = "middle";
+          for (let p = 0; p < 14; p++) {
+            const phase = (tux.age * 1.6 + p / 14) % 1;
+            if (tux.age < p / 14 / 1.6) continue;
+            const side = p % 2 ? 1 : -1, speed = 22 + (p * 37) % 26, lift = 46 + (p * 53) % 34;
+            const px = x + side * speed * phase * unit * 3, py = groundY - lift * phase * unit * 2 + 120 * phase * phase * unit * 2;
+            if (p % 3 === 0 && letters) {
+              context.save(); context.translate(px, py); context.rotate(side * phase * 6);
+              context.globalAlpha = 1 - phase * .6; context.fillStyle = "#d8dee9";
+              context.fillText(letters[(p + Math.floor(tux.age * 3)) % letters.length], 0, 0); context.restore();
+            } else {
+              context.fillStyle = ["#c4a67d", "#8a6b45", "#6b4f2e"][p % 3]; context.globalAlpha = 1 - phase * .5;
+              const bit = Math.max(2, Math.round(unit * (2 + (p % 2))));
+              context.fillRect(px, py, bit, bit); context.globalAlpha = 1;
+            }
+          }
+          context.globalAlpha = 1;
+          if (digProgress > .75) {
+            // Dust puffs at the rim as the hole breaks through.
+            const puff = (digProgress - .75) / .25;
+            context.fillStyle = `rgba(196,166,125,${.45 * (1 - puff)})`;
+            for (const edge of [span.start, span.end]) { context.beginPath(); context.arc(edge * cellWidth, groundY + cellHeight * .5, cellHeight * (.3 + puff * .9), 0, Math.PI * 2); context.fill(); }
+          }
         }
         if (!waving) corner();
         if (tux.state === "gone") {
@@ -97,7 +127,8 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
       surface.width = Math.round(width * ratio); surface.height = Math.round(height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0); context.imageSmoothingEnabled = false;
       cellWidth = width / terminal.cols; cellHeight = height / terminal.rows;
-      platforms = platformsFromLines(Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? ""));
+      lines = Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? "");
+      platforms = platformsFromLines(lines);
       holes = [];
       tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2)));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);

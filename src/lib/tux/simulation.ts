@@ -13,6 +13,8 @@ const solid = (platforms: Platform[], holes: Hole[], row: number, x: number) =>
   platforms.some(p => p.y === row && x >= p.start && x < p.end) && !holes.some(h => h.row === row && x >= h.start && x < h.end);
 /** A dig spans wider than the ~5-cell sprite so the damage shows beside it. */
 export const digSpan = (t: { x: number; floor: number }): Hole => ({ row: t.floor, start: Math.floor(t.x) - 3, end: Math.floor(t.x) + 4 });
+/** Seconds one dig takes, long enough to show the scooping animation. */
+export const DIG_TIME = 1.5;
 export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit" | "gone"; age: number; wait: number; floor: number; leave: number }
 /** Leaving: wave while the corner folds open, slip behind it, then close it. */
 export const LEAVE = { wave: 1.6, slip: .5, close: .5 };
@@ -35,7 +37,7 @@ export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number,
     return;
   }
   if (t.state === "dig") {
-    if (t.age > .9) { holes.push(digSpan(t)); t.state = "fall"; t.y += 1; t.vy = 0; t.age = 0; }
+    if (t.age > DIG_TIME) { holes.push(digSpan(t)); t.state = "fall"; t.y += 1; t.vy = 0; t.age = 0; }
     return;
   }
   if (t.state === "walk") {
