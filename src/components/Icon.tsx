@@ -16,7 +16,24 @@ import icon14 from "../assets/icons/edit.svg?raw";
 import folderIcon from "../assets/icons/folder.svg?raw";
 import fileIcon from "../assets/icons/file.svg?raw";
 
+import saveIcon from "../assets/icons/save.svg?raw";
+import undoIcon from "../assets/icons/undo.svg?raw";
+import redoIcon from "../assets/icons/redo.svg?raw";
+import searchIcon from "../assets/icons/search.svg?raw";
+import wrapIcon from "../assets/icons/wrap.svg?raw";
+import sshIcon from "../assets/icons/ssh.svg?raw";
+import windowsIcon from "../assets/icons/windows.svg?raw";
+import appleIcon from "../assets/icons/apple.svg?raw";
+
 const icons = {
+  "save": saveIcon,
+  "undo": undoIcon,
+  "redo": redoIcon,
+  "search": searchIcon,
+  "wrap": wrapIcon,
+  "ssh": sshIcon,
+  "windows": windowsIcon,
+  "apple": appleIcon,
   "terminal": icon0,
   "tux": icon1,
   "star": icon2,

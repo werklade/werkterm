@@ -8,6 +8,7 @@ export type SessionAuth =
   | { type: "ask" };
 
 export interface SavedSession {
+  kind: string;
   id: string;
   name: string;
   folder: string;

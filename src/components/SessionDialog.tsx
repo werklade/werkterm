@@ -64,7 +64,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
       const secret = authType === "password" && password !== "" ? password : null;
       clearPassword();
       setBusy(true); setError("");
-      void saveSession({ id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host,
+      void saveSession({ kind: session?.kind ?? "ssh", id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host,
         port: Number(port), user: user.trim() || null,
         auth: authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType },
         source: session?.source ?? null }, secret).then(onSaved, () => {

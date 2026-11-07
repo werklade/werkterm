@@ -5,7 +5,9 @@
 .browser-error { padding: 8px; color: var(--danger); overflow-wrap: anywhere; }
 .sidebar-panel > .browser-list { flex: 1 1 auto; min-height: 90px; margin-top: 8px; overflow-y: auto; overflow-x: hidden; }
 .browser-list table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; }
-.browser-list th { color: var(--fg-secondary); font-weight: 500; text-align: left; }
+.browser-list th { position: sticky; top: 0; z-index: 1; background: var(--bg-panel); color: var(--fg-secondary); font-weight: 500; text-align: left; }
+.browser-list th button { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; cursor: pointer; white-space: nowrap; }
+.browser-list th button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .browser-list td, .browser-list th { padding: 5px 4px; border-bottom: 1px solid var(--border); }
 .browser-list td:not(:first-child) { white-space: nowrap; }
 .browser-list tr:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }

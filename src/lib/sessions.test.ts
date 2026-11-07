@@ -10,7 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 
 const sample = (overrides: Partial<SavedSession> = {}): SavedSession => ({
-  id: "one", name: "Server", folder: "Lab/Linux", host: "server.test", port: 22,
+  kind: "ssh", id: "one", name: "Server", folder: "Lab/Linux", host: "server.test", port: 22,
   user: "alice", auth: { type: "default" }, source: null, ...overrides,
 });
 const candidate = (overrides: Partial<ImportCandidate> = {}): ImportCandidate => ({

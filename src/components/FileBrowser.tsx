@@ -6,6 +6,7 @@ import { FileActionDialog, type FileDialog } from "./FileActionDialog";
 import { listLocalDir, listSshDir, type DirEntry, type DirListing } from "../lib/fs";
 import { childPath, parentPath } from "../lib/paths";
 import { formatSize } from "../lib/formatSize";
+import { loadFileSort, saveFileSort, sortFileEntries, type FileSortColumn } from "../lib/fileSort";
 import type { Settings } from "../lib/settings";
 import { countEntries, createFile, deleteEntry, makeDirectory, remoteChild } from "../lib/transfers";
 import type { TransferQueueHandle } from "../lib/transferQueue";
@@ -13,7 +14,7 @@ import "./FileBrowser.css";
 
 export interface BrowserTab {
   id: number;
-  kind: "local" | "wsl" | "ssh";
+  kind: "local" | "wsl" | "ssh" | "editor";
   title: string;
   target?: string;
   savedSessionId?: string;
@@ -29,9 +30,10 @@ interface Props {
   onSettings: (settings: Settings) => void;
   onPath: (id: number, path: string) => void;
   onStatus: (message: string) => void;
+  onOpenFile: (tab: BrowserTab, path: string) => void;
   transferQueue: TransferQueueHandle;
 }
-type Action = "up" | "refresh" | "download" | "upload" | "mkdir" | "create" | "delete";
+type Action = "up" | "refresh" | "download" | "upload" | "mkdir" | "create" | "delete" | "edit";
 const actions: { icon: IconName; label: string; action?: Action }[] = [
   { icon: "folder-up", label: "Ordner hoch", action: "up" },
   { icon: "download", label: "Herunterladen", action: "download" },
@@ -40,7 +42,7 @@ const actions: { icon: IconName; label: string; action?: Action }[] = [
   { icon: "folder-new", label: "Neuer Ordner", action: "mkdir" },
   { icon: "file-new", label: "Neue Datei", action: "create" },
   { icon: "delete", label: "Löschen", action: "delete" },
-  { icon: "permissions", label: "Berechtigungen" }, { icon: "edit", label: "Bearbeiten" },
+  { icon: "permissions", label: "Berechtigungen" }, { icon: "edit", label: "Öffnen im MobaTextEditor", action: "edit" },
 ];
 const settingLabels: { key: keyof Settings; label: string; title: string }[] = [
   { key: "followTerminalFolder", label: "Follow Terminal Folder", title: "Browser folgt dem Terminalverzeichnis" },
@@ -49,13 +51,14 @@ const settingLabels: { key: keyof Settings; label: string; title: string }[] = [
 ];
 const isDirectory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
 
-export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, transferQueue }: Props) {
+export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onOpenFile, transferQueue }: Props) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [input, setInput] = useState(tab?.browserPath ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
+  const [sort, setSort] = useState(loadFileSort);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [prompt, setPrompt] = useState<FileDialog | null>(null);
@@ -117,6 +120,16 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, trans
   };
   const writable = ready && kind === "ssh" && listing?.mode === "sftp" && !loading;
   const selectedEntry = listing?.entries.find(entry => entry.name === selected);
+  const sortedEntries = listing ? sortFileEntries(listing.entries, sort) : [];
+  const editorReady = ready && !loading && (kind !== "ssh" || listing?.mode === "sftp");
+  const openEntry = (entry: DirEntry) => {
+    if (tab && listing && editorReady && !isDirectory(entry)) onOpenFile(tab, childPath(listing.path, entry.name));
+  };
+  const changeSort = (column: FileSortColumn) => {
+    const next = { column, direction: sort.column === column && sort.direction === "asc" ? "desc" as const : "asc" as const };
+    setSort(next);
+    saveFileSort(next);
+  };
   const disabledReason = kind !== "ssh" ? "Nur bei SSH-Sitzungen" : "Nur mit SFTP verfügbar";
   const refresh = () => { if (mounted.current) { ++request.current; setRevision(value => value + 1); } };
   const fail = (reason: unknown) => {
@@ -152,6 +165,7 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, trans
   const perform = (action: Action | undefined) => {
     if (action === "up") { navigate(parentPath(listing?.path ?? path)); return; }
     if (action === "refresh") { refresh(); return; }
+    if (action === "edit") { if (selectedEntry) openEntry(selectedEntry); return; }
     if (!writable || sessionId === undefined || !listing || operation.current) return;
     const targetId = sessionId;
     const targetDir = listing.path;
@@ -211,21 +225,24 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, trans
       const viewAction = action.action === "up" || action.action === "refresh";
       const missingSelection = (action.action === "download" || action.action === "delete") && !selectedEntry;
       const directoryDownload = action.action === "download" && selectedEntry && isDirectory(selectedEntry);
-      const disabled = viewAction ? !ready : !writable || busy || !action.action || missingSelection || directoryDownload;
-      const title = !viewAction && !writable ? disabledReason : directoryDownload ? "Ordner-Download folgt später" : action.label;
+      const editAction = action.action === "edit";
+      const disabled = editAction ? !editorReady || busy || !selectedEntry || isDirectory(selectedEntry)
+        : viewAction ? !ready : !writable || busy || !action.action || missingSelection || directoryDownload;
+      const title = editAction ? (kind === "ssh" && !editorReady ? "Nur mit SFTP verfügbar" : action.label)
+        : !viewAction && !writable ? disabledReason : directoryDownload ? "Ordner-Download folgt später" : action.label;
       return <button key={action.icon} type="button" aria-label={action.label} title={title} disabled={Boolean(disabled)} onClick={() => perform(action.action)}><Icon name={action.icon} /></button>;
     })}</div>
     <form onSubmit={event => { event.preventDefault(); navigate(input); }}><input className="remote-path" aria-label="Browser-Pfad" placeholder="Pfad (leer: Home)" value={input} disabled={!ready} onChange={event => setInput(event.target.value)} /></form>
     {notice && <p className="empty-state">{notice}</p>}
     {loading && <p className="empty-state" role="status">Verzeichnis wird geladen…</p>}
     {error && <p className="browser-error" role="alert">{error}</p>}
-    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label="Verzeichnisinhalt"><table><colgroup><col /><col className="browser-size-column" /><col className="browser-date-column" /></colgroup><thead><tr><th scope="col">Name</th><th scope="col">Größe</th><th scope="col">Geändert</th></tr></thead><tbody>{listing.entries.map((entry, index) => <tr key={entry.name} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={`${isDirectory(entry) ? "Ordner" : "Datei"}: ${entry.name}`} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); }} onKeyDown={event => {
-      if (event.key === "Enter" && isDirectory(entry)) { event.preventDefault(); navigate(childPath(listing.path, entry.name)); }
+    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label="Verzeichnisinhalt"><table><colgroup><col /><col className="browser-size-column" /><col className="browser-date-column" /></colgroup><thead><tr>{([{ column: "name", label: "Name" }, { column: "size", label: "Größe" }, { column: "modified", label: "Geändert" }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button></th>)}</tr></thead><tbody>{sortedEntries.map((entry, index) => <tr key={entry.name} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={`${isDirectory(entry) ? "Ordner" : "Datei"}: ${entry.name}`} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
+      if (event.key === "Enter") { event.preventDefault(); if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }
       if (event.key === "Delete") { event.preventDefault(); if (writable && !busy) perform("delete"); }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        const next = Math.max(0, Math.min(listing.entries.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
-        setSelected(listing.entries[next].name);
+        const next = Math.max(0, Math.min(sortedEntries.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+        setSelected(sortedEntries[next].name);
         listRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[next]?.focus();
       }
     }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">Leeres Verzeichnis</p>}</div>}
