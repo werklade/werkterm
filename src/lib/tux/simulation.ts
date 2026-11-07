@@ -21,14 +21,14 @@ export function groundAhead(platforms: Platform[], holes: Hole[], row: number, x
   while (n < 400 && solid(platforms, holes, row, x + direction * (n + 1))) n++;
   return n;
 }
-export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit" | "gone"; age: number; wait: number; floor: number; leave: number; sliding: boolean }
+export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit" | "gone"; age: number; wait: number; floor: number; leave: number; sliding: boolean; tool: "shovel" | "jackhammer" }
 /** Flapping caps the fall speed (rows/s); stretches longer than SLIDE_MIN cells are crossed on the belly. */
-export const MAX_FALL = 5, SLIDE_MIN = 10, SLIDE_SPEED = 9;
+export const MAX_FALL = 3.5, SLIDE_MIN = 10, SLIDE_SPEED = 9;
 /** Half the sprite width in cells: Tux stays this far from the terminal edges. */
 export const MARGIN = 3;
 /** Leaving: wave while the corner folds open, slip behind it, then close it. */
 export const LEAVE = { wave: 1.6, slip: .5, close: .5 };
-export function createTux(x: number, direction = 1, wait = 0): Tux { return { x, y: -2, vy: 0, direction, state: "fall", age: 0, wait, floor: -1, leave: -1, sliding: false }; }
+export function createTux(x: number, direction = 1, wait = 0): Tux { return { x, y: -2, vy: 0, direction, state: "fall", age: 0, wait, floor: -1, leave: -1, sliding: false, tool: "shovel" }; }
 export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number, random = Math.random, holes: Hole[] = [], cols = Infinity): void {
   dt = Math.max(0, Math.min(dt, .1));
   if (t.wait > 0) { t.wait -= dt; return; }
@@ -60,11 +60,11 @@ export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number,
     t.x += t.direction * dt * (t.sliding ? SLIDE_SPEED : 3);
     if (Number.isFinite(cols)) t.x = Math.min(Math.max(t.x, MARGIN), cols - MARGIN);
     if (!solid(platforms, holes, t.floor, t.x)) { t.state = "fall"; t.sliding = false; t.y += .05; t.vy = 0; t.age = 0; }
-    else if (!t.sliding && t.age > .4 && random() < dt * .6) { t.state = "dig"; t.age = 0; }
+    else if (!t.sliding && t.age > .4 && random() < dt * .6) { t.state = "dig"; t.age = 0; t.tool = random() < .5 ? "shovel" : "jackhammer"; }
     return;
   }
   const before = t.y;
-  t.vy = Math.min(MAX_FALL, t.vy + dt * 18); t.y += t.vy * dt;
+  t.vy = Math.min(MAX_FALL, t.vy + dt * 12); t.y += t.vy * dt;
   if (Number.isFinite(cols)) t.x = Math.min(Math.max(t.x, MARGIN), cols - MARGIN);
   const floor = platforms.filter(p => p.y >= before && p.y <= t.y && solid([p], holes, p.y, t.x)).sort((a, b) => a.y - b.y)[0];
   if (floor) { t.y = floor.y; t.floor = floor.y; t.state = "walk"; t.age = 0; t.vy = 0; }

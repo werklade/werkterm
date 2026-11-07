@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createTux, MARGIN, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
-import { palette, sprites } from "../lib/tux/sprites";
+import { helmet, palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
 export function TuxOverlay({ terminal, enabled, minutes, count, visible, active }: { terminal: Terminal | null; enabled: boolean; minutes: number; count: number; visible: boolean; active: boolean }) {
@@ -56,9 +56,11 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         // Sink in steps, one per scoop, with a small wobble while digging.
         const scoop = Math.floor(tux.age * 6) % 4;
         const sink = Math.min(1, Math.floor(digProgress * 5) / 5 + (scoop === 1 ? .06 : 0));
-        const wobble = tux.state === "dig" ? (scoop === 1 ? 1 : scoop === 3 ? -1 : 0) * Math.max(1, cellWidth / 8) : 0;
-        const x = tux.x * cellWidth + wobble, y = (tux.y + (tux.state === "dig" ? sink : 0)) * cellHeight;
-        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.sliding ? sprites.slide : tux.state === "fall" ? (tux.vy > 3 ? (Math.floor(now / 90) % 2 ? sprites.flapUp : sprites.flapDown) : sprites.fall) : tux.state === "dig" ? [sprites.digUp, sprites.digDown, sprites.digCrouch, sprites.digDown][scoop] : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
+        const hammering = tux.state === "dig" && tux.tool === "jackhammer";
+        // The jackhammer shakes Tux quickly; the shovel only rocks him with each scoop.
+        const wobble = tux.state !== "dig" ? 0 : hammering ? (Math.floor(now / 45) % 2 ? 1 : -1) * Math.max(1, cellWidth / 10) : (scoop === 1 ? 1 : scoop === 3 ? -1 : 0) * Math.max(1, cellWidth / 8);
+        const x = tux.x * cellWidth + wobble, y = (tux.y + (tux.state === "dig" ? sink : 0)) * cellHeight + (hammering && Math.floor(now / 60) % 2 ? Math.max(1, cellHeight / 16) : 0);
+        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.sliding ? sprites.slide : tux.state === "fall" ? (tux.vy > 2 ? (Math.floor(now / 90) % 2 ? sprites.flapUp : sprites.flapDown) : sprites.fall) : tux.state === "dig" ? (hammering || scoop % 2 ? sprites.sideA : sprites.sideB) : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.sideA : sprites.sideB) : sprites.wave;
         const hidden = tux.state === "gone" || (tux.state === "exit" && tux.leave > LEAVE.wave + LEAVE.slip);
         if (tux.state === "dig") hole(digSpan(tux), sink);
         const corner = () => {
@@ -76,7 +78,28 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         if (!hidden) {
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
-        sprite.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
+        const paint = (rows: string[]) => rows.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
+        paint(sprite);
+        if (tux.state === "dig") {
+          paint(helmet);
+          // Tools in sprite space (facing right, mirrored by the transform): origin = sprite centre, y down from the top.
+          if (hammering) {
+            const jx = 5 * pixel, chisel = Math.floor(now / 45) % 2 ? 0 : pixel;
+            context.fillStyle = "#59636b"; context.fillRect(jx - pixel, 6 * pixel, 5 * pixel, pixel);
+            context.fillStyle = "#9aa5ad"; context.fillRect(jx, 7 * pixel, 3 * pixel, 7 * pixel);
+            context.fillStyle = "#d94f2a"; context.fillRect(jx, 9 * pixel, 3 * pixel, pixel);
+            context.fillStyle = "#cfd6db"; context.fillRect(jx + pixel, 14 * pixel, pixel, 2 * pixel + chisel);
+          } else {
+            const phase = (tux.age * 1.4) % 1;
+            const swing = phase < .6 ? phase / .6 : 1 - (phase - .6) / .4;
+            const angle = -2.3 + swing * 2.9; // raised behind the head -> stabbing down in front
+            const px = 3 * pixel, py = 9 * pixel, dx = Math.sin(angle), dy = Math.cos(angle);
+            context.fillStyle = "#8a5a2b";
+            for (let i = 0; i <= 8; i++) context.fillRect(px + dx * i * pixel - pixel / 2, py + dy * i * pixel - pixel / 2, pixel, pixel);
+            context.fillStyle = "#9aa5ad";
+            context.fillRect(px + dx * 9 * pixel - pixel * 1.5, py + dy * 9 * pixel - pixel * 1.5, 3 * pixel, 3 * pixel);
+          }
+        }
         context.restore();
         }
         if (tux.state === "dig") {

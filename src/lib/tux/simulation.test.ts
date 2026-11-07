@@ -78,3 +78,12 @@ it("stays inside the terminal and turns around at its edge", () => {
   const faller = createTux(0); stepTux(faller, .1, [], 10, Math.random, [], 20);
   expect(faller.x).toBe(3);
 });
+it("picks a shovel or a jackhammer for each dig", () => {
+  const platforms = platformsFromLines(["x".repeat(12)]);
+  for (const [roll, tool] of [[0, "shovel"], [.9, "jackhammer"]] as const) {
+    const tux = createTux(10, 1); Object.assign(tux, { state: "walk", y: 0, floor: 0, age: 1 });
+    let first = true;
+    stepTux(tux, .1, platforms, 10, () => { const value = first ? 0 : roll; first = false; return value; }, [], 30);
+    expect(tux.state).toBe("dig"); expect(tux.tool).toBe(tool);
+  }
+});
