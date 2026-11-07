@@ -4,7 +4,7 @@ import { createTux, digSpan, IdleClock, platformsFromLines, stepTux, type Hole }
 import { palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
-export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { terminal: Terminal | null; enabled: boolean; minutes: number; visible: boolean; active: boolean }) {
+export function TuxOverlay({ terminal, enabled, minutes, count, visible, active }: { terminal: Terminal | null; enabled: boolean; minutes: number; count: number; visible: boolean; active: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const target = terminal?.element;
@@ -90,7 +90,7 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
       cellWidth = width / terminal.cols; cellHeight = height / terminal.rows;
       platforms = platformsFromLines(Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? ""));
       holes = [];
-      tuxes = Array.from({ length: motion.matches ? 1 : 1 + Math.floor(Math.random() * 3) }, (_, index) => createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, index * (1 + Math.random() * 2)));
+      tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2)));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);
     };
     const schedule = () => { clearTimeout(timer); if (enabled && available()) timer = setTimeout(start, clock.remaining(performance.now(), minutes * 60000)); };
@@ -108,6 +108,6 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
     motion.addEventListener("change", activity);
     schedule();
     return () => { clear(); input.dispose(); output.dispose(); scroll.dispose(); resize.disconnect(); events.forEach(event => target.removeEventListener(event, activity, true)); document.removeEventListener("visibilitychange", visibility); window.removeEventListener(tuxTestEvent, test); motion.removeEventListener("change", activity); };
-  }, [terminal, enabled, minutes, visible, active]);
+  }, [terminal, enabled, minutes, count, visible, active]);
   return <canvas ref={canvas} aria-hidden="true" style={{ position: "absolute", pointerEvents: "none", zIndex: 3 }} />;
 }

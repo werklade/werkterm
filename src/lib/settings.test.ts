@@ -4,6 +4,9 @@ it("normalizes Tux settings with defaults and finite minute bounds", () => {
   expect(normalizeSettings({})).toMatchObject({ tuxEnabled: true, tuxIdleMinutes: 10 });
   expect(normalizeSettings({ tuxEnabled: false, tuxIdleMinutes: 121 })).toMatchObject({ tuxEnabled: false, tuxIdleMinutes: 120 });
   expect(normalizeSettings({ tuxIdleMinutes: -1 }).tuxIdleMinutes).toBe(1);
+  expect(normalizeSettings({}).tuxCount).toBe(4);
+  expect(normalizeSettings({ tuxCount: 12 }).tuxCount).toBe(8);
+  expect(normalizeSettings({ tuxCount: 0 }).tuxCount).toBe(1);
   expect(normalizeSettings({ tuxIdleMinutes: 1.6 }).tuxIdleMinutes).toBe(2);
   for (const value of [NaN, Infinity, "5", null]) expect(normalizeSettings({ tuxEnabled: "false", tuxIdleMinutes: value })).toMatchObject({ tuxEnabled: true, tuxIdleMinutes: 10 });
 });
