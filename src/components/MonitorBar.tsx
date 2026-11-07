@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import tux from "../assets/icons/tux.svg";
 import { MonitorTooltip as Tip } from "./MonitorTooltip";
-import { decimal, rate, size, uptime, users, distro, history, dfTable, type Disk } from "./monitorFormat";
+import { decimal, rate, size, uptime, users, distro, history, dfTable, orderDisks, fittingCount, type Disk } from "./monitorFormat";
 import "./MonitorBar.css";
 interface Network { name: string; rx: number; tx: number; rxErrors: number; txErrors: number; rxDrop: number; txDrop: number }
 interface Sample { host: string; version: string | null; osName: string | null; osId: string | null; cpuCores: number | null; load: number[]; cpuParts: number[]; cpuPercent: number | null; memUsed: number; memTotal: number; memAvailable: number | null; cached: number | null; buffers: number | null; swapTotal: number | null; swapUsed: number | null; netRx: number | null; netTx: number | null; interfaces: Network[]; uptimeSecs: number; who: string[]; disks: Disk[]; dfAll: Disk[]; unsupported: boolean }
@@ -13,6 +13,31 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
   const [sample, setSample] = useState<Sample | null>(null);
   const [values, setValues] = useState<number[]>([]);
   const [error, setError] = useState("");
+  const bar = useRef<HTMLDivElement>(null);
+  const diskBox = useRef<HTMLDivElement>(null);
+  const widths = useRef(new Map<string, number>());
+  const [shown, setShown] = useState(Infinity);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const element = bar.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [sample === null]);
+  const disks = orderDisks(sample?.disks ?? []);
+  const diskKey = disks.map(d => d.mount).join("|");
+  // Measure rendered disk fields, then show as many as fit into the space left in the bar.
+  useLayoutEffect(() => {
+    const element = bar.current, box = diskBox.current;
+    if (!element || !box) return;
+    for (const child of Array.from(box.children) as HTMLElement[]) if (child.dataset.mount) widths.current.set(child.dataset.mount, child.offsetWidth + 12);
+    const others = element.scrollWidth - box.offsetWidth;
+    const available = element.clientWidth - others - 8;
+    const next = fittingCount(disks.map(d => widths.current.get(d.mount) ?? 150), available);
+    if (next !== shown) setShown(next);
+  });
+  useEffect(() => { setShown(Infinity); }, [width, diskKey]);
   useEffect(() => {
     let alive = true;
     setSample(null); setError(""); setValues([]);
@@ -33,7 +58,8 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
   const network = (upload: boolean) => <Table rows={sample.interfaces.flatMap(n => [[`${n.name} ${upload ? "gesendet" : "empfangen"} gesamt`, size(upload ? n.tx : n.rx)], [`${n.name} Fehler`, decimal(upload ? n.txErrors : n.rxErrors)], [`${n.name} verworfen`, decimal(upload ? n.txDrop : n.rxDrop)]] as [string, string][])} />;
   const df = <><strong>Ausgabe von df:</strong><pre>{dfTable(sample.dfAll)}</pre></>;
   const dist = distro(sample.osId);
-  return <div className="monitor-bar">
+  const visible = disks.slice(0, shown), hidden = disks.slice(visible.length);
+  return <div className="monitor-bar" ref={bar}>
     <Tip content={<><div>Hostname: {sample.host || "–"}</div><div>System: {sample.osName ?? "–"}</div><div>Version: {sample.version ?? "–"}</div><div>CPU-Kerne: {sample.cpuCores ?? "–"}</div></>}>{dist === "tux" ? <img className="monitor-tux" src={tux} alt="Linux" /> : <span className={`monitor-distro ${dist}`} aria-hidden="true">{dist[0].toUpperCase()}</span>}{sample.host || "–"}</Tip>
     <Tip content={cpu}>CPU {sample.cpuPercent === null ? "–" : `${decimal(sample.cpuPercent)} %`}</Tip>
     <Tip content={cpu}><svg className="monitor-history" viewBox="0 0 60 16" role="img" aria-label="CPU-Verlauf der letzten 60 Messwerte">{values.map((v, i) => <rect key={i} x={60 - values.length + i} y={16 - v * .16} width=".8" height={v * .16} />)}</svg></Tip>
@@ -41,7 +67,9 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
     <Tip content={network(true)}>↑ {rate(sample.netTx)}</Tip><Tip content={network(false)}>↓ {rate(sample.netRx)}</Tip>
     <Tip content={<><div>Laufzeit: {uptime(sample.uptimeSecs, true)}</div><div>Gestartet: {new Date(Date.now() - sample.uptimeSecs * 1000).toLocaleString("de-DE")}</div></>}>◷ {uptime(sample.uptimeSecs)}</Tip>
     <Tip content={<><strong>Ausgabe von who:</strong><pre>{sample.who.join("\n") || "–"}</pre></>}>♙ {users(sample.who)}</Tip>
-    {sample.disks.slice(0, 3).map(d => <Tip key={d.device + d.mount} content={df}>{d.mount}: {decimal(d.usedPercent)} % <Meter value={d.usedPercent} /></Tip>)}
-    {sample.disks.length > 3 && <Tip content={df}>+{sample.disks.length - 3}</Tip>}
+    <div className="monitor-disks" ref={diskBox}>
+      {visible.map(d => <span key={d.device + d.mount} data-mount={d.mount} className="monitor-disk"><Tip content={df}><span className={d.usedPercent >= 90 ? "monitor-critical" : undefined}>{d.mount}: {decimal(d.usedPercent)} %</span> <Meter value={d.usedPercent} /></Tip></span>)}
+      {hidden.length > 0 && <Tip content={<><strong>Weitere Laufwerke:</strong><Table rows={hidden.map(d => [d.mount, `${decimal(d.usedPercent)} % von ${size(d.sizeBytes)}`] as [string, string])} /></>}>+{hidden.length}</Tip>}
+    </div>
   </div>;
 }

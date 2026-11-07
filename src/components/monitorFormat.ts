@@ -2,7 +2,30 @@ export const decimal = (n: number, digits = 0) => n.toLocaleString("de-DE", { mi
 export function size(n: number) { const units = ["B", "kB", "MB", "GB", "TB"]; let i = 0; while (n >= 1000 && i < 4) { n /= 1000; i++; } return `${decimal(n, i ? 1 : 0)} ${units[i]}`; }
 export const rate = (n: number | null) => n === null ? "–" : `${size(n)}/s`;
 export function uptime(n: number, full = false) { const d = Math.floor(n / 86400), h = Math.floor(n / 3600) % 24, m = Math.floor(n / 60) % 60; return full ? `${d} ${d === 1 ? "Tag" : "Tage"}, ${h} h, ${m} min (${n} Sekunden)` : d ? `${d} ${d === 1 ? "Tag" : "Tage"}` : h ? `${h} h` : `${m} min`; }
-export function users(lines: string[]) { const names = [...new Set(lines.map(l => l.trim().split(/\s+/)[0]).filter(Boolean))]; return names.length ? `${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}` : "–"; }
+export function users(lines: string[]) {
+  const counts = new Map<string, number>();
+  for (const name of lines.map(l => l.trim().split(/\s+/)[0]).filter(Boolean)) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const names = [...counts].map(([name, n]) => n > 1 ? `${name} (x${n})` : name);
+  return names.length ? `${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}` : "–";
+}
+/** Bar order: system mounts first, then user mounts (/mnt, /media, /srv), then the rest. */
+const diskRank = (mount: string) => {
+  const fixed = ["/", "/boot", "/boot/efi", "/home", "/var", "/tmp"].indexOf(mount);
+  return fixed >= 0 ? fixed : /^\/(mnt|media|srv)(\/|$)/.test(mount) ? 10 : 20;
+};
+export function orderDisks<T extends { mount: string }>(disks: T[]): T[] {
+  return [...disks].sort((a, b) => diskRank(a.mount) - diskRank(b.mount) || a.mount.localeCompare(b.mount));
+}
+/** How many fields fit into `available` pixels, keeping room for a "+N" field when some are hidden. */
+export function fittingCount(widths: number[], available: number, more = 44): number {
+  let used = 0;
+  for (let i = 0; i < widths.length; i++) {
+    const reserve = i < widths.length - 1 ? more : 0;
+    if (used + widths[i] + reserve > available) return i;
+    used += widths[i];
+  }
+  return widths.length;
+}
 export const distro = (id: string | null) => ["debian", "ubuntu", "alpine"].includes(id ?? "") ? id! : "tux";
 export const history = (values: number[], n: number) => [...values, Math.max(0, Math.min(100, n))].slice(-60);
 export interface Disk { device: string; mount: string; usedPercent: number; sizeBytes: number; usedBytes: number; freeBytes: number }

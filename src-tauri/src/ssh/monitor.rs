@@ -10,7 +10,7 @@ printf 'MEM\n'; cat /proc/meminfo
 printf 'NET\n'; cat /proc/net/dev
 printf 'UP\n'; cut -d ' ' -f 1 /proc/uptime
 printf 'USERS\n'; who 2>/dev/null || :
-printf 'DISKS\n'; df -P -k 2>/dev/null | awk 'NR==FNR { if ($3 ~ /^(tmpfs|devtmpfs|overlay|squashfs)$/) skip[$2]=1; next } FNR==1 || !skip[$6]' /proc/mounts -
+printf 'DISKS\n'; df -P -k 2>/dev/null | awk 'NR==FNR { if ($3 ~ /^(tmpfs|devtmpfs|overlay|squashfs|efivarfs|ramfs|proc|sysfs|cgroup2?|devpts|securityfs|pstore|bpf|tracefs|debugfs|configfs|fusectl|hugetlbfs|mqueue|binfmt_misc|nsfs|autofs|fuse\.lxcfs|fuse\.gvfsd-fuse|fuse\.portal)$/ && $2 != "/tmp") skip[$2]=1; next } FNR==1 || !skip[$6]' /proc/mounts -
 printf 'DFALL\n'; df -P -k 2>/dev/null
 printf 'VERSION\n'; cat /proc/version
 printf 'OS\n'; if [ -r /etc/os-release ]; then cat /etc/os-release; fi

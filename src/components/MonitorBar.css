@@ -8,4 +8,7 @@
 .monitor-distro { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; color: white; font-weight: bold; }
 .monitor-distro.debian { background: #c52344; }.monitor-distro.ubuntu { background: #e95420; }.monitor-distro.alpine { background: #087bab; }
 .monitor-tux { width: 16px; height: 16px; }
-.monitor-history { width: 56px; height: 16px; fill: #50b95b; }
+.monitor-history { width: 56px; height: 16px; fill: #50b95b; background: #000; border: 1px solid var(--border, #555); box-sizing: border-box; }
+.monitor-disks { display: flex; flex: none; align-items: center; gap: 12px; white-space: nowrap; }
+.monitor-disk { display: inline-flex; }
+.monitor-critical { color: #ff5f5f; font-weight: bold; }
