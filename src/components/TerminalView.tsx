@@ -44,6 +44,8 @@ interface Props {
   shellIntegration: boolean;
   sshPromptCommand: boolean;
   onExit: (id: number) => void;
+  onCloseTab?: (id: number) => void;
+  onRestart?: (id: number) => void;
   onStatus: (message: string) => void;
   onSession: (id: number, sessionId: number | null) => void;
   onCwd: (id: number, cwd: TerminalCwd) => void;
@@ -53,7 +55,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const [tuxTerminal, setTuxTerminal] = useState<Terminal | null>(null);
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
@@ -84,8 +86,8 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
   const shownRef = useRef(visible ?? active); shownRef.current = visible ?? active;
   const activeRef = useRef(active);
   activeRef.current = active;
-  const callbacks = useRef({ onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts });
-  callbacks.current = { onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts };
+  const callbacks = useRef({ onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: (): void => undefined });
+  callbacks.current = { onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: () => { void saveContent("txt"); } };
   const settings = useRef({ shellIntegration, sshPromptCommand });
   settings.current = { shellIntegration, sshPromptCommand };
 
@@ -136,6 +138,19 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         }, 150);
       });
       terminal.attachCustomKeyEventHandler(event => {
+        // After the session ended: Return closes the tab, R restarts, S saves the output.
+        if (exited && !event.ctrlKey && !event.altKey && !event.metaKey) {
+          const key = event.key.toLowerCase();
+          if (key === "enter" || key === "r" || key === "s") {
+            event.preventDefault();
+            if (event.type === "keydown") {
+              if (key === "enter") callbacks.current.onCloseTab?.(id);
+              else if (key === "r") callbacks.current.onRestart?.(id);
+              else callbacks.current.saveOutput();
+            }
+            return false;
+          }
+        }
         if (!event.altKey && ((event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c") || (event.ctrlKey && event.key === "Insert"))) {
           event.preventDefault();
           if (event.type === "keydown") copySelection();
@@ -180,7 +195,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         promptCommand.receiveData();
       };
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh" || wire) callbacks.current.onStatus("Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh" || wire) callbacks.current.onStatus("Verbindung beendet"); terminal.write("\r\n\r\n\x1b[1;33mSitzung beendet\x1b[0m\r\n    - \x1b[1m<Return>\x1b[0m: Tab schließen\r\n    - \x1b[1mR\x1b[0m: Sitzung neu starten\r\n    - \x1b[1mS\x1b[0m: Terminalausgabe in Datei speichern\r\n"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);

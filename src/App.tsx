@@ -425,6 +425,17 @@ export default function App() {
     })();
     pendingOpens.current.set(sourceKey, pending);
   };
+  // Restart a finished session in the same tab; the new generation remounts the terminal view.
+  const restartTab = useCallback((id: number) => {
+    if (windowClosing.current) return;
+    setTabs(current => current.map(tab => {
+      if (tab.id !== id || !tab.exited) return tab;
+      liveTabs.current.add(id);
+      if (tab.kind === "ssh" || tab.kind === "telnet" || tab.kind === "serial") sshTabs.current.add(id);
+      return { ...tab, exited: false, sessionId: undefined, generation: (tab.generation ?? 0) + 1 };
+    }));
+    setStatus("Sitzung wird neu gestartet…");
+  }, []);
   const markExited = useCallback((id: number) => {
     cancelTabTransfers(id);
     liveTabs.current.delete(id);
@@ -617,11 +628,11 @@ export default function App() {
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={tab.id} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
-            onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
+            onExit={markExited} onCloseTab={closeTab} onRestart={restartTab} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           {splitVisible && <SplitLayout mode={settings.splitMode} panes={panes} terminals={terminals} focusedIndex={activeId !== null && panes.includes(activeId) ? panes.indexOf(activeId) : focusedPane} ratios={ratios} onRatios={setRatios} onAssign={assignSplit}
             onFocus={index => { setFocusedPane(index); setActiveId(panes[index] ?? null); }}
             onNew={index => { setFocusedPane(index); const id = nextId.current; openTab("local"); setPanes(current => assignPane(current, index, id)); }} />}

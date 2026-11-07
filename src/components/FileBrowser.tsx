@@ -33,6 +33,8 @@ export interface BrowserTab {
   browserPath: string;
   browserAccess?: { sessionId: number; mode: DirListing["mode"]; sudo: boolean };
   exited: boolean;
+  /** Bumped on restart so the terminal view starts a fresh session. */
+  generation?: number;
 }
 interface Props {
   tab: BrowserTab | null;
