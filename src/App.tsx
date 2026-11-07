@@ -143,6 +143,18 @@ export default function App() {
     return () => { document.removeEventListener("keydown", show, true); document.removeEventListener("pointerdown", outside, true); };
   }, []);
   const [sidebarPanel, setSidebarPanel] = useState(3);
+  // Leaving Home or opening a new tab shows the SSH browser for it; switching between
+  // tabs that were already open keeps the user's panel choice.
+  const previousActive = useRef<number | null>(0);
+  const seenTabs = useRef(new Set<number>());
+  useEffect(() => {
+    const previous = previousActive.current;
+    previousActive.current = activeId;
+    if (activeId === null || activeId === 0) return;
+    const isNew = !seenTabs.current.has(activeId);
+    seenTabs.current.add(activeId);
+    if (previous === 0 || previous === null || isNew) setSidebarPanel(3);
+  }, [activeId]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
   const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | null>(null);
