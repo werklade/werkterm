@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { createTux, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
+import { createTux, MARGIN, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
@@ -109,7 +109,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         }
         if (!waving) corner();
         if (tux.state === "gone") {
-          tuxes[i] = createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4);
+          tuxes[i] = createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4);
         }
       }
       // Reduced motion needs only occasional blink updates, no continuous RAF loop.
@@ -130,7 +130,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
       lines = Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? "");
       platforms = platformsFromLines(lines);
       holes = [];
-      tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2)));
+      tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2)));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);
     };
     const schedule = () => { clearTimeout(timer); if (enabled && available()) timer = setTimeout(start, clock.remaining(performance.now(), minutes * 60000)); };
