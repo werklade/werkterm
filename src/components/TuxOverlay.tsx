@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { createTux, IdleClock, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
+import { createTux, digSpan, IdleClock, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
@@ -53,7 +53,7 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
         const size = pixel * 16;
         const x = tux.x * cellWidth, y = (tux.y + (tux.state === "dig" ? Math.min(1, tux.age / .9) : 0)) * cellHeight;
         const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "walk" ? (Math.floor(tux.age * 7) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
-        if (tux.state === "dig") { const col = Math.floor(tux.x); hole({ row: tux.floor, start: col - 1, end: col + 2 }, Math.min(1, tux.age / .9)); }
+        if (tux.state === "dig") hole(digSpan(tux), Math.min(1, tux.age / .9));
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
         sprite.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));

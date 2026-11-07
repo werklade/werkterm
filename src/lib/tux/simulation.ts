@@ -11,6 +11,8 @@ export class IdleClock {
 export interface Hole { row: number; start: number; end: number }
 const solid = (platforms: Platform[], holes: Hole[], row: number, x: number) =>
   platforms.some(p => p.y === row && x >= p.start && x < p.end) && !holes.some(h => h.row === row && x >= h.start && x < h.end);
+/** A dig spans wider than the ~5-cell sprite so the damage shows beside it. */
+export const digSpan = (t: { x: number; floor: number }): Hole => ({ row: t.floor, start: Math.floor(t.x) - 3, end: Math.floor(t.x) + 4 });
 export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit"; age: number; wait: number; floor: number }
 export function createTux(x: number, direction = 1, wait = 0): Tux { return { x, y: -2, vy: 0, direction, state: "fall", age: 0, wait, floor: -1 }; }
 export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number, random = Math.random, holes: Hole[] = []): void {
@@ -19,7 +21,7 @@ export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number,
   t.age += dt;
   if (t.state === "exit") { t.x += t.direction * dt * 6; return; }
   if (t.state === "dig") {
-    if (t.age > .9) { const col = Math.floor(t.x); holes.push({ row: t.floor, start: col - 1, end: col + 2 }); t.state = "fall"; t.y += 1; t.vy = 0; t.age = 0; }
+    if (t.age > .9) { holes.push(digSpan(t)); t.state = "fall"; t.y += 1; t.vy = 0; t.age = 0; }
     return;
   }
   if (t.state === "walk") {
