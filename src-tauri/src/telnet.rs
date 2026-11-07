@@ -413,7 +413,7 @@ pub async fn terminal_resize(id: u32, cols: u16, rows: u16) -> Result<(), String
 }
 #[tauri::command]
 pub async fn terminal_close(id: u32) -> Result<(), String> {
-    if let Some(entry) = connections().lock().map_err(|e| e.to_string())?.get(&id) {
+    if let Some(entry) = connections().lock().map_err(|e| e.to_string())?.remove(&id) {
         entry.control.close();
     }
     Ok(())
@@ -425,6 +425,17 @@ pub async fn serial_break(id: u32) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn close_removes_connection_even_before_worker_finishes() {
+        let (tx, _rx) = mpsc::channel(1);
+        let (id, control) = register(tx);
+        terminal_close(id).await.unwrap();
+        assert!(control.stop.load(Ordering::Acquire));
+        assert!(!connections().lock().unwrap().contains_key(&id));
+        assert!(send(id, Message::Data(vec![1])).await.is_err());
+        terminal_close(id).await.unwrap();
+        remove(id);
+    }
     #[test]
     fn split_negotiation_and_subnegotiation() {
         let mut p = Parser::default();

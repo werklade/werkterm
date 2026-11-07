@@ -421,6 +421,9 @@ pub async fn sessions_save(
         session.id = new_id();
     }
     let previous = sessions.iter().position(|s| s.id == session.id);
+    protect_kind_change(&session, &sessions, || {
+        crate::tunnels::protect_session(&app, &session.id)
+    })?;
     let mut proposed = sessions.clone();
     proposed.retain(|s| s.id != session.id);
     proposed.push(session.clone());
@@ -460,6 +463,22 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
         crate::secrets::delete_password(format!("session:{id}"))
             .await
             .map_err(|error| format!("Sitzung wurde gelöscht; Schlüsselbund: {error}"))?;
+    }
+    Ok(())
+}
+
+fn protect_kind_change(
+    session: &SavedSession,
+    sessions: &[SavedSession],
+    protect_tunnels: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if session.kind != "ssh"
+        && sessions
+            .iter()
+            .any(|saved| saved.id == session.id && saved.kind == "ssh")
+    {
+        validate_delete(&session.id, sessions)?;
+        protect_tunnels()?;
     }
     Ok(())
 }
@@ -565,7 +584,8 @@ pub fn mark_duplicates(preview: &mut ImportPreview, sessions: &[SavedSession]) {
         candidate.duplicate_of = sessions
             .iter()
             .find(|session| {
-                session.host.to_lowercase() == candidate.host.to_lowercase()
+                session.kind == "ssh"
+                    && session.host.to_lowercase() == candidate.host.to_lowercase()
                     && session.port == candidate.port
                     && session.user == candidate.user
             })
@@ -740,7 +760,8 @@ fn append_unique_imports(
     let mut result = ImportResult::default();
     for session in imported {
         let duplicate = sessions.iter().any(|saved| {
-            saved.host.to_lowercase() == session.host.to_lowercase()
+            saved.kind == session.kind
+                && saved.host.to_lowercase() == session.host.to_lowercase()
                 && saved.port == session.port
                 && saved.user == session.user
         });
@@ -812,6 +833,69 @@ pub async fn sessions_import_commit(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kind_changes_preserve_named_jump_and_tunnel_references() {
+        let original = jump_sample("gateway", None);
+        for kind in ["telnet", "serial"] {
+            let changed = SavedSession {
+                kind: kind.into(),
+                ..original.clone()
+            };
+            let sessions = vec![original.clone(), jump_sample("production", Some("gateway"))];
+            let error =
+                protect_kind_change(&changed, &sessions, || panic!("jump protection first"))
+                    .unwrap_err();
+            assert!(error.contains("production"));
+            let error = protect_kind_change(&changed, std::slice::from_ref(&original), || {
+                Err("Sitzung wird von SSH-Tunneln verwendet: Database".into())
+            })
+            .unwrap_err();
+            assert!(error.contains("Database"));
+            assert!(
+                protect_kind_change(&changed, std::slice::from_ref(&original), || Ok(())).is_ok()
+            );
+            assert!(protect_kind_change(&changed, &[], || panic!("new session")).is_ok());
+        }
+        assert!(
+            protect_kind_change(&original, std::slice::from_ref(&original), || panic!(
+                "SSH unchanged"
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn import_duplicates_require_matching_kind() {
+        let imported = sample();
+        let mut preview = ImportPreview {
+            candidates: vec![ImportCandidate {
+                key: "windterm:test".into(),
+                name: imported.name.clone(),
+                folder: imported.folder.clone(),
+                host: imported.host.to_uppercase(),
+                port: imported.port,
+                user: imported.user.clone(),
+                key_path: None,
+                one_key: None,
+                duplicate_of: None,
+            }],
+            ..Default::default()
+        };
+        for kind in ["telnet", "serial", "ssh"] {
+            let other = SavedSession {
+                kind: kind.into(),
+                ..sample()
+            };
+            mark_duplicates(&mut preview, std::slice::from_ref(&other));
+            assert_eq!(preview.candidates[0].duplicate_of.is_some(), kind == "ssh");
+            let mut saved = vec![other];
+            let result =
+                append_unique_imports(&mut saved, vec![imported.clone(), imported.clone()])
+                    .unwrap();
+            assert_eq!(result.imported, u32::from(kind != "ssh"));
+            assert_eq!(result.skipped_duplicates, if kind == "ssh" { 2 } else { 1 });
+        }
+    }
     #[test]
     fn password_auth_requires_a_real_existing_secret_when_no_replacement_is_given() {
         assert!(super::require_existing_password(None).is_err());

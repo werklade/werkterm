@@ -156,7 +156,8 @@ export function markImportDuplicates(
   selections: readonly ImportSelection[], sessions: readonly SavedSession[],
 ): ImportSelection[] {
   return selections.map(selection => {
-    const duplicate = sessions.find(session => session.host.toLowerCase() === selection.candidate.host.toLowerCase()
+    const duplicate = sessions.find(session => session.kind === "ssh"
+      && session.host.toLowerCase() === selection.candidate.host.toLowerCase()
       && session.port === selection.candidate.port && session.user === selection.user);
     return { ...selection, candidate: { ...selection.candidate, duplicateOf: duplicate?.id ?? null } };
   });

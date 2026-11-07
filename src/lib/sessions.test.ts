@@ -19,6 +19,13 @@ const candidate = (overrides: Partial<ImportCandidate> = {}): ImportCandidate =>
 });
 
 describe("session helpers", () => {
+  it("only marks SSH sessions as SSH import duplicates", () => {
+    const selections = applyOneKeyMappings([candidate()], {});
+    for (const kind of ["telnet", "serial"]) {
+      expect(markImportDuplicates(selections, [sample({ kind })])[0].candidate.duplicateOf).toBeNull();
+    }
+    expect(markImportDuplicates(selections, [sample({ kind: "telnet" }), sample({ id: "ssh" })])[0].candidate.duplicateOf).toBe("ssh");
+  });
   it("prefers keyring passwords for quick-connect drafts and asks when unavailable", () => {
     const draft = sample({ id: "" });
     expect(initialSessionAuthType(draft, true, true)).toBe("password");
