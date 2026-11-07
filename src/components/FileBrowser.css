@@ -3,7 +3,7 @@
 .browser-settings input { margin: 0; accent-color: var(--accent); }
 .browser-heading { margin: 0; padding: 8px; font-size: inherit; font-weight: 600; overflow-wrap: anywhere; }
 .browser-error { padding: 8px; color: var(--danger); overflow-wrap: anywhere; }
-.browser-list { margin-top: 8px; overflow-y: auto; overflow-x: hidden; min-height: 90px; }
+.sidebar-panel > .browser-list { flex: 1 1 auto; min-height: 90px; margin-top: 8px; overflow-y: auto; overflow-x: hidden; }
 .browser-list table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; }
 .browser-list th { color: var(--fg-secondary); font-weight: 500; text-align: left; }
 .browser-list td, .browser-list th { padding: 5px 4px; border-bottom: 1px solid var(--border); }

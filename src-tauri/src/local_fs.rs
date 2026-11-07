@@ -34,6 +34,17 @@ pub fn wsl_unc_path(distro: &str, path: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(result))
 }
 
+/// Drop the Windows verbatim prefix that `canonicalize` adds (`\\?\C:\x`, `\\?\UNC\srv\x`).
+fn display_local_path(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        path.to_owned()
+    }
+}
+
 pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirListing, String> {
     let (directory, display_path) = if let Some(distro) = wsl_distro {
         if !cfg!(windows) {
@@ -52,7 +63,7 @@ pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirLis
         let directory = directory
             .canonicalize()
             .map_err(|error| format!("Verzeichnis kann nicht aufgelöst werden: {error}"))?;
-        let display_path = directory.to_string_lossy().into_owned();
+        let display_path = display_local_path(&directory.to_string_lossy());
         (directory, display_path)
     };
     let mut entries = Vec::new();
@@ -121,6 +132,13 @@ fn permissions(metadata: &std::fs::Metadata) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_path_drops_verbatim_prefix() {
+        assert_eq!(display_local_path(r"\\?\C:\Users\marck"), r"C:\Users\marck");
+        assert_eq!(display_local_path(r"\\?\UNC\srv\share"), r"\\srv\share");
+        assert_eq!(display_local_path("/home/marck"), "/home/marck");
+    }
 
     #[test]
     fn converts_wsl_paths_without_escaping_share() {
