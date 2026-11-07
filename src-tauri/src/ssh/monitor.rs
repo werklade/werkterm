@@ -9,10 +9,13 @@ head -n 1 /proc/stat
 printf 'MEM\n'; cat /proc/meminfo
 printf 'NET\n'; cat /proc/net/dev
 printf 'UP\n'; cut -d ' ' -f 1 /proc/uptime
-printf 'USERS\n'; if logged=$(who 2>/dev/null); then
-if [ -n "$logged" ]; then printf '%s\n' "$logged" | wc -l; else printf '0\n'; fi
-else printf '\n'; fi
+printf 'USERS\n'; who 2>/dev/null || :
 printf 'DISKS\n'; df -P -k 2>/dev/null | awk 'NR==FNR { if ($3 ~ /^(tmpfs|devtmpfs|overlay|squashfs)$/) skip[$2]=1; next } FNR==1 || !skip[$6]' /proc/mounts -
+printf 'DFALL\n'; df -P -k 2>/dev/null
+printf 'VERSION\n'; cat /proc/version
+printf 'OS\n'; if [ -r /etc/os-release ]; then cat /etc/os-release; fi
+printf 'CPUS\n'; grep -c '^processor' /proc/cpuinfo
+printf 'LOAD\n'; cat /proc/loadavg
 printf 'HOST\n'; uname -n
 printf 'WERKTERM_END\n'
 sleep 2
@@ -30,11 +33,28 @@ pub struct MonitorSample {
     uptime_secs: u64,
     users: Option<u32>,
     disks: Vec<Disk>,
+    version: Option<String>,
+    os_name: Option<String>,
+    os_id: Option<String>,
+    cpu_cores: Option<u32>,
+    load: Vec<f64>,
+    cpu_parts: Vec<f32>,
+    mem_available: Option<u64>,
+    cached: Option<u64>,
+    buffers: Option<u64>,
+    swap_total: Option<u64>,
+    swap_used: Option<u64>,
+    interfaces: Vec<Network>,
+    who: Vec<String>,
+    df_all: Vec<Disk>,
     unsupported: bool,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Disk {
+    device: String,
+    used_bytes: u64,
+    free_bytes: u64,
     mount: String,
     used_percent: u32,
     size_bytes: u64,
@@ -43,12 +63,68 @@ struct Disk {
 struct Snapshot {
     sample: MonitorSample,
     cpu: Vec<u64>,
-    rx: u64,
-    tx: u64,
     uptime: f64,
 }
-fn section<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
-    text.split_once(start)?.1.split_once(end).map(|v| v.0)
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Network {
+    name: String,
+    rx: u64,
+    tx: u64,
+    rx_errors: u64,
+    tx_errors: u64,
+    rx_drop: u64,
+    tx_drop: u64,
+    rx_rate: Option<u64>,
+    tx_rate: Option<u64>,
+}
+fn section<'a>(text: &'a str, name: &str) -> &'a str {
+    const MARKERS: [&str; 12] = [
+        "MEM",
+        "NET",
+        "UP",
+        "USERS",
+        "DISKS",
+        "DFALL",
+        "HOST",
+        "VERSION",
+        "OS",
+        "CPUS",
+        "LOAD",
+        "WERKTERM_END",
+    ];
+    let Some((_, rest)) = text.split_once(&format!("\n{name}\n")) else {
+        return "";
+    };
+    let end = rest
+        .split_inclusive('\n')
+        .scan(0, |offset, line| {
+            let start = *offset;
+            *offset += line.len();
+            Some((start, line.trim_end()))
+        })
+        .find(|(_, line)| MARKERS.contains(line))
+        .map_or(rest.len(), |(offset, _)| offset);
+    rest[..end].trim_end()
+}
+fn disks(text: &str) -> Vec<Disk> {
+    text.lines()
+        .filter_map(|line| {
+            let f: Vec<_> = line.split_whitespace().collect();
+            if f.len() < 6 {
+                return None;
+            }
+            let bytes = |i: usize| f[i].parse::<u64>().ok()?.checked_mul(1024);
+            Some(Disk {
+                device: f[0].into(),
+                size_bytes: bytes(1)?,
+                used_bytes: bytes(2)?,
+                free_bytes: bytes(3)?,
+                used_percent: f[4].strip_suffix('%')?.parse().ok()?,
+                mount: f[5..].join(" "),
+            })
+        })
+        .collect()
 }
 fn parse(text: &str) -> Option<Snapshot> {
     let cpu = text
@@ -63,87 +139,104 @@ fn parse(text: &str) -> Option<Snapshot> {
     if cpu.len() < 4 {
         return None;
     }
-    let memory = section(text, "\nMEM\n", "\nNET\n")?;
-    let mem = |key: &str| -> Option<u64> {
+    let memory = section(text, "MEM");
+    let mem = |key: &str| {
         memory.lines().find_map(|line| {
             let (name, value) = line.split_once(':')?;
-            (name == key)
-                .then(|| {
-                    value
-                        .split_whitespace()
-                        .next()?
-                        .parse::<u64>()
-                        .ok()?
-                        .checked_mul(1024)
-                })
-                .flatten()
+            if name != key {
+                return None;
+            }
+            value
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()?
+                .checked_mul(1024)
         })
     };
-    let total = mem("MemTotal")?;
+    let total = mem("MemTotal").unwrap_or(0);
     let available = mem("MemAvailable").or_else(|| {
         mem("MemFree")?
-            .checked_add(mem("Buffers")?)?
-            .checked_add(mem("Cached")?)
-    })?;
-    if available > total {
+            .checked_add(mem("Buffers").unwrap_or(0))?
+            .checked_add(mem("Cached").unwrap_or(0))
+    });
+    if available.is_some_and(|v| v > total) {
         return None;
     }
-    let mut rx = 0u64;
-    let mut tx = 0u64;
-    for line in section(text, "\nNET\n", "\nUP\n")?.lines() {
-        let Some((name, values)) = line.split_once(':') else {
-            continue;
-        };
-        if name.trim() == "lo" {
-            continue;
-        }
-        let values = values
-            .split_whitespace()
-            .map(str::parse)
-            .collect::<Result<Vec<u64>, _>>()
-            .ok()?;
-        if values.len() < 16 {
-            return None;
-        }
-        rx = rx.checked_add(values[0])?;
-        tx = tx.checked_add(values[8])?;
-    }
-    let uptime: f64 = section(text, "\nUP\n", "\nUSERS\n")?.trim().parse().ok()?;
+    let interfaces: Vec<_> = section(text, "NET")
+        .lines()
+        .filter_map(|line| {
+            let (name, values) = line.split_once(':')?;
+            if name.trim() == "lo" {
+                return None;
+            }
+            let v = values
+                .split_whitespace()
+                .map(str::parse)
+                .collect::<Result<Vec<u64>, _>>()
+                .ok()?;
+            if v.len() < 16 {
+                return None;
+            }
+            Some(Network {
+                name: name.trim().into(),
+                rx: v[0],
+                tx: v[8],
+                rx_errors: v[2],
+                tx_errors: v[10],
+                rx_drop: v[3],
+                tx_drop: v[11],
+                rx_rate: None,
+                tx_rate: None,
+            })
+        })
+        .collect();
+    let uptime = section(text, "UP").trim().parse::<f64>().unwrap_or(0.0);
     if !uptime.is_finite() || uptime < 0.0 {
         return None;
     }
-    let users = section(text, "\nUSERS\n", "\nDISKS\n")?.trim().parse().ok();
-    let mut disks = Vec::new();
-    for line in section(text, "\nDISKS\n", "\nHOST\n")?.lines().skip(1) {
-        let fields: Vec<_> = line.split_whitespace().collect();
-        if fields.len() < 6 {
-            return None;
-        }
-        let used_percent = fields[4].strip_suffix('%')?.parse::<u32>().ok()?;
-        let size_bytes = fields[1].parse::<u64>().ok()?.checked_mul(1024)?;
-        disks.push(Disk {
-            mount: fields[5..].join(" "),
-            used_percent,
-            size_bytes,
-        });
-    }
-    let host = text.split_once("\nHOST\n")?.1.trim().to_owned();
-    if host.is_empty() {
-        return None;
-    }
+    let os = |key: &str| {
+        section(text, "OS").lines().find_map(|line| {
+            let (k, v) = line.split_once('=')?;
+            (k == key).then(|| v.trim_matches(['"', '\'']).to_owned())
+        })
+    };
+    let who: Vec<_> = section(text, "USERS")
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_owned)
+        .collect();
     Some(Snapshot {
         sample: MonitorSample {
-            host,
-            mem_used: total - available,
+            host: section(text, "HOST").trim().into(),
+            version: (!section(text, "VERSION").is_empty())
+                .then(|| section(text, "VERSION").into()),
+            os_name: os("PRETTY_NAME"),
+            os_id: os("ID"),
+            cpu_cores: section(text, "CPUS").trim().parse().ok(),
+            load: section(text, "LOAD")
+                .split_whitespace()
+                .take(3)
+                .filter_map(|v| v.parse().ok().filter(|v: &f64| v.is_finite()))
+                .collect(),
             mem_total: total,
+            mem_used: total.saturating_sub(available.unwrap_or(total)),
+            mem_available: available,
+            cached: mem("Cached"),
+            buffers: mem("Buffers"),
+            swap_total: mem("SwapTotal"),
+            swap_used: mem("SwapTotal")
+                .zip(mem("SwapFree"))
+                .map(|(t, f)| t.saturating_sub(f)),
             uptime_secs: uptime as u64,
-            users,
-            disks,
+            users: (!who.is_empty()).then_some(who.len() as u32),
+            who,
+            interfaces,
+            disks: disks(section(text, "DISKS")),
+            df_all: disks(section(text, "DFALL")),
             ..Default::default()
         },
         cpu,
-        rx,
-        tx,
         uptime,
     })
 }
@@ -152,14 +245,33 @@ fn deltas(current: &mut Snapshot, previous: &Snapshot) {
     if elapsed <= 0.0 {
         return;
     }
+    for interface in &mut current.sample.interfaces {
+        if let Some(old) = previous
+            .sample
+            .interfaces
+            .iter()
+            .find(|n| n.name == interface.name)
+        {
+            interface.rx_rate = interface
+                .rx
+                .checked_sub(old.rx)
+                .map(|v| (v as f64 / elapsed) as u64);
+            interface.tx_rate = interface
+                .tx
+                .checked_sub(old.tx)
+                .map(|v| (v as f64 / elapsed) as u64);
+        }
+    }
     current.sample.net_rx = current
-        .rx
-        .checked_sub(previous.rx)
-        .map(|v| (v as f64 / elapsed) as u64);
+        .sample
+        .interfaces
+        .iter()
+        .try_fold(0u64, |sum, n| sum.checked_add(n.rx_rate?));
     current.sample.net_tx = current
-        .tx
-        .checked_sub(previous.tx)
-        .map(|v| (v as f64 / elapsed) as u64);
+        .sample
+        .interfaces
+        .iter()
+        .try_fold(0u64, |sum, n| sum.checked_add(n.tx_rate?));
     if current.cpu.len() != previous.cpu.len() {
         return;
     }
@@ -176,6 +288,10 @@ fn deltas(current: &mut Snapshot, previous: &Snapshot) {
             && total > 0
             && idle <= total
         {
+            current.sample.cpu_parts = values
+                .iter()
+                .map(|v| (100.0 * *v as f64 / total as f64) as f32)
+                .collect();
             current.sample.cpu_percent =
                 Some((100.0 * (total - idle) as f64 / total as f64) as f32);
         }
@@ -330,8 +446,55 @@ mod tests {
     use super::*;
     fn block(cpu: &str, rx: u64, uptime: u32) -> String {
         format!(
-            "cpu {cpu}\nMEM\nMemTotal: 1000 kB\nMemFree: 100 kB\nBuffers: 50 kB\nCached: 150 kB\nNET\neth0: {rx} 0 0 0 0 0 0 0 {rx} 0 0 0 0 0 0 0\nlo: 9999 0 0 0 0 0 0 0 9999 0 0 0 0 0 0 0\nUP\n{uptime}\nUSERS\n2\nDISKS\nFilesystem 1024-blocks Used Available Capacity Mounted on\n/dev/a 100 50 50 50% /\nHOST\nserver"
+            "cpu {cpu}\nMEM\nMemTotal: 1000 kB\nMemFree: 100 kB\nBuffers: 50 kB\nCached: 150 kB\nNET\neth0: {rx} 0 0 0 0 0 0 0 {rx} 0 0 0 0 0 0 0\nlo: 9999 0 0 0 0 0 0 0 9999 0 0 0 0 0 0 0\nUP\n{uptime}\nUSERS\nalice pts/0\nbob pts/1\nDISKS\nFilesystem 1024-blocks Used Available Capacity Mounted on\n/dev/a 100 50 50 50% /\nHOST\nserver"
         )
+    }
+    #[test]
+    fn extended_sections_and_interface_rates() {
+        let extra = "\nVERSION\nLinux version example\nOS\nPRETTY_NAME=\"Debian GNU/Linux\"\nID=debian\nCPUS\n4\nLOAD\n0.10 0.20 0.30 1/100 42\nDFALL\nFilesystem 1024-blocks Used Available Capacity Mounted on\ntmpfs 100 10 90 10% /run";
+        let first = parse(&(block("10 10 10 10 10 10 10 10", 100, 10) + extra)).unwrap();
+        let mut next = parse(&(block("20 20 20 20 20 20 20 20", 300, 12) + extra)).unwrap();
+        deltas(&mut next, &first);
+        assert_eq!(next.sample.cpu_parts, vec![12.5; 8]);
+        assert_eq!(next.sample.cpu_percent, Some(75.0));
+        assert_eq!(next.sample.interfaces[0].rx_rate, Some(100));
+        assert_eq!(next.sample.interfaces[0].tx_rate, Some(100));
+        assert_eq!(next.sample.cpu_cores, Some(4));
+        assert_eq!(next.sample.os_id.as_deref(), Some("debian"));
+        assert_eq!(next.sample.os_name.as_deref(), Some("Debian GNU/Linux"));
+        assert_eq!(
+            next.sample.version.as_deref(),
+            Some("Linux version example")
+        );
+        assert_eq!(next.sample.load, vec![0.1, 0.2, 0.3]);
+        assert_eq!(next.sample.df_all[0].device, "tmpfs");
+        assert_eq!(next.sample.who.len(), 2);
+        let minimal = parse("cpu 1 2 3 4").unwrap().sample;
+        assert!(minimal.os_id.is_none());
+        assert!(minimal.who.is_empty());
+        assert!(minimal.interfaces.is_empty());
+        // BusyBox installations may not provide who or os-release.
+        let busybox = parse(&block("1 2 3 4", 1, 1).replace("alice pts/0\nbob pts/1", ""))
+            .unwrap()
+            .sample;
+        assert!(busybox.who.is_empty());
+        assert!(busybox.os_name.is_none());
+        assert!(busybox.users.is_none());
+        let swap = parse(
+            &block("1 2 3 4", 1, 1).replace("MEM\n", "MEM\nSwapTotal: 100 kB\nSwapFree: 25 kB\n"),
+        )
+        .unwrap()
+        .sample;
+        assert_eq!(swap.swap_used, Some(75 * 1024));
+        assert_eq!(swap.cached, Some(150 * 1024));
+        let errors = parse(&block("1 2 3 4", 1, 1).replace(
+            "eth0: 1 0 0 0 0 0 0 0 1 0 0 0",
+            "eth0: 1 0 2 3 0 0 0 0 1 0 4 5",
+        ))
+        .unwrap()
+        .sample;
+        assert_eq!(errors.interfaces[0].rx_errors, 2);
+        assert_eq!(errors.interfaces[0].tx_drop, 5);
     }
     #[test]
     fn parser_and_deltas() {
@@ -385,7 +548,7 @@ mod tests {
     #[test]
     fn available_memory_optional_users_and_bad_blocks() {
         let text = block("10 0 0 90", 100, 10).replace("MemFree: 100 kB", "MemAvailable: 500 kB");
-        let sample = parse(&text.replace("\n2\nDISKS", "\n\nDISKS"))
+        let sample = parse(&text.replace("\nalice pts/0\nbob pts/1\nDISKS", "\n\nDISKS"))
             .unwrap()
             .sample;
         assert_eq!(sample.mem_used, 500 * 1024);
@@ -394,7 +557,6 @@ mod tests {
             "".to_owned(),
             "cpu nope".to_owned(),
             text.replace("1000 kB", "1 kB"),
-            text.replace("50%", "bad"),
             text.replace("\n10\nUSERS", "\nNaN\nUSERS"),
         ] {
             assert!(parse(&text).is_none());
