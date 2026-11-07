@@ -14,10 +14,11 @@ export type { BrowserTab } from "./FileBrowser";
 const panels: { name: string; icon: IconName; placeholder: string }[] = [
   { name: "Sessions", icon: "star", placeholder: "Noch keine gespeicherten Sitzungen." },
   { name: "Tools", icon: "tools", placeholder: "Werkzeuge folgen in einer späteren Phase." },
-  { name: "Macros", icon: "macros", placeholder: "Noch keine Makros vorhanden." },
+  { name: "Macros", icon: "macros", placeholder: "Makros folgen in einer späteren Version" },
   { name: "SSH-Browser", icon: "globe", placeholder: "Keine SSH-Sitzung verbunden" },
 ];
 interface Props {
+  active: number; onActive(value: number): void; onOpenSettings(): void;
   onStatus: (message: string) => void;
   onOpenFile: (tab: BrowserTab, path: string) => void;
   transferQueue: TransferQueueHandle;
@@ -32,7 +33,7 @@ interface Props {
   onAccess: (id: number, sessionId: number, mode: "sftp" | "exec" | "local", sudo: boolean) => void;
   onPath: (id: number, path: string) => void;
 }
-export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
+export function Sidebar({ active, onActive: setActive, onOpenSettings, onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [width, setWidth] = useState(() => clampPanel(loadWidth("werkterm.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
   useEffect(() => {
@@ -41,7 +42,6 @@ export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSett
     return () => window.removeEventListener("resize", resized);
   }, []);
   const resize = (next: number) => { const value = clampPanel(next, window.innerWidth); setWidth(value); storeWidth("werkterm.sidebar.width", value); };
-  const [active, setActive] = useState(3);
   const [input, setInput] = useState("");
   const [invalid, setInvalid] = useState(false);
   const error = "Ungültige Adresse. Erwartet: [user@]host[:port], IPv6 in […], Port 1–65535.";
@@ -51,7 +51,7 @@ export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSett
     </form>
     <div className="sidebar-content"><nav className="sidebar-icons" aria-label="Seitenbereiche">{panels.map((panel, index) => <button type="button" key={panel.name} aria-label={panel.name} aria-pressed={active === index} title={panel.name} onClick={() => setActive(index)}><Icon name={panel.icon} /></button>)}</nav>
       <section className="sidebar-panel" aria-label={panels[active].name}><h2>{panels[active].name}</h2>
-        {active === 0 ? <SessionsPanel sessions={savedSessions} onConnect={onSavedConnect} onEdit={onEditSession} onReload={onReloadSessions} onStatus={onStatus} /> : active === 3 ? <FileBrowser onOpenFile={onOpenFile} key={tab?.id ?? "none"} tab={tab} settings={settings} onSettings={onSettings} onPath={onPath} onAccess={onAccess} onStatus={onStatus} transferQueue={transferQueue} /> : <p className="empty-state">{panels[active].placeholder}</p>}
+        {active === 0 ? <SessionsPanel sessions={savedSessions} onConnect={onSavedConnect} onEdit={onEditSession} onReload={onReloadSessions} onStatus={onStatus} /> : active === 3 ? <FileBrowser onOpenFile={onOpenFile} key={tab?.id ?? "none"} tab={tab} settings={settings} onSettings={onSettings} onPath={onPath} onAccess={onAccess} onStatus={onStatus} transferQueue={transferQueue} /> : active === 1 ? <div className="tools-panel"><button onClick={onOpenSettings}>Einstellungen…</button><button aria-disabled="true" title="folgt">MultiExec</button></div> : <p className="empty-state">{panels[active].placeholder}</p>}
       </section>
     </div>
     <ResizeGrip className="sidebar-resize" label="Seitenpanel-Breite" value={width} min={260} max={Math.max(260, windowWidth * .6)} onResize={resize} onAuto={() => resize(DEFAULT_PANEL_WIDTH)} />

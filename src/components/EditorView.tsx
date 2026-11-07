@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { basicSetup } from "codemirror";
-import { Compartment, EditorState, Prec, type Range } from "@codemirror/state";
+import { Compartment, EditorState, Facet, Prec, type Range } from "@codemirror/state";
 import { Decoration, EditorView as CodeMirrorView, ViewPlugin, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { indentWithTab, undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
 import { LanguageDescription, HighlightStyle, foldNodeProp, foldService, syntaxHighlighting, syntaxTree } from "@codemirror/language";
@@ -11,15 +11,19 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import { tags } from "@lezer/highlight";
 import { Icon, type IconName } from "./Icon";
 import { useModal } from "./useModal";
-import { colorCodeMatches, EDITOR_BACKGROUND, mixColor, parseColor, textColor } from "../lib/colorCodes";
+import { colorCodeMatches, mixColor, parseColor, textColor, luminance } from "../lib/colorCodes";
 import { initialEol, eolChanged, mostFrequentEol } from "../lib/editorEol";
 import { braceFold, indentationFold } from "../lib/editorFolding";
 import { languageFromShebang } from "../lib/editorLanguage";
 import type { EditorDocument, EditorEol } from "../lib/editorTypes";
 import "./EditorView.css";
 
+import { selectedTheme, type Settings } from "../lib/settings";
+import { emojiFallback } from "../lib/terminalThemes";
+
 export interface EditorHandle { save(): Promise<boolean>; isDirty(): boolean; lock(): Promise<void>; unlock(): void }
 interface EditorViewProps {
+  settings: Settings;
   document: EditorDocument;
   onDirtyChange(dirty: boolean): void;
   onStatusChange(status: string): void;
@@ -34,9 +38,11 @@ function EditorChoice({ choice, onAnswer }: { choice: Choice; onAnswer(value: st
   </dialog>;
 }
 
+const editorBackground = Facet.define<string, string>({ combine: values => values[0] ?? "#000000" });
+
 function decorations(view: CodeMirrorView): DecorationSet {
   const ranges: Range<Decoration>[] = [];
-  const background = parseColor(EDITOR_BACKGROUND)!;
+  const background = parseColor(view.state.facet(editorBackground)) ?? parseColor("#000000")!;
   for (const { from, to } of view.visibleRanges) {
     // Include adjacent characters only to validate word boundaries, never decorate outside visibleRanges.
     const start = Math.max(0, from - 1), end = Math.min(view.state.doc.length, to + 1);
@@ -52,7 +58,7 @@ const colorPlugin = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
   constructor(view: CodeMirrorView) { this.decorations = decorations(view); }
   update(update: ViewUpdate) {
-    if (update.docChanged || update.viewportChanged) this.decorations = decorations(update.view);
+    if (update.docChanged || update.viewportChanged || update.transactions.length > 0) this.decorations = decorations(update.view);
   }
 }, { decorations: plugin => plugin.decorations });
 
@@ -105,7 +111,7 @@ const appTheme = CodeMirrorView.theme({
   ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "#181818" },
   ".cm-line": { padding: "0 6px" },
   ".cm-content": { caretColor: "#d4d4d4" },
-}, { dark: true });
+});
 const comments = syntaxHighlighting(HighlightStyle.define([{ tag: tags.comment, color: "#829b7a", fontStyle: "italic" }]));
 const eolLabels: Record<EditorEol, string> = { lf: "LF", crLf: "CRLF", cr: "CR" };
 
@@ -126,10 +132,11 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   const saveRef = useRef<() => Promise<boolean>>(async () => false);
   const languageCompartment = useRef(new Compartment());
   const wrapCompartment = useRef(new Compartment());
+  const preferencesCompartment = useRef(new Compartment());
   const readonlyCompartment = useRef(new Compartment());
   const languageRequest = useRef(0);
   const [eol, setEol] = useState(target.current);
-  const [wrap, setWrap] = useState(false);
+  const [wrap, setWrap] = useState(props.settings.editorWrap);
   const [notice, setNotice] = useState("");
   const [choice, setChoice] = useState<Choice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -242,9 +249,28 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     }).catch(() => { if (mounted.current && languageRequest.current === request) setNotice("Die Syntaxhervorhebung konnte nicht geladen werden."); });
   }
 
+  function preferenceExtensions(settings: Settings) {
+    const theme = selectedTheme(settings);
+    const light = luminance(parseColor(theme.background)!) > 140;
+    return [editorBackground.of(theme.background), light ? [] : oneDark, Prec.high(appTheme), Prec.highest(CodeMirrorView.theme({
+      "&": { backgroundColor: theme.background, color: theme.foreground },
+      ".cm-scroller": { fontSize: `${settings.editorFontSize}px`, fontFamily: settings.fontFamily + emojiFallback },
+      ".cm-content": { caretColor: theme.cursor },
+      ".cm-gutters": { backgroundColor: theme.background, color: light ? "#666666" : "#999999" },
+      ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: light ? "#0000000b" : "#ffffff0b" },
+    }, { dark: !light })), EditorState.tabSize.of(settings.editorTabSize)];
+  }
+  useEffect(() => {
+    view.current?.dispatch({ effects: preferencesCompartment.current.reconfigure(preferenceExtensions(props.settings)) });
+  }, [props.settings]);
+  useEffect(() => {
+    setWrap(props.settings.editorWrap);
+    view.current?.dispatch({ effects: wrapCompartment.current.reconfigure(props.settings.editorWrap ? CodeMirrorView.lineWrapping : []) });
+  }, [props.settings.editorWrap]);
+
   function editorExtensions(readonly: boolean) {
     return [
-      basicSetup, oneDark, Prec.highest(appTheme), Prec.highest(comments), colorPlugin, indentationPlugin, fallbackFolding,
+      basicSetup, preferencesCompartment.current.of(preferenceExtensions(props.settings)), Prec.highest(comments), colorPlugin, indentationPlugin, fallbackFolding,
       readonlyCompartment.current.of([EditorState.readOnly.of(readonly || locks.current > 0), CodeMirrorView.editable.of(!readonly && !locks.current)]),
       EditorState.transactionFilter.of(transaction => locks.current && transaction.docChanged ? [] : transaction),
       languageCompartment.current.of([]), wrapCompartment.current.of(wrap ? CodeMirrorView.lineWrapping : []),

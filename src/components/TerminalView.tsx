@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { Channel, killPty, resizePty, spawnPty, writePty } from "../lib/pty";
@@ -8,7 +8,11 @@ import { parseOsc7, type TerminalCwd } from "../lib/osc7";
 import { parseQuickConnect } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
 
+import { selectedTheme, type Settings } from "../lib/settings";
+import { emojiFallback } from "../lib/terminalThemes";
+
 interface Props {
+  preferences: Settings;
   id: number;
   kind: "local" | "wsl" | "ssh";
   target?: string;
@@ -26,18 +30,10 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-function terminalTheme(styles: CSSStyleDeclaration): ITheme {
-  const color = (name: string) => styles.getPropertyValue(`--term-${name}`).trim();
-  return {
-    background: styles.getPropertyValue("--bg-content").trim(), foreground: color("fg"), cursor: color("cursor"), selectionBackground: color("selection"),
-    black: color("black"), red: color("red"), green: color("green"), yellow: color("yellow"), blue: color("blue"), magenta: color("magenta"), cyan: color("cyan"), white: color("white"),
-    brightBlack: color("bright-black"), brightRed: color("bright-red"), brightGreen: color("bright-green"), brightYellow: color("bright-yellow"), brightBlue: color("bright-blue"), brightMagenta: color("bright-magenta"), brightCyan: color("bright-cyan"), brightWhite: color("bright-white"),
-  };
-}
-
-export function TerminalView({ id, kind, target, savedSessionId, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ preferences, id, kind, target, savedSessionId, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
+  const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
   const activeRef = useRef(active);
   activeRef.current = active;
   const callbacks = useRef({ onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts });
@@ -52,8 +48,8 @@ export function TerminalView({ id, kind, target, savedSessionId, active, shellIn
     queueMicrotask(() => {
       const element = container.current;
       if (cancelled || !element) return;
-      const styles = getComputedStyle(element);
-      const terminal = new Terminal({ cursorBlink: true, fontFamily: `${styles.getPropertyValue("--font-mono").trim()}, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Twemoji Mozilla"`, fontSize: parseFloat(styles.getPropertyValue("--font-size-term")), theme: terminalTheme(styles) });
+      const initial = preferencesRef.current;
+      const terminal = new Terminal({ fontFamily: initial.fontFamily + emojiFallback, fontSize: initial.fontSize, lineHeight: initial.lineHeight, cursorStyle: initial.cursorStyle, cursorBlink: initial.cursorBlink, scrollback: initial.scrollback, theme: selectedTheme(initial) });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(element);
@@ -137,6 +133,13 @@ export function TerminalView({ id, kind, target, savedSessionId, active, shellIn
     });
     return () => { cancelled = true; cleanup?.(); };
   }, [id, kind, target, savedSessionId]);
+
+  useEffect(() => {
+    const current = runtime.current;
+    if (!current) return;
+    Object.assign(current.terminal.options, { fontFamily: preferences.fontFamily + emojiFallback, fontSize: preferences.fontSize, lineHeight: preferences.lineHeight, cursorStyle: preferences.cursorStyle, cursorBlink: preferences.cursorBlink, scrollback: preferences.scrollback, theme: selectedTheme(preferences) });
+    if (activeRef.current) current.fit.fit();
+  }, [preferences]);
 
   useEffect(() => {
     if (!active) return;

@@ -1,4 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { HelpDialog } from "./components/HelpDialog";
+import { ImportDialog } from "./components/ImportDialog";
+import { normalizeSettings, selectedTheme } from "./lib/settings";
+import type { AppMenu } from "./components/MenuBar";
 import { MenuBar } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar, type BrowserTab } from "./components/Sidebar";
@@ -92,6 +97,13 @@ export default function App() {
   const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
   useEffect(reloadSessions, [reloadSessions]);
   const [settings, setSettings] = useState(loadSettings);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarPanel, setSidebarPanel] = useState(3);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
+  const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | null>(null);
+  const fullscreenPending = useRef(false);
+  useEffect(() => { document.documentElement.style.setProperty("--bg-content", selectedTheme(settings).background); }, [settings]);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
   const promptQueue = useRef<QueuedPrompt[]>([]);
   const liveTabs = useRef(new Set([1]));
@@ -314,7 +326,8 @@ export default function App() {
   const setPath = useCallback((id: number, browserPath: string) => {
     setTabs(current => current.map(tab => tab.id === id ? { ...tab, browserPath } : tab));
   }, []);
-  const changeSettings = (next: Settings) => {
+  const changeSettings = (input: Settings) => {
+    const next = normalizeSettings(input);
     settingsRef.current = next;
     setSettings(next);
     saveSettings(next);
@@ -348,21 +361,61 @@ export default function App() {
   const offerSave = quickTarget && sessionsLoaded && !savedSessions.some(session => session.host.toLowerCase() === quickTarget.host.toLowerCase() && session.port === quickTarget.port && session.user === quickTarget.user);
   const dismissSave = (tabId: number) => setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, saveDismissed: true } : tab));
 
+  const showPanel = (index: number) => { setSidebarVisible(true); setSidebarPanel(index); };
+  const action = (name: string) => {
+    switch (name) {
+      case "local": openTab("local"); break;
+      case "wsl": if (hasWsl) openTab("wsl"); break;
+      case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Quick connect"]')?.focus()); break;
+      case "close": if (activeId !== null) closeTab(activeId); break;
+      case "quit": void closeRequest.current(); break;
+      case "newSession": setSessionDialog({}); break;
+      case "sessions": showPanel(0); break;
+      case "mobaxterm": case "windterm": setImportSource(name); break;
+      case "sidebar": setSidebarVisible(value => !value); break;
+      case "browser": showPanel(3); break;
+      case "monitoring": changeSettings({ ...settings, monitoring: !settings.monitoring }); break;
+      case "larger": case "smaller": case "resetFont": {
+        const delta = name === "larger" ? 1 : -1;
+        changeSettings({ ...settings, fontSize: name === "resetFont" ? 14 : settings.fontSize + delta, editorFontSize: name === "resetFont" ? 14 : settings.editorFontSize + delta }); break;
+      }
+      case "fullscreen": {
+        if (fullscreenPending.current) break;
+        fullscreenPending.current = true;
+        const win = getCurrentWindow();
+        void win.isFullscreen().then(value => win.setFullscreen(!value)).catch(reason => reportStatus(String(reason))).finally(() => { fullscreenPending.current = false; }); break;
+      }
+      case "settings": setSettingsOpen(true); break;
+      case "shortcuts": setHelp("shortcuts"); break;
+      case "about": setHelp("about"); break;
+    }
+  };
+  const menus: AppMenu[] = [
+    { label: "Terminal", mnemonic: 0, items: [
+      { label: "Neues lokales Terminal", action: "local", shortcut: "Strg+Umschalt+T" },
+      ...(hasWsl ? [{ label: "Neues WSL-Terminal", action: "wsl" }] : []),
+      { label: "Quick connect…", action: "quick" }, { label: "Tab schließen", action: "close", shortcut: "Strg+Umschalt+W", disabled: activeId === null, tooltip: activeId === null ? "Kein Tab geöffnet" : undefined }, { label: "Beenden", action: "quit" },
+    ] },
+    { label: "Sessions", mnemonic: 0, items: [{ label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungen anzeigen", action: "sessions" }, { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" }] },
+    { label: "View", mnemonic: 0, items: [{ label: "Seitenleiste", action: "sidebar", checked: sidebarVisible }, { label: "SSH-Browser anzeigen", action: "browser" }, { label: "Monitoring-Leiste", action: "monitoring", checked: settings.monitoring }, { label: "Schrift größer", action: "larger", shortcut: "Strg+Umschalt+Plus" }, { label: "Schrift kleiner", action: "smaller", shortcut: "Strg+Umschalt+Minus" }, { label: "Schrift Standard", action: "resetFont", shortcut: "Strg+Umschalt+0" }, { label: "Vollbild", action: "fullscreen", shortcut: "F11" }] },
+    { label: "Tools", mnemonic: 1, items: [{ label: "MultiExec", action: "multiexec", disabled: true, tooltip: "folgt" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," }] },
+    { label: "Help", mnemonic: 0, items: [{ label: "Tastenkürzel", action: "shortcuts" }, { label: "Über Werkterm", action: "about" }] },
+  ];
   return <div className="app-shell">
-    <MenuBar />
-    <Toolbar hasWsl={hasWsl} onOpen={openTab} />
+    <MenuBar menus={menus} onAction={action} />
+    <Toolbar hasWsl={hasWsl} onOpen={openTab} onSession={() => setSessionDialog({})} onTools={() => showPanel(1)} />
     <div className="workspace">
-      <Sidebar onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
+      {sidebarVisible && <Sidebar active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <TabBar tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         <div className="terminal-stack">
           <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} active={tab.id === activeId}
-            shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
+            preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
-            return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
+            return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView settings={settings} ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
               onDirtyChange={dirty => setEditors(current => !current[id] || current[id].dirty === dirty ? current : { ...current, [id]: { ...current[id], dirty } })}
               onStatusChange={status => setEditors(current => !current[id] || current[id].status === status ? current : { ...current, [id]: { ...current[id], status } })}
               onDocumentChange={document => setEditors(current => !current[id] ? current : { ...current, [id]: { ...current[id], document } })} /></div>;
@@ -372,6 +425,9 @@ export default function App() {
       </main>
     </div>
     <footer className="statusbar" role="status" aria-live="polite"><span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClose={() => setSettingsOpen(false)} />}
+    {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
+    {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
     {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={() => { if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); }} />}
     {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}

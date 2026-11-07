@@ -56,7 +56,7 @@ const actions: { icon: IconName; label: string; action?: Action }[] = [
   { icon: "delete", label: "Löschen", action: "delete" },
   { icon: "permissions", label: "SSH-Browser mit sudo-Rechten", action: "sudo" }, { icon: "edit", label: "Öffnen im Editor", action: "edit" },
 ];
-const settingLabels: { key: keyof Settings; label: string; title: string }[] = [
+const settingLabels: { key: "followTerminalFolder" | "shellIntegration" | "sshPromptCommand"; label: string; title: string }[] = [
   { key: "followTerminalFolder", label: "Follow Terminal Folder", title: "Browser folgt dem Terminalverzeichnis" },
   { key: "shellIntegration", label: "Shell-Integration", title: "OSC 7 in neuen lokalen und WSL-Sitzungen aktivieren" },
   { key: "sshPromptCommand", label: "SSH PROMPT_COMMAND", title: "OSC 7 einmalig in neuen SSH-Sitzungen aktivieren" },

@@ -5,6 +5,7 @@ pub mod pty;
 pub mod secrets;
 pub mod sessions;
 pub mod ssh;
+mod terminal_colors;
 
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            terminal_colors::import_mobaxterm_colors,
             editor::editor_open_remote,
             editor::editor_open_local,
             editor::editor_save,

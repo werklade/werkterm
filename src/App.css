@@ -81,3 +81,27 @@ input::placeholder { color: var(--fg-muted); }
 .resize-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; user-select: none; z-index: 3; }
 .resize-grip:hover, .resize-grip:focus-visible { background: var(--accent); outline: none; }
 .sidebar-resize { right: -4px; }
+.menu-root { position: relative; display: flex; }
+.menu-root > button { padding: 0 12px; }
+.menu-root > button[aria-expanded="true"] { background: var(--bg-hover); }
+.app-menu { position: absolute; top: 100%; left: 0; z-index: 100; min-width: 310px; padding: 4px; background: var(--bg-panel); color: var(--fg-primary); border: 1px solid var(--border-strong); box-shadow: 0 6px 18px #0008; }
+.app-menu button { display: flex; align-items: center; justify-content: space-between; gap: 28px; width: 100%; padding: 8px 10px; text-align: left; white-space: nowrap; }
+.app-menu button:focus { background: var(--bg-hover); outline: 1px solid var(--focus-ring); }
+[aria-disabled="true"] { color: var(--fg-muted); cursor: default; }
+.app-menu kbd { font: inherit; color: var(--fg-secondary); font-size: 11px; }
+.tools-panel { display: flex; flex-direction: column; padding: 8px; gap: 8px; }
+.tools-panel button { padding: 8px; text-align: left; }
+.settings-dialog { width: 520px; max-height: calc(100vh - 40px); overflow: auto; }
+.settings-dialog [role="tablist"] { display: flex; border-bottom: 1px solid var(--border-strong); }
+.settings-dialog [role="tab"] { padding: 8px 16px; }
+.settings-dialog [aria-selected="true"] { border-bottom: 2px solid var(--accent); }
+.settings-fields { display: grid; gap: 12px; margin-top: 16px; }
+.settings-fields label { display: grid; grid-template-columns: 1fr 1.4fr; align-items: center; gap: 12px; }
+.settings-fields select { padding: 6px; }
+.settings-fields .settings-check { display: flex; }
+.settings-check input { width: auto; }
+.theme-preview { padding: 12px; border: 1px solid var(--border-strong); }
+.theme-preview > div { display: grid; grid-template-columns: repeat(8, 1fr); }
+.theme-preview span { height: 22px; }
+.license-link { text-decoration: underline; color: var(--accent-hover); }
+.license-text { max-width: 70vw; max-height: 45vh; overflow: auto; white-space: pre-wrap; font-size: 12px; }
