@@ -1,11 +1,12 @@
 import { useModal } from "./useModal";
 import type { DirEntry } from "../lib/fs";
-export type ContextAction = "edit" | "download" | "chmod" | "delete";
-export function BrowserContextMenu({ entry, x, y, onAnswer }: { entry: DirEntry; x: number; y: number; onAnswer: (action: ContextAction | null) => void }) {
+export type ContextAction = "edit" | "download" | "chmod" | "delete" | "remember" | "compare";
+export function BrowserContextMenu({ entry, x, y, onAnswer, markedName }: { markedName?: string; entry: DirEntry; x: number; y: number; onAnswer: (action: ContextAction | null) => void }) {
   const dialog = useModal();
   const file = entry.kind === "file" || (entry.kind === "symlink" && !entry.targetIsDir);
   const items: { action: ContextAction; label: string; disabled?: boolean }[] = [
     ...(file ? [{ action: "edit" as const, label: "Öffnen im Editor" }] : []),
+    ...(file ? [{ action: "remember" as const, label: "Zum Vergleich merken" }, ...(markedName ? [{ action: "compare" as const, label: `Mit ${markedName} vergleichen` }] : [])] : []),
     { action: "download", label: "Herunterladen", disabled: !file },
     { action: "chmod", label: "Berechtigungen…", disabled: entry.kind === "symlink" },
     { action: "delete", label: "Löschen" },

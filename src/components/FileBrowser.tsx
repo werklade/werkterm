@@ -1,3 +1,4 @@
+import type { DiffSource } from "../lib/diff";
 import { useEffect, useRef, useState } from "react";
 import { PermissionsDialog } from "./PermissionsDialog";
 import { SecretDialog } from "./SecretDialog";
@@ -21,7 +22,7 @@ import "./FileBrowser.css";
 
 export interface BrowserTab {
   id: number;
-  kind: "local" | "wsl" | "ssh" | "telnet" | "serial" | "editor";
+  kind: "local" | "wsl" | "ssh" | "telnet" | "serial" | "editor" | "diff";
   title: string;
   serial?: import("../lib/sessions").SerialConfig | null;
   target?: string;
@@ -43,6 +44,8 @@ interface Props {
   onPath: (id: number, path: string) => void;
   onAccess: (id: number, sessionId: number, mode: DirListing["mode"], sudo: boolean) => void;
   onStatus: (message: string) => void;
+  markedSource?: DiffSource | null;
+  onCompareFile?: (source: DiffSource, remember: boolean) => void;
   onOpenFile: (tab: BrowserTab, path: string) => void;
   transferQueue: TransferQueueHandle;
 }
@@ -67,7 +70,7 @@ const settingLabels: { key: "followTerminalFolder" | "shellIntegration" | "sshPr
 ];
 const isDirectory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
 
-export function FileBrowser({ tab, settings, onSettings, onPath, onAccess, onStatus, onOpenFile, transferQueue }: Props) {
+export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSettings, onPath, onAccess, onStatus, onOpenFile, transferQueue }: Props) {
   const [widths, setWidths] = useState<ColumnWidths>(() => ({
     name: Math.max(100, loadWidth("werkterm.column.name", DEFAULT_COLUMNS.name)),
     size: Math.max(55, loadWidth("werkterm.column.size", DEFAULT_COLUMNS.size)),
@@ -334,9 +337,9 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onAccess, onSta
     {notice && <p className="empty-state">{notice}</p>}
     {loading && <p className="empty-state" role="status">Verzeichnis wird geladen…</p>}
     {error && <p className="browser-error" role="alert">{error}</p>}
-    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label="Verzeichnisinhalt"><table style={{ minWidth: widths.name + widths.size + widths.modified }}><colgroup><col /><col style={{ width: widths.size }} /><col style={{ width: widths.modified }} /></colgroup><thead><tr>{([{ column: "name", label: "Name" }, { column: "size", label: "Größe" }, { column: "modified", label: "Geändert" }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button><ResizeGrip label={header.label + "-Spaltenbreite"} value={widths[header.column]} measure={() => listRef.current?.querySelectorAll("th")[{ name: 0, size: 1, modified: 2 }[header.column]]?.getBoundingClientRect().width ?? widths[header.column]} min={header.column === "name" ? 100 : header.column === "size" ? 55 : 90} onResize={value => resizeColumn(header.column, value)} onAuto={() => autoColumn(header.column)} /></th>)}</tr></thead><tbody>{sortedEntries.map((entry, index) => <tr key={entry.name} title={modeToRwx(entry.permissions)} onContextMenu={event => { if (!writable || busy) return; event.preventDefault(); setSelected(entry.name); setContext({ entry, x: event.clientX, y: event.clientY }); }} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={`${isDirectory(entry) ? "Ordner" : "Datei"}: ${entry.name}`} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
+    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label="Verzeichnisinhalt"><table style={{ minWidth: widths.name + widths.size + widths.modified }}><colgroup><col /><col style={{ width: widths.size }} /><col style={{ width: widths.modified }} /></colgroup><thead><tr>{([{ column: "name", label: "Name" }, { column: "size", label: "Größe" }, { column: "modified", label: "Geändert" }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button><ResizeGrip label={header.label + "-Spaltenbreite"} value={widths[header.column]} measure={() => listRef.current?.querySelectorAll("th")[{ name: 0, size: 1, modified: 2 }[header.column]]?.getBoundingClientRect().width ?? widths[header.column]} min={header.column === "name" ? 100 : header.column === "size" ? 55 : 90} onResize={value => resizeColumn(header.column, value)} onAuto={() => autoColumn(header.column)} /></th>)}</tr></thead><tbody>{sortedEntries.map((entry, index) => <tr key={entry.name} title={modeToRwx(entry.permissions)} onContextMenu={event => { if ((!writable && !editorReady) || busy) return; event.preventDefault(); setSelected(entry.name); setContext({ entry, x: event.clientX, y: event.clientY }); }} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={`${isDirectory(entry) ? "Ordner" : "Datei"}: ${entry.name}`} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
       if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-        if (writable && !busy) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setSelected(entry.name); setContext({ entry, x: rect.left + 12, y: rect.bottom }); }
+        if ((writable || editorReady) && !busy) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setSelected(entry.name); setContext({ entry, x: rect.left + 12, y: rect.bottom }); }
       }
       if (event.key === "Enter") { event.preventDefault(); if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }
       if (event.key === "Delete") { event.preventDefault(); if (writable && !busy) perform("delete"); }
@@ -347,7 +350,7 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onAccess, onSta
         listRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[next]?.focus();
       }
     }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">Leeres Verzeichnis</p>}</div>}
-    {context && <BrowserContextMenu {...context} onAnswer={action => { const entry = context.entry; setContext(null); if (action) perform(action, entry); }} />}
+    {context && <BrowserContextMenu {...context} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
     {prompt?.type === "sudo" ? <SecretDialog key={promptSequence} title={`sudo-Passwort für ${prompt.label}`} prompt={{ type: "secret", requestId: 0, kind: "password", label: prompt.label }} onAnswer={prompt.answer} />
       : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} onAnswer={prompt.answer} />
       : prompt && <FileActionDialog key={promptSequence} prompt={prompt} />}

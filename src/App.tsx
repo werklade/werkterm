@@ -1,3 +1,5 @@
+import { DiffDialog } from "./components/DiffDialog";
+import { comparisonSources, rememberedSource, diffTitle, diffError, loadDiffPair, type DiffSource, type DiffPair } from "./lib/diff";
 import { connectionTitle, connectionStatus } from "./lib/connection";
 import { defaultSerial } from "./lib/sessions";
 import { tuxTestEvent } from "./components/TuxOverlay";
@@ -53,6 +55,7 @@ import { gridColumns, inputTargets, terminalWriters } from "./lib/multiExec";
 
 const TerminalView = lazy(() => import("./components/TerminalView").then(module => ({ default: module.TerminalView })));
 
+const DiffView = lazy(() => import("./components/DiffView"));
 const EditorView = lazy(() => import("./components/EditorView"));
 interface EditorTabState { document: EditorDocument; source: BrowserTab; sourceKey: string; dirty: boolean; status: string }
 function EditorCloseDialog({ name, busy, onAnswer }: { name: string; busy: boolean; onAnswer: (answer: "save" | "discard" | "cancel") => void }) {
@@ -96,6 +99,11 @@ export default function App() {
     return () => { void subscription.then(stop => stop()); };
   }, [onLog]);
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
+  const [diffs, setDiffs] = useState<Record<number, DiffPair>>({});
+  const [diffDialog, setDiffDialog] = useState(false);
+  const [marked, setMarked] = useState<DiffSource | null>(null);
+  const markedSource = rememberedSource(marked, tabs);
+  useEffect(() => { if (marked && !rememberedSource(marked, tabs)) setMarked(null); }, [marked, tabs]);
   const [editors, setEditors] = useState<Record<number, EditorTabState>>({});
   const editorsRef = useRef(editors);
   editorsRef.current = editors;
@@ -312,6 +320,7 @@ export default function App() {
     if (id !== null) setEditors(current => !current[id] ? current : { ...current, [id]: { ...current[id], status: message } });
   };
   const removeTab = (id: number) => {
+    setDiffs(current => { const next = { ...current }; delete next[id]; return next; });
     cancelTabTransfers(id);
     liveTabs.current.delete(id);
     removePrompts(id);
@@ -398,7 +407,7 @@ export default function App() {
       if (approved) {
         const restore = terminalDescriptors(tabsRef.current);
         await invoke("last_tabs_save", { tabs: restore });
-        await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor").map(tab => stopLog(tab.id)));
+        await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff").map(tab => stopLog(tab.id)));
         await getCurrentWindow().destroy();
       }
     } catch (reason) { reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason)); }
@@ -407,7 +416,7 @@ export default function App() {
   const openEditor = (browserSource: BrowserTab, path: string) => {
     if (windowClosing.current) return;
     const source = sourceForEditorOpen(browserSource, editorsRef.current[browserSource.id]?.source);
-    if (["editor", "telnet", "serial"].includes(source.kind)) return;
+    if (["editor", "diff", "telnet", "serial"].includes(source.kind)) return;
     const sourceKey = editorFileKey(source, path);
     const existing = Object.entries(editorsRef.current).find(([, editor]) => editor.sourceKey === sourceKey);
     if (existing) { setActiveId(Number(existing[0])); return; }
@@ -427,6 +436,24 @@ export default function App() {
       finally { pendingOpens.current.delete(sourceKey); }
     })();
     pendingOpens.current.set(sourceKey, pending);
+  };
+  const compareFiles = async (sources: [DiffSource, DiffSource]) => {
+    try {
+      const pair = await loadDiffPair(sources);
+      for (const source of sources) if (!rememberedSource(source, tabsRef.current)) throw "SESSION_CLOSED:";
+      if (windowClosing.current) return;
+      const id = nextId.current++;
+      setDiffs(current => ({ ...current, [id]: pair }));
+      setTabs(current => [...current, { id, kind: "diff", title: diffTitle(sources[0].path, sources[1].path), browserPath: "", exited: false }]);
+      setActiveId(id);
+    } catch (reason) { throw diffError(reason); }
+  };
+  const compareBrowserFile = (source: DiffSource, remember: boolean) => {
+    const original = sourceForEditorOpen(source.tab, editorsRef.current[source.tab.id]?.source);
+    const next = { ...source, tab: original };
+    if (remember) { setMarked(next); return; }
+    const sources = comparisonSources(markedSource, next);
+    if (sources) void compareFiles(sources).catch(reason => reportStatus(String(reason)));
   };
   // Restart a finished session in the same tab; the new generation remounts the terminal view.
   const restartTab = useCallback((id: number) => {
@@ -510,7 +537,7 @@ export default function App() {
   const currentPrompt = prompts[0];
   const activeTab = tabs.find(tab => tab.id === activeId) ?? null;
   const activeEditor = activeId === null ? undefined : editors[activeId];
-  const browserTab = activeEditor && activeTab ? browserForEditor(activeTab, activeEditor.source, tabs) : activeTab;
+  const browserTab = activeTab?.kind === "diff" ? null : activeEditor && activeTab ? browserForEditor(activeTab, activeEditor.source, tabs) : activeTab;
   const quickTarget = activeTab?.kind === "ssh" && activeTab.sessionId !== undefined && !activeTab.exited && !activeTab.savedSessionId && !activeTab.saveDismissed ? parseQuickConnect(activeTab.target ?? "") : null;
   const offerSave = quickTarget && sessionsLoaded && !savedSessions.some(session => session.host.toLowerCase() === quickTarget.host.toLowerCase() && session.port === quickTarget.port && session.user === quickTarget.user);
   const dismissSave = (tabId: number) => setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, saveDismissed: true } : tab));
@@ -543,7 +570,7 @@ export default function App() {
       const mode = name.slice(6) as SplitMode;
       if (!["columns", "rows", "quad"].includes(mode)) return;
       changeSettings({ ...settings, splitMode: mode });
-      const initialPanes = seedPanes(tabs.filter(tab => tab.kind !== "editor").map(tab => tab.id), activeId, paneCount(mode));
+      const initialPanes = seedPanes(tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff").map(tab => tab.id), activeId, paneCount(mode));
       setPanes(initialPanes);
       if (activeId === null) setActiveId(initialPanes[0]);
       setFocusedPane(0); setRatios({ x: 50, y: 50 }); return;
@@ -556,6 +583,7 @@ export default function App() {
       case "logFolder": void openLogFolder(settings.logFolder).catch(reason => setStatus(String(reason))); break;
       case "logToggle": if (activeId !== null) toggleSessionLog(activeId); break;
       case "root": case "processes": case "hardware": openTab("local", name); break;
+      case "compareFiles": setDiffDialog(true); break;
       case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: "Lokal", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(String(reason))); break;
       case "compact": changeSettings({ ...settings, compact: !settings.compact }); break;
       case "left": case "right": changeSettings({ ...settings, sidebarRight: name === "right" }); break;
@@ -592,8 +620,8 @@ export default function App() {
       case "about": setHelp("about"); break;
     }
   };
-  const terminals = tabs.filter(tab => tab.kind !== "editor");
-  const splitVisible = !multiExec && settings.splitMode !== "single" && activeId !== 0 && activeTab?.kind !== "editor";
+  const terminals = tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff");
+  const splitVisible = !multiExec && settings.splitMode !== "single" && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff";
   const terminalIds = terminals.map(tab => tab.id).join(",");
   useEffect(() => {
     if (settings.splitMode === "single") return;
@@ -610,7 +638,7 @@ export default function App() {
     setPanes(current => assignPane(current, index, id));
     setActiveId(id);
   };
-  const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor";
+  const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff";
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
     const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
@@ -618,20 +646,20 @@ export default function App() {
     if (pasted && shouldConfirmPaste(data, settings.pasteConfirm)) { setPasteRequest(current => current ?? { targets, data, multiExec: gridVisible }); return; }
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus = createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const menus = createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
-      {sidebarVisible && <Sidebar collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      {sidebarVisible && <Sidebar markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <div className={`tab-row ${settings.sidebarRight ? "reverse" : ""}`}>{sidebarVisible && sidebarCollapsed && <QuickConnect className="in-tabbar" onConnect={connect} onStatus={reportStatus} />}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
@@ -639,6 +667,7 @@ export default function App() {
           {splitVisible && <SplitLayout mode={settings.splitMode} panes={panes} terminals={terminals} focusedIndex={activeId !== null && panes.includes(activeId) ? panes.indexOf(activeId) : focusedPane} ratios={ratios} onRatios={setRatios} onAssign={assignSplit}
             onFocus={index => { setFocusedPane(index); setActiveId(panes[index] ?? null); }}
             onNew={index => { setFocusedPane(index); const id = nextId.current; openTab("local"); setPanes(current => assignPane(current, index, id)); }} />}
+          <Suspense fallback={null}>{Object.entries(diffs).map(([key, pair]) => <div key={key} id={`diff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><DiffView pair={pair} settings={settings} onOpen={source => openEditor(source.tab, source.path)} /></div>)}</Suspense>
           <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
             return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView settings={settings} ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
@@ -657,6 +686,7 @@ export default function App() {
     }} />}
     {tunnelsOpen && <TunnelDialog sessions={savedSessions} tunnels={tunnels} statuses={tunnelStatuses} reload={reloadTunnels} start={startTunnel} onClose={() => setTunnelsOpen(false)} />}
     {tunnelConfirmation && <TunnelConfirmDialog onAnswer={accepted => { setTunnelConfirmation(null); tunnelConfirmation(accepted); }} />}
+    {diffDialog && <DiffDialog onCompare={compareFiles} onClose={() => setDiffDialog(false)} />}
     {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}

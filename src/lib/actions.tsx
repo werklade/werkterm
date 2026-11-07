@@ -7,7 +7,6 @@ export function createMenus({ savedSessions, settings, hasWsl, activeId, multiEx
 }): AppMenu[] {
   const sidebarVisible = settings.sidebarVisible;
   const heading = (label: string) => ({ label, action: `heading:${label}`, heading: true });
-  const later = (label: string) => ({ label, action: `later:${label}`, disabled: true, tooltip: "folgt" });
   const radio = (label: string, action: string, checked: boolean) => ({ label, action, checked, radio: true });
   const folders = [...new Set(savedSessions.map(s => s.folder || "Ohne Ordner"))].sort();
   return [
@@ -33,7 +32,7 @@ export function createMenus({ savedSessions, settings, hasWsl, activeId, multiEx
     ] },
     { label: "Split", mnemonic: 1, items: [{ ...radio("Ein Terminal", "single", settings.splitMode === "single"), disabled: multiExec }, ...([ ["Zwei nebeneinander", "columns"], ["Zwei untereinander", "rows"], ["Vier Terminals", "quad"] ] as const).map(([label, mode]) => ({ ...radio(label, `split:${mode}`, settings.splitMode === mode), disabled: multiExec }))] },
     { label: "Tools", mnemonic: 1, items: [heading("System"), { label: "Lokales Terminal", action: "local" }, ...(isLinux ? [{ label: "Root-Terminal", action: "root" }, { label: "Laufende Prozesse", action: "processes" }, { label: "Hardware anzeigen", action: "hardware" }] : []), { label: "Tux-Wanderer starten", action: "tux" },
-      heading("Editor"), { label: "Lokale Datei öffnen…", action: "openFile" }, { label: "ASCII-Tabelle", action: "ascii" }, later("Dateien vergleichen"),
+      heading("Editor"), { label: "Lokale Datei öffnen…", action: "openFile" }, { label: "ASCII-Tabelle", action: "ascii" }, { label: "Dateien vergleichen…", action: "compareFiles" },
       heading("Netzwerk"), { label: "SSH-Schlüssel erzeugen", action: "keygen" }, { label: "Offene lokale Ports", action: "ports" }, { label: "SSH-Tunnel", action: "tunnels" },
       { label: "", action: "tools-separator", separator: true }, { label: "MultiExec", action: "multiexec", checked: multiExec, inlineCheck: true, shortcut: "Strg+Umschalt+M" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," },
     ] },
