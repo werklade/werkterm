@@ -26,9 +26,15 @@ pub enum SessionAuth {
     Ask,
 }
 
+fn default_kind() -> String {
+    "ssh".into()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedSession {
+    #[serde(default = "default_kind")]
+    pub kind: String,
     pub id: String,
     pub name: String,
     pub folder: String,
@@ -97,6 +103,9 @@ fn new_id() -> String {
 }
 
 pub fn validate(session: &SavedSession) -> Result<(), String> {
+    if session.kind != "ssh" {
+        return Err("Unbekannter Sitzungstyp".into());
+    }
     if session.name.trim().is_empty() {
         return Err("Sitzungsname darf nicht leer sein".into());
     }
@@ -502,6 +511,7 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                 .ok_or_else(|| "Unbekannte Importquelle".to_owned())?
                 .to_owned();
             let session = SavedSession {
+                kind: default_kind(),
                 id: new_id(),
                 name: candidate.name,
                 folder: candidate.folder,
@@ -569,8 +579,21 @@ pub async fn sessions_import_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_session_files_default_to_ssh() {
+        let mut value = serde_json::to_value(sample()).unwrap();
+        value.as_object_mut().unwrap().remove("kind");
+        let file: SessionFile =
+            serde_json::from_value(serde_json::json!({"version": 1, "sessions": [value]})).unwrap();
+        assert_eq!(file.sessions[0].kind, "ssh");
+        validate(&file.sessions[0]).unwrap();
+        let mut invalid = sample();
+        invalid.kind = "local".into();
+        assert!(validate(&invalid).is_err());
+    }
     fn sample() -> SavedSession {
         SavedSession {
+            kind: default_kind(),
             id: "sample".into(),
             name: "Test".into(),
             folder: "Lab/SSH".into(),

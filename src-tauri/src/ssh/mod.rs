@@ -1054,6 +1054,20 @@ impl SshManager {
         let _ = registered.send(true);
         Ok(SshConnection { id, mode })
     }
+    pub(crate) async fn editor_sftp(&self, id: u32) -> Result<Arc<SftpSession>, String> {
+        let session = self
+            .session(id)
+            .await
+            .map_err(|_| "SESSION_CLOSED: SSH-Sitzung beendet".to_owned())?;
+        if session.finished.load(Ordering::Acquire) {
+            return Err("SESSION_CLOSED: SSH-Sitzung beendet".into());
+        }
+        session
+            .sftp
+            .get()
+            .cloned()
+            .ok_or_else(|| "Nur mit SFTP verfügbar".into())
+    }
     async fn session(&self, id: u32) -> Result<Arc<Session>, String> {
         self.sessions
             .lock()

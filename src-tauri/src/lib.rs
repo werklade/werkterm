@@ -1,4 +1,5 @@
 mod commands;
+pub mod editor;
 pub mod local_fs;
 pub mod pty;
 pub mod secrets;
@@ -10,12 +11,22 @@ use std::sync::Arc;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Arc::new(editor::EditorDocs::default()))
+        .setup(|app| {
+            editor::clear_cache(app.handle());
+            Ok(())
+        })
         .manage(Arc::new(pty::PtyManager::default()))
         .manage(Arc::new(ssh::SshManager::default()))
         .manage(Arc::new(commands::PendingPrompts::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            editor::editor_open_remote,
+            editor::editor_open_local,
+            editor::editor_save,
+            editor::editor_reload,
+            editor::editor_close,
             commands::pty_spawn,
             commands::pty_write,
             commands::pty_resize,
