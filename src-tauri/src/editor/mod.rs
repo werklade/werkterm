@@ -1067,7 +1067,16 @@ mod tests {
         assert!(!stale.exists());
         assert!(unknown.join("backup").exists());
         drop(lock);
-        clean_stale_instances(&root).unwrap();
+        // Parallel tests spawn processes; a child between fork and exec briefly
+        // shares the lock descriptor, so allow the lock a moment to be released.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            clean_stale_instances(&root).unwrap();
+            if !live.exists() || std::time::Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         assert!(!live.exists());
     }
     #[test]
