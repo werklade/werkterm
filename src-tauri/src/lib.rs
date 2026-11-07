@@ -13,7 +13,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(editor::EditorDocs::default()))
         .setup(|app| {
-            editor::clear_cache(app.handle());
+            editor::init_cache(app.handle()).map_err(std::io::Error::other)?;
             Ok(())
         })
         .manage(Arc::new(pty::PtyManager::default()))
@@ -56,9 +56,14 @@ pub fn run() {
             sessions::sessions_import_preview,
             sessions::sessions_import_commit
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .unwrap_or_else(|error| {
             eprintln!("error while running tauri application: {error}");
             std::process::exit(1);
+        })
+        .run(|_, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                editor::clear_cache();
+            }
         });
 }

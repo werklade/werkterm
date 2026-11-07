@@ -12,6 +12,8 @@ import { availableShells, type ShellKind } from "./lib/pty";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { parseQuickConnect } from "./lib/quickConnect";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { beginClose, advanceClose, type CloseAnswer } from "./lib/editorClose";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { allocateTransferId, cancelTransfer, downloadFile, uploadFile, type TransferProgress } from "./lib/transfers";
 import { TransferQueue, type QueueState, type ConflictResolution } from "./lib/transferQueue";
@@ -58,6 +60,20 @@ export default function App() {
   const editorHandles = useRef(new Map<number, EditorHandle>());
   const pendingOpens = useRef(new Map<string, Promise<void>>());
   const closing = useRef(new Set<number>());
+  const windowClosing = useRef(false);
+  const closeAnswer = useRef<((answer: CloseAnswer) => void) | null>(null);
+  const closeRequest = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow().onCloseRequested(event => {
+      // Prevent synchronously; destruction is requested only after the sequence succeeds.
+      event.preventDefault();
+      void closeRequest.current();
+    }).then(stop => { if (disposed) stop(); else unlisten = stop; })
+      .catch(reason => setStatus(String(reason)));
+    return () => { disposed = true; unlisten?.(); };
+  }, []);
   const [closeEditorId, setCloseEditorId] = useState<number | null>(null);
   const [closeEditorBusy, setCloseEditorBusy] = useState(false);
   const [activeId, setActiveId] = useState<number | null>(1);
@@ -142,12 +158,14 @@ export default function App() {
     for (const item of removed) void declinePrompt(item.prompt).catch(() => undefined);
   }, []);
   const openTab = (kind: ShellKind) => {
+    if (windowClosing.current) return;
     const id = nextId.current++;
     liveTabs.current.add(id);
     setTabs(current => [...current, { id, kind, title: `${kind === "wsl" ? "WSL" : localTitle()} ${id}`, exited: false, browserPath: "" }]);
     setActiveId(id);
   };
   const connect = (target: string) => {
+    if (windowClosing.current) return;
     const parsed = parseQuickConnect(target);
     if (!parsed) return;
     const id = nextId.current++;
@@ -158,6 +176,7 @@ export default function App() {
     setStatus(`Verbinde mit ${parsed.user}@${parsed.host}…`);
   };
   const connectSaved = (session: SavedSession, userOverride?: string) => {
+    if (windowClosing.current) return;
     if (!session.user && !userOverride) { setUserSession(session); return; }
     const id = nextId.current++;
     liveTabs.current.add(id);
@@ -181,39 +200,70 @@ export default function App() {
     if (activeIdRef.current === id) setActiveId(currentTabs[index + 1]?.id ?? currentTabs[index - 1]?.id ?? null);
     setTabs(current => current.filter(tab => tab.id !== id));
   };
+  const askEditorClose = (id: number): Promise<CloseAnswer> => {
+    setActiveId(id); setCloseEditorId(id);
+    return new Promise(resolve => { closeAnswer.current = resolve; });
+  };
   const finishEditorClose = async (id: number) => {
     const editor = editorsRef.current[id];
-    if (!editor || closing.current.has(id)) return;
-    closing.current.add(id);
-    try {
-      await invoke("editor_close", { docId: editor.document.docId });
-      setEditors(current => { const next = { ...current }; delete next[id]; return next; });
-      editorHandles.current.delete(id);
-      removeTab(id);
-      setCloseEditorId(null);
-    } catch (reason: unknown) { reportStatus(`Editor konnte nicht geschlossen werden: ${String(reason)}`); }
-    finally { closing.current.delete(id); }
+    if (!editor) return;
+    await invoke("editor_close", { docId: editor.document.docId });
+    const next = { ...editorsRef.current }; delete next[id];
+    editorsRef.current = next; setEditors(next);
+    editorHandles.current.delete(id);
+    removeTab(id);
+  };
+  const closeEditors = async (ids: number[], remove: boolean): Promise<boolean> => {
+    let state = beginClose(ids);
+    while (state.phase === "pending") {
+      const id = state.remaining[0];
+      const editor = editorsRef.current[id];
+      const handle = editorHandles.current.get(id);
+      if (!editor || !handle) throw new Error("Editor ist noch nicht bereit.");
+      // Hold the lock across the final dirty check, dialog, save and editor_close.
+      await handle.lock();
+      try {
+        const answer = handle.isDirty() ? await askEditorClose(id) : "discard";
+        setCloseEditorBusy(true);
+        const saved = answer !== "save" || (await handle.save() && !handle.isDirty());
+        state = advanceClose(state, answer, saved);
+        if (state.phase === "cancelled") return false;
+        if (remove) await finishEditorClose(id);
+      } finally {
+        handle.unlock();
+        setCloseEditorBusy(false); setCloseEditorId(null); closeAnswer.current = null;
+      }
+    }
+    return true;
   };
   const closeTab = (id: number) => {
-    const editor = editorsRef.current[id];
-    if (!editor) { removeTab(id); return; }
-    if (editorHandles.current.get(id)?.isDirty() ?? editor.dirty) { setActiveId(id); setCloseEditorId(id); }
-    else void finishEditorClose(id);
+    if (windowClosing.current || closing.current.size) return;
+    if (!editorsRef.current[id]) { removeTab(id); return; }
+    closing.current.add(id);
+    void closeEditors([id], true).catch(reason => reportStatus(String(reason)))
+      .finally(() => closing.current.delete(id));
   };
-  const answerEditorClose = async (answer: "save" | "discard" | "cancel") => {
-    const id = closeEditorId;
-    if (id === null || closeEditorBusy) return;
-    if (answer === "cancel") { setCloseEditorId(null); return; }
-    setCloseEditorBusy(true);
+  const answerEditorClose = (answer: CloseAnswer) => {
+    if (closeEditorBusy) return;
+    const resolve = closeAnswer.current;
+    closeAnswer.current = null;
+    resolve?.(answer);
+  };
+  closeRequest.current = async () => {
+    if (windowClosing.current || closing.current.size) return;
+    windowClosing.current = true;
+    const locked: EditorHandle[] = [];
     try {
-      if (answer === "save") {
-        const handle = editorHandles.current.get(id);
-        if (!handle || !await handle.save() || handle.isDirty()) return;
-      }
-      await finishEditorClose(id);
-    } finally { setCloseEditorBusy(false); }
+      await Promise.all(pendingOpens.current.values());
+      // Freeze every document so a previously clean tab cannot become dirty mid-sequence.
+      for (const handle of [...editorHandles.current.values()]) { locked.push(handle); await handle.lock(); }
+      const ids = Object.keys(editorsRef.current).map(Number);
+      if (await closeEditors(ids, false)) await getCurrentWindow().destroy();
+    } catch (reason) { reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason)); }
+    finally { for (const handle of locked) handle.unlock(); windowClosing.current = false; }
   };
   const openEditor = (browserSource: BrowserTab, path: string) => {
+    if (windowClosing.current) return;
     const source = sourceForEditorOpen(browserSource, editorsRef.current[browserSource.id]?.source);
     if (source.kind === "editor") return;
     const sourceKey = editorFileKey(source, path);
@@ -316,7 +366,7 @@ export default function App() {
       </main>
     </div>
     <footer className="statusbar" role="status" aria-live="polite"><span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
-    {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
+    {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
     {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={() => { if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); }} />}
     {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}
     {conflict && <FileActionDialog key={conflictSequence} prompt={conflict} />}

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { ResizeGrip } from "./ResizeGrip";
+import { DEFAULT_COLUMNS, loadWidth, storeWidth, type ColumnWidths } from "../lib/browserWidths";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Icon, type IconName } from "./Icon";
@@ -52,6 +54,40 @@ const settingLabels: { key: keyof Settings; label: string; title: string }[] = [
 const isDirectory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
 
 export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onOpenFile, transferQueue }: Props) {
+  const [widths, setWidths] = useState<ColumnWidths>(() => ({
+    name: Math.max(100, loadWidth("linmoba.column.name", DEFAULT_COLUMNS.name)),
+    size: Math.max(55, loadWidth("linmoba.column.size", DEFAULT_COLUMNS.size)),
+    modified: Math.max(90, loadWidth("linmoba.column.modified", DEFAULT_COLUMNS.modified)),
+  }));
+  const resizeColumn = (column: FileSortColumn, value: number) => {
+    setWidths(current => {
+      const next = { ...current, [column]: value };
+      // Name fills the remainder; its boundary transfers space to/from Size.
+      if (column === "name") {
+        const actual = listRef.current?.querySelector("th")?.getBoundingClientRect().width ?? current.name;
+        next.size = Math.max(55, current.size + actual - value);
+        storeWidth("linmoba.column.size", next.size);
+      }
+      storeWidth("linmoba.column." + column, value);
+      return next;
+    });
+  };
+  const autoColumn = (column: FileSortColumn) => {
+    const index = { name: 0, size: 1, modified: 2 }[column];
+    const list = listRef.current;
+    if (!list) return;
+    const canvas = document.createElement("canvas").getContext("2d");
+    if (!canvas) return;
+    const cells = Array.from(list.querySelectorAll<HTMLTableRowElement>("tr")).map(row => row.cells[index]).filter(Boolean);
+    let width = { name: 100, size: 55, modified: 90 }[column];
+    for (const cell of cells) {
+      const rect = cell.getBoundingClientRect(), viewport = list.getBoundingClientRect();
+      if (rect.bottom < viewport.top || rect.top > viewport.bottom) continue;
+      canvas.font = getComputedStyle(cell).font;
+      width = Math.max(width, Math.ceil(canvas.measureText(cell.textContent ?? "").width) + (column === "name" ? 38 : 20));
+    }
+    resizeColumn(column, width);
+  };
   const [listing, setListing] = useState<DirListing | null>(null);
   const [input, setInput] = useState(tab?.browserPath ?? "");
   const [loading, setLoading] = useState(false);
@@ -236,7 +272,7 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onOpe
     {notice && <p className="empty-state">{notice}</p>}
     {loading && <p className="empty-state" role="status">Verzeichnis wird geladen…</p>}
     {error && <p className="browser-error" role="alert">{error}</p>}
-    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label="Verzeichnisinhalt"><table><colgroup><col /><col className="browser-size-column" /><col className="browser-date-column" /></colgroup><thead><tr>{([{ column: "name", label: "Name" }, { column: "size", label: "Größe" }, { column: "modified", label: "Geändert" }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button></th>)}</tr></thead><tbody>{sortedEntries.map((entry, index) => <tr key={entry.name} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={`${isDirectory(entry) ? "Ordner" : "Datei"}: ${entry.name}`} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
+    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label="Verzeichnisinhalt"><table style={{ minWidth: widths.name + widths.size + widths.modified }}><colgroup><col /><col style={{ width: widths.size }} /><col style={{ width: widths.modified }} /></colgroup><thead><tr>{([{ column: "name", label: "Name" }, { column: "size", label: "Größe" }, { column: "modified", label: "Geändert" }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button><ResizeGrip label={header.label + "-Spaltenbreite"} value={widths[header.column]} measure={() => listRef.current?.querySelectorAll("th")[{ name: 0, size: 1, modified: 2 }[header.column]]?.getBoundingClientRect().width ?? widths[header.column]} min={header.column === "name" ? 100 : header.column === "size" ? 55 : 90} onResize={value => resizeColumn(header.column, value)} onAuto={() => autoColumn(header.column)} /></th>)}</tr></thead><tbody>{sortedEntries.map((entry, index) => <tr key={entry.name} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={`${isDirectory(entry) ? "Ordner" : "Datei"}: ${entry.name}`} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
       if (event.key === "Enter") { event.preventDefault(); if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }
       if (event.key === "Delete") { event.preventDefault(); if (writable && !busy) perform("delete"); }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {

@@ -6,7 +6,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
     time::UNIX_EPOCH,
 };
 use tauri::{Manager, State};
@@ -124,6 +124,8 @@ pub struct DocumentEntry {
     pub permissions: Option<u32>,
     display_path: String,
     local_modified: Option<std::time::SystemTime>,
+    local_identity: Option<LocalIdentity>,
+    baseline: Vec<u8>,
 }
 #[derive(Default)]
 struct Documents {
@@ -154,16 +156,125 @@ pub struct SaveResult {
     pub size: u64,
     pub mtime: Option<u64>,
 }
-fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_cache_dir()
-        .map(|path| path.join("editor"))
-        .map_err(io_error)
+struct InstanceCache {
+    path: PathBuf,
+    _lock: fs::File,
 }
-pub fn clear_cache(app: &tauri::AppHandle) {
-    if let Ok(path) = cache_dir(app) {
+static INSTANCE_CACHE: StdMutex<Option<InstanceCache>> = StdMutex::new(None);
+
+// Locks protect live instances regardless of age. Unknown entries are left alone.
+fn clean_stale_instances(root: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(root)?;
+    for entry in fs::read_dir(root)? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if !kind.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(lock) = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path.join("instance.lock"))
+        else {
+            continue;
+        };
+        if lock.try_lock().is_err() {
+            continue;
+        }
+        let removed = (|| -> std::io::Result<()> {
+            for child in fs::read_dir(&path)? {
+                let child = child?;
+                if child.file_name() == "instance.lock" {
+                    continue;
+                }
+                if child.file_type()?.is_dir() {
+                    fs::remove_dir_all(child.path())?;
+                } else {
+                    fs::remove_file(child.path())?;
+                }
+            }
+            Ok(())
+        })();
+        // Keep the marker if cleanup failed so a later startup can retry.
+        if removed.is_err() {
+            continue;
+        }
+        // Windows requires closing the lock before deleting the lock file.
+        drop(lock);
+        let _ = fs::remove_file(path.join("instance.lock"));
+        let _ = fs::remove_dir(&path);
+    }
+    Ok(())
+}
+
+pub fn init_cache(app: &tauri::AppHandle) -> Result<(), String> {
+    let root = app.path().app_cache_dir().map_err(io_error)?.join("editor");
+    clean_stale_instances(&root).map_err(io_error)?;
+    *INSTANCE_CACHE.lock().map_err(io_error)? = Some(create_instance_cache(&root)?);
+    Ok(())
+}
+fn create_instance_cache(root: &Path) -> Result<InstanceCache, String> {
+    let started = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(io_error)?
+        .as_nanos();
+    let path = root.join(format!("{}-{started}", std::process::id()));
+    fs::create_dir(&path).map_err(io_error)?;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(path.join("initializing.lock"))
+        .map_err(io_error)?;
+    lock.try_lock().map_err(io_error)?;
+    fs::rename(path.join("initializing.lock"), path.join("instance.lock")).map_err(io_error)?;
+    Ok(InstanceCache { path, _lock: lock })
+}
+
+fn cache_dir(_: &tauri::AppHandle) -> Result<PathBuf, String> {
+    INSTANCE_CACHE
+        .lock()
+        .map_err(io_error)?
+        .as_ref()
+        .map(|cache| cache.path.clone())
+        .ok_or("Editor-Cache ist nicht initialisiert".into())
+}
+pub fn clear_cache() {
+    if let Ok(mut cache) = INSTANCE_CACHE.lock()
+        && let Some(instance) = cache.take()
+    {
+        let path = instance.path.clone();
+        drop(instance);
         let _ = fs::remove_dir_all(path);
     }
+}
+#[derive(Debug, PartialEq, Eq)]
+struct LocalIdentity {
+    created: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    device_inode: (u64, u64),
+}
+fn local_identity(meta: &fs::Metadata) -> LocalIdentity {
+    LocalIdentity {
+        created: meta.created().ok(),
+        #[cfg(unix)]
+        device_inode: {
+            use std::os::unix::fs::MetadataExt;
+            (meta.dev(), meta.ino())
+        },
+    }
+}
+fn write_failed(path: Option<&Path>) -> String {
+    format!(
+        "WRITE_FAILED: Speichern fehlgeschlagen – die Datei ist möglicherweise unvollständig. Ihr Inhalt ist im Editor erhalten; bitte erneut speichern. Sicherung: {}",
+        path.map(|path| path.display().to_string())
+            .unwrap_or_else(|| "nicht verfügbar".into())
+    )
 }
 fn file_name(path: &str) -> String {
     // POSIX remote names must not be interpreted as Windows drive prefixes.
@@ -232,7 +343,7 @@ async fn load(
     doc_id: u32,
     ssh: &SshManager,
 ) -> Result<EditorDocument, String> {
-    let (bytes, stamp, readonly, permissions, local_modified) = match &entry.source {
+    let (bytes, stamp, readonly, permissions, local_modified, identity) = match &entry.source {
         DocumentSource::Local { path } => {
             let (bytes, meta) = read_local(path)?;
             let readonly = meta.permissions().readonly()
@@ -243,6 +354,7 @@ async fn load(
                 readonly,
                 local_permissions(&meta),
                 meta.modified().ok(),
+                Some(local_identity(&meta)),
             )
         }
         DocumentSource::Remote { session_id, path } => {
@@ -253,42 +365,25 @@ async fn load(
             }
             let stamp = remote_stamp(&meta)?;
             check_size(stamp.size)?;
-            let cache = entry.cache_path.as_ref().ok_or("Cache-Datei fehlt")?;
-            let result = async {
-                let mut remote = sftp.open(path.clone()).await.map_err(io_error)?;
-                let mut local = fs::File::create(cache).map_err(io_error)?;
-                let mut count = 0_u64;
-                let mut buffer = vec![0_u8; 64 * 1024];
-                let copy = async {
-                    loop {
-                        let size = remote.read(&mut buffer).await.map_err(io_error)?;
-                        if size == 0 {
-                            break;
-                        }
-                        count += size as u64;
-                        check_size(count)?;
-                        local.write_all(&buffer[..size]).map_err(io_error)?;
-                    }
-                    local.flush().map_err(io_error)
-                }
-                .await;
-                let closed = remote.shutdown().await.map_err(io_error);
-                copy?;
-                closed?;
-                fs::read(cache).map_err(io_error)
-            }
-            .await;
-            let bytes = match result {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    let _ = fs::remove_file(cache);
-                    return Err(error);
-                }
-            };
-            (bytes, stamp, false, meta.permissions, None)
+            let mut remote = sftp.open(path.clone()).await.map_err(io_error)?;
+            let mut bytes = Vec::new();
+            let read = AsyncReadExt::take(&mut remote, MAX_SIZE + 1)
+                .read_to_end(&mut bytes)
+                .await
+                .map_err(io_error);
+            let closed = remote.shutdown().await.map_err(io_error);
+            read?;
+            closed?;
+            check_size(bytes.len() as u64)?;
+            (bytes, stamp, false, meta.permissions, None, None)
         }
     };
     let decoded = decode(&bytes)?;
+    if let Some(cache) = &entry.cache_path {
+        fs::write(cache, &bytes).map_err(io_error)?;
+    }
+    entry.baseline = bytes;
+    entry.local_identity = identity;
     entry.size = stamp.size;
     entry.mtime = stamp.mtime;
     entry.permissions = permissions;
@@ -344,7 +439,7 @@ pub async fn editor_open_remote(
     let doc_id = next_id(&mut docs)?;
     let dir = cache_dir(&app)?;
     fs::create_dir_all(&dir).map_err(io_error)?;
-    let cache_path = dir.join(format!("{doc_id}-{}", safe_name(&path)));
+    let cache_path = dir.join(format!("{doc_id}-backup-{}", safe_name(&path)));
     let mut entry = DocumentEntry {
         source: DocumentSource::Remote {
             session_id: id,
@@ -356,6 +451,8 @@ pub async fn editor_open_remote(
         permissions: None,
         display_path: path,
         local_modified: None,
+        local_identity: None,
+        baseline: Vec::new(),
     };
     match load(&mut entry, doc_id, &ssh).await {
         Ok(document) => {
@@ -370,6 +467,7 @@ pub async fn editor_open_remote(
 }
 #[tauri::command]
 pub async fn editor_open_local(
+    app: tauri::AppHandle,
     docs: State<'_, Arc<EditorDocs>>,
     ssh: State<'_, Arc<SshManager>>,
     path: String,
@@ -389,12 +487,14 @@ pub async fn editor_open_local(
     let doc_id = next_id(&mut docs)?;
     let mut entry = DocumentEntry {
         source: DocumentSource::Local { path: local_path },
-        cache_path: None,
+        cache_path: Some(cache_dir(&app)?.join(format!("{doc_id}-backup-{}", safe_name(&path)))),
         mtime: None,
         size: 0,
         permissions: None,
         display_path: path,
         local_modified: None,
+        local_identity: None,
+        baseline: Vec::new(),
     };
     let document = load(&mut entry, doc_id, &ssh).await?;
     docs.entries.insert(doc_id, entry);
@@ -455,66 +555,100 @@ async fn save_entry(
     bytes: &[u8],
     force: bool,
 ) -> Result<SaveResult, String> {
-    let stamp = match &entry.source {
-        DocumentSource::Local { path } => {
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .open(path)
-                .map_err(io_error)?;
-            let metadata = file.metadata().map_err(io_error)?;
-            check_conflict(entry, &local_stamp(&metadata), force)?;
-            if !force && entry.local_modified != metadata.modified().ok() {
-                return Err("CONFLICT: Datei wurde zwischenzeitlich geändert".into());
+    // Back up the known baseline, never re-read the file before writing.
+    if let Some(cache) = &entry.cache_path {
+        fs::write(cache, &entry.baseline).map_err(|_| write_failed(Some(cache)))?;
+    }
+    let result = async {
+        let stamp = match &entry.source {
+            DocumentSource::Local { path } => {
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .map_err(io_error)?;
+                save_local_handle(entry, &mut file, bytes, force)?;
+                let metadata = file.metadata().map_err(io_error)?;
+                entry.local_modified = metadata.modified().ok();
+                entry.local_identity = Some(local_identity(&metadata));
+                local_stamp(&metadata)
             }
-            file.set_len(0).map_err(io_error)?;
-            file.write_all(bytes).map_err(io_error)?;
-            file.sync_all().map_err(io_error)?;
-            let metadata = file.metadata().map_err(io_error)?;
-            entry.local_modified = metadata.modified().ok();
-            local_stamp(&metadata)
+            DocumentSource::Remote { session_id, path } => {
+                let sftp = ssh.editor_sftp(*session_id).await?;
+                let mut remote = sftp
+                    .open_with_flags(path.clone(), OpenFlags::WRITE)
+                    .await
+                    .map_err(io_error)?;
+                let written = async {
+                    let before = remote.metadata().await.map_err(io_error)?;
+                    check_conflict(entry, &remote_stamp(&before)?, force)?;
+                    let permissions = before
+                        .permissions
+                        .ok_or("Dateirechte konnten nicht ermittelt werden")?;
+                    remote.write_all(bytes).await.map_err(io_error)?;
+                    remote.flush().await.map_err(io_error)?;
+                    remote
+                        .set_metadata(FileAttributes {
+                            size: Some(bytes.len() as u64),
+                            permissions: Some(permissions),
+                            ..FileAttributes::empty()
+                        })
+                        .await
+                        .map_err(io_error)?;
+                    remote.sync_all().await.map_err(io_error)?;
+                    let after = remote.metadata().await.map_err(io_error)?;
+                    entry.permissions = Some(permissions);
+                    remote_stamp(&after)
+                }
+                .await;
+                let closed = remote.shutdown().await.map_err(io_error);
+                let stamp = written?;
+                closed?;
+                stamp
+            }
+        };
+        Ok::<_, String>(stamp)
+    }
+    .await;
+    let stamp = result.map_err(|error| {
+        if error.starts_with("CONFLICT:") {
+            error
+        } else {
+            write_failed(entry.cache_path.as_deref())
         }
-        DocumentSource::Remote { session_id, path } => {
-            let sftp = ssh.editor_sftp(*session_id).await?;
-            let before = sftp.metadata(path.clone()).await.map_err(io_error)?;
-            check_conflict(entry, &remote_stamp(&before)?, force)?;
-            let permissions = before
-                .permissions
-                .ok_or("Dateirechte konnten nicht ermittelt werden")?;
-            let mut remote = sftp
-                .open_with_flags(path.clone(), OpenFlags::WRITE | OpenFlags::TRUNCATE)
-                .await
-                .map_err(io_error)?;
-            let written = async {
-                remote.write_all(bytes).await.map_err(io_error)?;
-                remote.flush().await.map_err(io_error)
-            }
-            .await;
-            let closed = remote.shutdown().await.map_err(io_error);
-            let after = sftp.metadata(path.clone()).await.map_err(io_error)?;
-            if after.permissions != Some(permissions) {
-                sftp.set_metadata(
-                    path.clone(),
-                    FileAttributes {
-                        permissions: Some(permissions),
-                        ..FileAttributes::empty()
-                    },
-                )
-                .await
-                .map_err(io_error)?;
-            }
-            written?;
-            closed?;
-            entry.permissions = Some(permissions);
-            remote_stamp(&sftp.metadata(path.clone()).await.map_err(io_error)?)?
-        }
-    };
-    // The source is already saved; retain its new conflict baseline even if cache I/O fails.
+    })?;
     entry.size = stamp.size;
     entry.mtime = stamp.mtime;
-    if let Some(cache) = &entry.cache_path {
-        fs::write(cache, bytes).map_err(io_error)?;
-    }
+    entry.baseline = bytes.to_vec();
     Ok(stamp)
+}
+fn check_local_conflict(
+    entry: &DocumentEntry,
+    metadata: &fs::Metadata,
+    force: bool,
+) -> Result<(), String> {
+    check_conflict(entry, &local_stamp(metadata), force)?;
+    if !force
+        && (entry.local_modified != metadata.modified().ok()
+            || entry.local_identity.as_ref() != Some(&local_identity(metadata)))
+    {
+        return Err("CONFLICT: Datei wurde zwischenzeitlich geändert".into());
+    }
+    Ok(())
+}
+fn save_local_handle(
+    entry: &DocumentEntry,
+    file: &mut fs::File,
+    bytes: &[u8],
+    force: bool,
+) -> Result<(), String> {
+    let metadata = file.metadata().map_err(io_error)?;
+    check_local_conflict(entry, &metadata, force)?;
+    write_local(file, bytes).map_err(io_error)
+}
+fn write_local(file: &mut fs::File, bytes: &[u8]) -> std::io::Result<()> {
+    file.write_all(bytes)?;
+    file.set_len(bytes.len() as u64)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -673,15 +807,7 @@ mod tests {
     impl TestFile {
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
-            let base = if cfg!(windows) {
-                PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap())
-            } else {
-                std::env::var_os("XDG_CACHE_HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| {
-                        PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache")
-                    })
-            };
+            let base = std::env::temp_dir();
             let dir = base.join("linmoba").join("editor-tests").join(format!(
                 "{}-{}",
                 std::process::id(),
@@ -697,12 +823,14 @@ mod tests {
                 source: DocumentSource::Local {
                     path: self.path.clone(),
                 },
-                cache_path: None,
+                cache_path: Some(self.dir.join("1-backup-document.txt")),
                 mtime: None,
                 size: 0,
                 permissions: None,
                 display_path: self.path.to_string_lossy().into_owned(),
                 local_modified: None,
+                local_identity: None,
+                baseline: Vec::new(),
             }
         }
     }
@@ -759,6 +887,8 @@ mod tests {
             permissions: None,
             display_path: "file".into(),
             local_modified: None,
+            local_identity: None,
+            baseline: Vec::new(),
         };
         assert_eq!(
             load(&mut entry, 1, &ssh).await.unwrap_err(),
@@ -768,7 +898,7 @@ mod tests {
             save_entry(&mut entry, &ssh, b"text", false)
                 .await
                 .unwrap_err(),
-            "SESSION_CLOSED: SSH-Sitzung beendet"
+            write_failed(None)
         );
     }
     #[tokio::test]
@@ -812,5 +942,124 @@ mod tests {
         save_entry(&mut entry, &ssh, b"new", false).await.unwrap();
         assert_eq!(fs::metadata(&file.path).unwrap().ino(), inode);
         assert_eq!(fs::read(hardlink).unwrap(), b"new");
+    }
+    #[test]
+    fn write_failure_message_contains_recovery_path() {
+        let path = Path::new("known-backup");
+        assert_eq!(
+            write_failed(Some(path)),
+            "WRITE_FAILED: Speichern fehlgeschlagen – die Datei ist möglicherweise unvollständig. Ihr Inhalt ist im Editor erhalten; bitte erneut speichern. Sicherung: known-backup"
+        );
+    }
+    #[tokio::test]
+    async fn opened_handle_conflict_never_writes_and_short_save_truncates() {
+        let file = TestFile::new();
+        let mut entry = file.entry();
+        let ssh = SshManager::default();
+        load(&mut entry, 1, &ssh).await.unwrap();
+        let mut opened = fs::OpenOptions::new().write(true).open(&file.path).unwrap();
+        fs::write(&file.path, b"external content").unwrap();
+        let error = save_local_handle(&entry, &mut opened, b"must not write", false).unwrap_err();
+        assert!(error.starts_with("CONFLICT:"));
+        assert_eq!(fs::read(&file.path).unwrap(), b"external content");
+        assert_eq!(fs::read(entry.cache_path.as_ref().unwrap()).unwrap(), CRLF);
+        // A fresh handle starts at byte zero and truncates only after writing.
+        let mut opened = fs::OpenOptions::new().write(true).open(&file.path).unwrap();
+        save_local_handle(&entry, &mut opened, b"x", true).unwrap();
+        assert_eq!(fs::read(&file.path).unwrap(), b"x");
+    }
+    #[tokio::test]
+    async fn backup_uses_known_baseline_even_when_force_overwrites_external_changes() {
+        let file = TestFile::new();
+        let mut entry = file.entry();
+        let ssh = SshManager::default();
+        load(&mut entry, 1, &ssh).await.unwrap();
+        fs::write(&file.path, b"external").unwrap();
+        save_entry(&mut entry, &ssh, b"saved", true).await.unwrap();
+        assert_eq!(fs::read(entry.cache_path.as_ref().unwrap()).unwrap(), CRLF);
+        save_entry(&mut entry, &ssh, b"next", false).await.unwrap();
+        assert_eq!(
+            fs::read(entry.cache_path.as_ref().unwrap()).unwrap(),
+            b"saved"
+        );
+        fs::remove_file(&file.path).unwrap();
+        let error = save_entry(&mut entry, &ssh, b"retained", false)
+            .await
+            .unwrap_err();
+        assert_eq!(error, write_failed(entry.cache_path.as_deref()));
+        assert_eq!(
+            fs::read(entry.cache_path.as_ref().unwrap()).unwrap(),
+            b"next"
+        );
+        assert_eq!(entry.baseline, b"next");
+    }
+    #[test]
+    fn cleanup_removes_only_unlocked_instance_directories() {
+        let file = TestFile::new();
+        let root = file.dir.join("instances");
+        fs::create_dir_all(&root).unwrap();
+        let live = root.join("live");
+        let stale = root.join("stale");
+        let unknown = root.join("legacy");
+        for path in [&live, &stale, &unknown] {
+            fs::create_dir(path).unwrap();
+            fs::write(path.join("backup"), b"keep").unwrap();
+        }
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(live.join("instance.lock"))
+            .unwrap();
+        lock.try_lock().unwrap();
+        fs::write(stale.join("instance.lock"), b"").unwrap();
+        clean_stale_instances(&root).unwrap();
+        assert!(live.join("backup").exists());
+        assert!(!stale.exists());
+        assert!(unknown.join("backup").exists());
+        drop(lock);
+        clean_stale_instances(&root).unwrap();
+        assert!(!live.exists());
+    }
+    #[test]
+    fn instance_marker_is_published_with_its_lock_already_held() {
+        let file = TestFile::new();
+        let root = file.dir.join("instances");
+        fs::create_dir(&root).unwrap();
+        let instance = create_instance_cache(&root).unwrap();
+        let path = instance.path.clone();
+        assert!(path.join("instance.lock").exists());
+        assert!(!path.join("initializing.lock").exists());
+        clean_stale_instances(&root).unwrap();
+        assert!(path.exists());
+        drop(instance);
+        clean_stale_instances(&root).unwrap();
+        assert!(!path.exists());
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn replacement_identity_conflicts_even_with_equal_size_and_timestamp() {
+        let file = TestFile::new();
+        let mut entry = file.entry();
+        let ssh = SshManager::default();
+        load(&mut entry, 1, &ssh).await.unwrap();
+        let previous = fs::metadata(&file.path).unwrap();
+        let replacement = file.dir.join("replacement");
+        fs::write(&replacement, CRLF).unwrap();
+        let handle = fs::OpenOptions::new()
+            .write(true)
+            .open(&replacement)
+            .unwrap();
+        handle
+            .set_times(fs::FileTimes::new().set_modified(previous.modified().unwrap()))
+            .unwrap();
+        fs::rename(&replacement, &file.path).unwrap();
+        assert!(
+            save_entry(&mut entry, &ssh, b"bad", false)
+                .await
+                .unwrap_err()
+                .starts_with("CONFLICT:")
+        );
+        assert_eq!(fs::read(&file.path).unwrap(), CRLF);
     }
 }

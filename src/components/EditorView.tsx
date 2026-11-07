@@ -18,7 +18,7 @@ import { languageFromShebang } from "../lib/editorLanguage";
 import type { EditorDocument, EditorEol } from "../lib/editorTypes";
 import "./EditorView.css";
 
-export interface EditorHandle { save(): Promise<boolean>; isDirty(): boolean }
+export interface EditorHandle { save(): Promise<boolean>; isDirty(): boolean; lock(): Promise<void>; unlock(): void }
 interface EditorViewProps {
   document: EditorDocument;
   onDirtyChange(dirty: boolean): void;
@@ -99,10 +99,10 @@ const fallbackFolding = foldService.of((state, start, end) => {
 });
 
 const appTheme = CodeMirrorView.theme({
-  "&": { height: "100%", backgroundColor: EDITOR_BACKGROUND, color: "#d4d4d4" },
+  "&": { height: "100%", backgroundColor: "var(--bg-content)", color: "#d4d4d4" },
   ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", fontSize: "14px" },
-  ".cm-gutters": { backgroundColor: EDITOR_BACKGROUND, borderRight: "1px solid #3c3c3c", color: "#7a7a7a" },
-  ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "#ffffff09" },
+  ".cm-gutters": { backgroundColor: "var(--bg-content)", borderRight: "1px solid #3c3c3c", color: "#7a7a7a" },
+  ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "#181818" },
   ".cm-line": { padding: "0 6px" },
   ".cm-content": { caretColor: "#d4d4d4" },
 }, { dark: true });
@@ -118,6 +118,8 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   const target = useRef<EditorEol | null>(initialEol(props.document.eol));
   const language = useRef("Text");
   const dirty = useRef(false);
+  const locks = useRef(0);
+  const [locked, setLocked] = useState(false);
   const saving = useRef<Promise<boolean> | null>(null);
   const mounted = useRef(true);
   const chooseRef = useRef<Choice | null>(null);
@@ -147,7 +149,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     setHistoryState({ undo: undoDepth(editor.state) > 0, redo: redoDepth(editor.state) > 0 });
   }
   function selectEol(value: EditorEol) {
-    if (loaded.current.readonly || saving.current) return;
+    if (loaded.current.readonly || saving.current || locks.current) return;
     target.current = value; setEol(value); report();
   }
   function ask(title: string, choices: string[]): Promise<string> {
@@ -163,7 +165,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     const message = String(error);
     const labels: Record<string, string> = { SESSION_CLOSED: "Die SSH-Sitzung ist geschlossen. Der Editor bleibt mit Ihrem Inhalt geöffnet.", ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", BINARY: "Binärdateien können nicht bearbeitet werden.", TOO_LARGE: "Die Datei ist größer als 10 MB." };
     const prefix = message.split(":", 1)[0];
-    const readable = labels[prefix] ?? `Speichern fehlgeschlagen: ${message}`;
+    const readable = prefix === "WRITE_FAILED" ? message.slice("WRITE_FAILED: ".length) : labels[prefix] ?? `Speichern fehlgeschlagen: ${message}`;
     if (mounted.current) { setNotice(readable); callbacks.current.onStatusChange(readable); }
   }
   async function performSave(): Promise<boolean> {
@@ -192,13 +194,16 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
           if (!mounted.current || action === "Abbrechen") return false;
           if (action === "Überschreiben") { force = true; continue; }
           if (await ask("Lokale Änderungen verwerfen und Datei neu laden?", ["Neu laden", "Abbrechen"]) !== "Neu laden") return false;
-          const document = await invoke<EditorDocument>("editor_reload", { docId: original.docId });
-          if (!mounted.current) return false;
-          loaded.current = document; savedText.current = document.text;
-          target.current = initialEol(document.eol); setEol(target.current);
-          editor.setState(EditorState.create({ doc: document.text, extensions: editorExtensions(document.readonly) }));
-          loadLanguage(document);
-          callbacks.current.onDocumentChange?.(document); setNotice(""); report();
+          setLock(true);
+          try {
+            const document = await invoke<EditorDocument>("editor_reload", { docId: original.docId });
+            if (!mounted.current) return false;
+            loaded.current = document; savedText.current = document.text;
+            target.current = initialEol(document.eol); setEol(target.current);
+            editor.setState(EditorState.create({ doc: document.text, extensions: editorExtensions(document.readonly) }));
+            loadLanguage(document);
+            callbacks.current.onDocumentChange?.(document); setNotice(""); report();
+          } finally { setLock(false); }
           return false;
         }
       }
@@ -209,7 +214,19 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     if (!saving.current) saving.current = performSave().finally(() => { saving.current = null; });
     return saving.current;
   };
-  useImperativeHandle(ref, () => ({ save: () => saveRef.current(), isDirty: () => dirty.current }), []);
+  function setLock(value: boolean) {
+    locks.current = Math.max(0, locks.current + (value ? 1 : -1));
+    if (!mounted.current) return;
+    setLocked(locks.current > 0);
+    const readonly = loaded.current.readonly || locks.current > 0;
+    view.current?.dispatch({ effects: readonlyCompartment.current.reconfigure([EditorState.readOnly.of(readonly), CodeMirrorView.editable.of(!readonly)]) });
+  }
+  useImperativeHandle(ref, () => ({
+    save: () => saveRef.current(),
+    isDirty: () => dirty.current,
+    lock: async () => { setLock(true); await saving.current; },
+    unlock: () => setLock(false),
+  }), []);
 
   function loadLanguage(document: EditorDocument) {
     const editor = view.current;
@@ -227,8 +244,9 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
 
   function editorExtensions(readonly: boolean) {
     return [
-      basicSetup, oneDark, appTheme, Prec.highest(comments), colorPlugin, indentationPlugin, fallbackFolding,
-      readonlyCompartment.current.of([EditorState.readOnly.of(readonly), CodeMirrorView.editable.of(!readonly)]),
+      basicSetup, oneDark, Prec.highest(appTheme), Prec.highest(comments), colorPlugin, indentationPlugin, fallbackFolding,
+      readonlyCompartment.current.of([EditorState.readOnly.of(readonly || locks.current > 0), CodeMirrorView.editable.of(!readonly && !locks.current)]),
+      EditorState.transactionFilter.of(transaction => locks.current && transaction.docChanged ? [] : transaction),
       languageCompartment.current.of([]), wrapCompartment.current.of(wrap ? CodeMirrorView.lineWrapping : []),
       Prec.highest(keymap.of([
         { key: "Mod-s", run: () => { void saveRef.current(); return true; } },
@@ -259,20 +277,20 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   }
   return <section className="editor-view" aria-label={`MobaTextEditor: ${props.document.name}`}>
     <div className="editor-toolbar" role="toolbar" aria-label="Editor-Werkzeuge">
-      {button("save", "Speichern (Strg+S)", () => { void saveRef.current(); }, busy || loaded.current.readonly || !eol)}
-      {button("undo", "Rückgängig (Strg+Z)", () => { if (view.current) undo(view.current); }, loaded.current.readonly || !historyState.undo)}
-      {button("redo", "Wiederholen (Strg+Umschalt+Z)", () => { if (view.current) redo(view.current); }, loaded.current.readonly || !historyState.redo)}
+      {button("save", "Speichern (Strg+S)", () => { void saveRef.current(); }, busy || locked || loaded.current.readonly || !eol)}
+      {button("undo", "Rückgängig (Strg+Z)", () => { if (view.current && !locks.current) undo(view.current); }, locked || loaded.current.readonly || !historyState.undo)}
+      {button("redo", "Wiederholen (Strg+Umschalt+Z)", () => { if (view.current && !locks.current) redo(view.current); }, locked || loaded.current.readonly || !historyState.redo)}
       {button("search", "Suchen / Ersetzen (Strg+F / Strg+H)", () => { if (view.current) openSearchPanel(view.current); })}
       {button("wrap", "Zeilenumbruch ein-/ausschalten", toggleWrap, false, wrap)}
       <span className="editor-toolbar-separator" role="separator" />
-      {button("windows", "Windows-Zeilenenden (CRLF)", () => selectEol("crLf"), busy || loaded.current.readonly, eol === "crLf")}
-      {button("tux", "Linux-Zeilenenden (LF)", () => selectEol("lf"), busy || loaded.current.readonly, eol === "lf")}
-      {button("apple", "Mac-Zeilenenden (CR)", () => selectEol("cr"), busy || loaded.current.readonly, eol === "cr")}
+      {button("windows", "Windows-Zeilenenden (CRLF)", () => selectEol("crLf"), busy || locked || loaded.current.readonly, eol === "crLf")}
+      {button("tux", "Linux-Zeilenenden (LF)", () => selectEol("lf"), busy || locked || loaded.current.readonly, eol === "lf")}
+      {button("apple", "Mac-Zeilenenden (CR)", () => selectEol("cr"), busy || locked || loaded.current.readonly, eol === "cr")}
       {busy && <span>Speichern …</span>}
     </div>
     {loaded.current.readonly && <div className="editor-notice">Schreibgeschützt – die Datei kann nicht geändert werden.</div>}
-    {loaded.current.eol === "mixed" && !eol && <div className="editor-notice">Gemischte Zeilenenden (LF {loaded.current.eolCounts.lf}, CRLF {loaded.current.eolCounts.crLf}, CR {loaded.current.eolCounts.cr}) <button disabled={loaded.current.readonly} onClick={() => selectEol(mostFrequentEol(loaded.current.eolCounts))}>Vereinheitlichen</button></div>}
-    {notice && <div className="editor-notice" role="status">{notice}</div>}
+    {loaded.current.eol === "mixed" && !eol && <div className="editor-notice">Gemischte Zeilenenden (LF {loaded.current.eolCounts.lf}, CRLF {loaded.current.eolCounts.crLf}, CR {loaded.current.eolCounts.cr}) <button disabled={locked || loaded.current.readonly} onClick={() => selectEol(mostFrequentEol(loaded.current.eolCounts))}>Vereinheitlichen</button></div>}
+    {notice && <div className="editor-notice editor-error" role="alert">{notice}</div>}
     <div ref={host} className="editor-code" />
     {choice && <EditorChoice key={choice.title} choice={choice} onAnswer={resolveChoice} />}
   </section>;

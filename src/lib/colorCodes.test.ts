@@ -19,10 +19,10 @@ describe("color codes", () => {
   });
   it("mixes alpha on the actual editor background before contrast", () => {
     const mixed = mixColor(parseColor("rgba(255, 255, 255, 0.5)")!, parseColor(EDITOR_BACKGROUND)!);
-    expect(mixed).toEqual({ r: 142.5, g: 142.5, b: 142.5, a: 1 });
-    expect(textColor(mixed)).toBe("#000000");
-    expect(mixColor(parseColor("#0000")!, parseColor(EDITOR_BACKGROUND)!)).toEqual({ r: 30, g: 30, b: 30, a: 1 });
-    expect(textColor(mixColor(parseColor("rgba(250.2,250.2,250.2,.5)")!, parseColor(EDITOR_BACKGROUND)!))).toBe("#000000");
+    expect(mixed).toEqual({ r: 127.5, g: 127.5, b: 127.5, a: 1 });
+    expect(textColor(mixed)).toBe("#ffffff");
+    expect(mixColor(parseColor("#0000")!, parseColor(EDITOR_BACKGROUND)!)).toEqual({ r: 0, g: 0, b: 0, a: 1 });
+    expect(textColor(mixColor(parseColor("rgba(250.2,250.2,250.2,.5)")!, parseColor(EDITOR_BACKGROUND)!))).toBe("#ffffff");
   });
   it("accepts comma and modern space syntax with percentage channels and alpha", () => {
     expect(parseColor("rgb(100% 0% 0% / 50%)")).toEqual({ r: 255, g: 0, b: 0, a: .5 });

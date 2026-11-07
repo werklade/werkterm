@@ -1,5 +1,5 @@
 export interface Rgba { r: number; g: number; b: number; a: number }
-export const EDITOR_BACKGROUND = "#1e1e1e";
+export const EDITOR_BACKGROUND = "#000000";
 const clamp = (n: number, maximum: number) => Math.max(0, Math.min(maximum, n));
 const numeric = /^[+-]?(?:\d+\.?\d*|\.\d+)%?$/;
 /** CSS numeric channels and alpha are clamped to their legal range; invalid syntax is ignored. */

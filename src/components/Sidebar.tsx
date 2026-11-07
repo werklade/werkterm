@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { ResizeGrip } from "./ResizeGrip";
+import { clampPanel, DEFAULT_PANEL_WIDTH, loadWidth, storeWidth } from "../lib/browserWidths";
 import { SessionsPanel } from "./SessionsPanel";
 import type { SavedSession } from "../lib/sessions";
 import { Icon, type IconName } from "./Icon";
@@ -30,11 +32,19 @@ interface Props {
   onPath: (id: number, path: string) => void;
 }
 export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [width, setWidth] = useState(() => clampPanel(loadWidth("linmoba.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
+  useEffect(() => {
+    const resized = () => { setWindowWidth(window.innerWidth); setWidth(current => clampPanel(current, window.innerWidth)); };
+    window.addEventListener("resize", resized);
+    return () => window.removeEventListener("resize", resized);
+  }, []);
+  const resize = (next: number) => { const value = clampPanel(next, window.innerWidth); setWidth(value); storeWidth("linmoba.sidebar.width", value); };
   const [active, setActive] = useState(3);
   const [input, setInput] = useState("");
   const [invalid, setInvalid] = useState(false);
   const error = "Ungültige Adresse. Erwartet: user@host[:port], Port 1–65535.";
-  return <aside className="sidebar" aria-label="Sitzungen und SSH-Browser">
+  return <aside className="sidebar" style={{ "--sidebar-width": width + "px" } as CSSProperties} aria-label="Sitzungen und SSH-Browser">
     <form className="quick-connect" onSubmit={event => { event.preventDefault(); const valid = parseQuickConnect(input) !== null; setInvalid(!valid); if (valid) { onConnect(input.trim()); setInput(""); } else onStatus(error); }}>
       <input aria-label="Quick connect" placeholder="Quick connect..." value={input} aria-invalid={invalid} title={invalid ? error : "user@host[:port]"} onChange={event => { setInput(event.target.value); setInvalid(false); }} />
     </form>
@@ -43,5 +53,6 @@ export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSett
         {active === 0 ? <SessionsPanel sessions={savedSessions} onConnect={onSavedConnect} onEdit={onEditSession} onReload={onReloadSessions} onStatus={onStatus} /> : active === 3 ? <FileBrowser onOpenFile={onOpenFile} key={tab?.id ?? "none"} tab={tab} settings={settings} onSettings={onSettings} onPath={onPath} onStatus={onStatus} transferQueue={transferQueue} /> : <p className="empty-state">{panels[active].placeholder}</p>}
       </section>
     </div>
+    <ResizeGrip className="sidebar-resize" label="Seitenpanel-Breite" value={width} min={260} max={Math.max(260, windowWidth * .6)} onResize={resize} onAuto={() => resize(DEFAULT_PANEL_WIDTH)} />
   </aside>;
 }

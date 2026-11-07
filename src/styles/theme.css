@@ -1,4 +1,5 @@
 :root {
+  --bg-content: #000000;
   --bg-app: #1e1e1e;
   --bg-panel: #252526;
   --bg-panel-alt: #2d2d2e;
@@ -25,7 +26,7 @@
   --warning: #e3961a;
   --success: #00b452;
   
-  --term-bg: #000000;
+  --term-bg: var(--bg-content);
   --term-fg: #c5c8c6;
   --term-cursor: #1769ff;
   --term-selection: #3c3c3c;
@@ -54,7 +55,7 @@
   --font-size-term: 14px;
   --radius: 4px;
   --sidebar-icon-width: 40px;
-  --sidebar-width: 240px;
+  --sidebar-width: 260px;
   --toolbar-height: 32px;
   --menubar-height: 26px;
   --tabbar-height: 32px;

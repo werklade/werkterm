@@ -29,7 +29,7 @@ interface Runtime { terminal: Terminal; fit: FitAddon }
 function terminalTheme(styles: CSSStyleDeclaration): ITheme {
   const color = (name: string) => styles.getPropertyValue(`--term-${name}`).trim();
   return {
-    background: color("bg"), foreground: color("fg"), cursor: color("cursor"), selectionBackground: color("selection"),
+    background: styles.getPropertyValue("--bg-content").trim(), foreground: color("fg"), cursor: color("cursor"), selectionBackground: color("selection"),
     black: color("black"), red: color("red"), green: color("green"), yellow: color("yellow"), blue: color("blue"), magenta: color("magenta"), cyan: color("cyan"), white: color("white"),
     brightBlack: color("bright-black"), brightRed: color("bright-red"), brightGreen: color("bright-green"), brightYellow: color("bright-yellow"), brightBlue: color("bright-blue"), brightMagenta: color("bright-magenta"), brightCyan: color("bright-cyan"), brightWhite: color("bright-white"),
   };

@@ -23,7 +23,7 @@ input::placeholder { color: var(--fg-muted); }
 .toolbar-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 66px; padding: 3px 10px; border-radius: var(--radius); }
 .toolbar-button .icon { width: 28px; height: 28px; }
 .workspace { display: flex; flex: 1; min-height: 0; }
-.sidebar { flex: none; width: calc(var(--sidebar-icon-width) + var(--sidebar-width)); display: flex; flex-direction: column; background: var(--bg-panel); border-right: 1px solid var(--border-strong); }
+.sidebar { position: relative; flex: none; width: calc(var(--sidebar-icon-width) + var(--sidebar-width)); display: flex; flex-direction: column; background: var(--bg-panel); border-right: 1px solid var(--border-strong); }
 .quick-connect { padding: 8px; }
 .quick-connect input { width: 100%; }
 .quick-connect input[aria-invalid="true"] { border-color: var(--danger); outline-color: var(--danger); }
@@ -50,8 +50,8 @@ input::placeholder { color: var(--fg-muted); }
 .new-tab > button { padding: 0 10px; font-size: 18px; }
 .shell-menu { position: absolute; top: 100%; right: 0; background: var(--bg-panel-alt); border: 1px solid var(--border-strong); min-width: 140px; padding: 4px; }
 .shell-menu button { padding: 8px; width: 100%; text-align: left; }
-.terminal-stack { position: relative; flex: 1; min-height: 0; background: var(--term-bg); }
-.terminal-panel { height: 100%; padding: 6px; }
+.terminal-stack { position: relative; flex: 1; min-height: 0; background: var(--bg-content); }
+.terminal-panel { background: var(--bg-content); height: 100%; padding: 6px; }
 .terminal-panel[hidden] { display: none; }
 .terminal-container { height: 100%; width: 100%; overflow: hidden; }
 .terminal-empty { display: grid; height: 100%; place-items: center; color: var(--fg-muted); }
@@ -77,3 +77,7 @@ input::placeholder { color: var(--fg-muted); }
 .statusbar { display: flex; align-items: center; gap: 10px; }
 .statusbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .statusbar > button { flex: none; border: 1px solid var(--border-strong); border-radius: var(--radius); }
+
+.resize-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; user-select: none; z-index: 3; }
+.resize-grip:hover, .resize-grip:focus-visible { background: var(--accent); outline: none; }
+.sidebar-resize { right: -4px; }

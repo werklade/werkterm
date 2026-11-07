@@ -3,7 +3,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-app);
+  background: var(--bg-content);
   color: var(--fg-primary);
 }
 
@@ -49,3 +49,5 @@
 .editor-dialog > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .editor-dialog button, .editor-notice button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-toolbar); color: var(--fg-primary); cursor: pointer; }
 .editor-dialog button:focus-visible, .editor-notice button:focus-visible { outline: 2px solid var(--focus-ring); }
+
+.editor-error { background: #591c1c; color: #ffffff; border: 2px solid var(--danger); overflow-wrap: anywhere; }
