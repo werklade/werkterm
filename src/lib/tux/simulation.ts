@@ -1,6 +1,6 @@
 export interface Platform { start: number; end: number; y: number }
 export function platformsFromLines(lines: string[]): Platform[] {
-  return lines.flatMap((line, y) => Array.from(line.matchAll(/\S+/gu), match => ({ start: match.index, end: match.index + match[0].length, y: y + 1 })));
+  return lines.flatMap((line, y) => Array.from(line.matchAll(/\S+/gu), match => ({ start: match.index, end: match.index + match[0].length, y })));
 }
 export class IdleClock {
   constructor(public lastActivity: number) {}
@@ -15,13 +15,13 @@ export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number,
   t.age += dt;
   if (t.state === "exit") { t.x += t.direction * dt * 6; return; }
   if (t.state === "dig") {
-    if (t.age > .7) { t.state = "fall"; t.y += .15; t.vy = 0; t.age = 0; }
+    if (t.age > .9) { t.state = "fall"; t.y += 1; t.vy = 0; t.age = 0; }
     return;
   }
   if (t.state === "walk") {
     t.x += t.direction * dt * 3;
     if (!platforms.some(p => p.y === t.floor && t.x >= p.start && t.x < p.end)) { t.state = "fall"; t.y += .05; t.vy = 0; t.age = 0; }
-    else if (t.age > 2 && random() < dt * .18) { t.state = "dig"; t.age = 0; }
+    else if (t.age > .4 && random() < dt * .6) { t.state = "dig"; t.age = 0; }
     return;
   }
   const before = t.y;

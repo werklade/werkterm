@@ -35,7 +35,7 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
         if (tux.wait > 0) continue;
         const pixel = Math.max(1, Math.floor(cellHeight * 2 / 16));
         const size = pixel * 16;
-        const x = tux.x * cellWidth, y = tux.y * cellHeight;
+        const x = tux.x * cellWidth, y = (tux.y + (tux.state === "dig" ? Math.min(1, tux.age / .9) : 0)) * cellHeight;
         const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "walk" ? (Math.floor(tux.age * 7) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
@@ -79,7 +79,7 @@ export function TuxOverlay({ terminal, enabled, minutes, visible, active }: { te
     const activity = () => { clear(); clock.activity(performance.now()); schedule(); };
     const visibility = () => { clear(); clock.activity(performance.now()); schedule(); };
     const test = () => { if (active) start(); };
-    const events = ["tux-activity", "keydown", "pointermove", "pointerdown", "paste", "input", "wheel"];
+    const events = ["tux-activity", "keydown", "pointerdown", "paste", "input", "wheel"];
     events.forEach(event => target.addEventListener(event, activity, true));
     const input = terminal.onData(activity);
     const output = terminal.onWriteParsed(activity);
