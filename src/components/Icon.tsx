@@ -24,11 +24,15 @@ import wrapIcon from "../assets/icons/wrap.svg?raw";
 import sshIcon from "../assets/icons/ssh.svg?raw";
 import windowsIcon from "../assets/icons/windows.svg?raw";
 import appleIcon from "../assets/icons/apple.svg?raw";
+import sessionNewIcon from "../assets/icons/session-new.svg?raw";
+import settingsIcon from "../assets/icons/settings.svg?raw";
 
 const inline = (paths: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 const icons = {
   home: inline('<path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>'),
-  settings: inline('<circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/>'),
+  settings: settingsIcon,
+  "session-new": sessionNewIcon,
+  multiexec: inline('<rect x="8" y="3" width="13" height="11" rx="2"/><path d="M5 7v8a2 2 0 0 0 2 2h9"/><path d="M2 11v8a2 2 0 0 0 2 2h9"/><path d="m11 7 2 2-2 2"/><path d="M15 11h3"/>'),
   help: inline('<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 3h.01"/>'),
   split: inline('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
   view: inline('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11"/>'),
