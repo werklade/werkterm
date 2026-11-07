@@ -234,6 +234,8 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
         if (!exited) {
           terminalWriters.set(id, (data, pasted) => {
+            // MultiExec input bypasses xterm's own scroll-on-input, so jump to the end here.
+            terminal.scrollToBottom();
             if (!pasted) { send(data); return; }
             // xterm.paste emits onData synchronously. Do not redistribute that
             // approved paste through the keyboard/MultiExec path a second time.
