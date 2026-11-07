@@ -80,27 +80,14 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         <div className="session-target-fields"><label>Host<input required value={host} onChange={event => setHost(event.target.value)} /></label>
           <label>Port<input required type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} /></label></div>
         <label>Benutzer<input value={user} onChange={event => setUser(event.target.value)} placeholder="Beim Verbinden eingeben" /></label>
-        <div role="radiogroup" aria-labelledby={`${id}-auth-label`} className="session-auth">
-          <span id={`${id}-auth-label`}>Anmeldung</span>
-          {([
-            ["default", "Standard (Agent/~/.ssh)", "SSH-Agent und Standardschlüssel im Ordner ~/.ssh verwenden."],
-            ["keyFile", "Schlüsseldatei", "Eine bestimmte private SSH-Schlüsseldatei verwenden."],
-            ["password", "Passwort (im Schlüsselbund)", "Das Passwort sicher im Schlüsselbund dieses Geräts speichern."],
-            ["ask", "Beim Verbinden fragen", "Das Passwort bei jeder Verbindung eingeben."],
-          ] as const).map(([type, label, hint]) => <div className="session-auth-option" key={type}>
-            <label className="session-auth-choice"><input type="radio" name={`${id}-auth`} value={type}
-              checked={authType === type} disabled={type === "password" && keyring !== true}
-              aria-describedby={`${id}-${type}-hint${type === "password" && keyring !== true ? ` ${id}-keyring-hint` : ""}`}
-              onChange={() => { authChanged.current = true; setAuthType(type); clearPassword(); }} />
-              <span>{label}</span>
-              {type === "password" && keyring !== true && <span id={`${id}-keyring-hint`} className="session-hint">{keyring === null ? "Schlüsselbund wird geprüft…" : "Schlüsselbund nicht verfügbar: Passwortspeicherung ist deaktiviert."}</span>}
-            </label>
-            <p id={`${id}-${type}-hint`} className="session-hint">{hint}</p>
-            {type === "keyFile" && authType === type && <div className="session-auth-input"><label htmlFor={`${id}-key-path`}>Schlüsseldatei</label><div className="session-path-field"><input id={`${id}-key-path`} required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></div>}
-            {type === "password" && authType === type && <label className="session-auth-input">Passwort<input type="password" autoComplete="off" disabled={keyring !== true} value={password} onChange={event => setPassword(event.target.value)} />
-              {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
-          </div>)}
-        </div>
+        <label>Anmeldung<select value={authType} onChange={event => { authChanged.current = true; setAuthType(event.target.value as SessionAuth["type"]); clearPassword(); }}>
+          <option value="default">Standard (Agent/~/.ssh)</option><option value="keyFile">Schlüsseldatei</option>
+          <option value="password" disabled={keyring !== true}>Passwort (im Schlüsselbund)</option><option value="ask">Beim Verbinden fragen</option>
+        </select></label>
+        {keyring === false && <p className="session-hint">Schlüsselbund nicht verfügbar: Passwortspeicherung ist deaktiviert.</p>}
+        {authType === "keyFile" && <label>Schlüsseldatei<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></label>}
+        {authType === "password" && <label>Passwort<input type="password" autoComplete="off" disabled={keyring !== true} value={password} onChange={event => setPassword(event.target.value)} />
+          {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
       </fieldset>
       {error && <p role="alert" className="session-error">{error}</p>}
       <div className="dialog-actions"><button type="submit" disabled={!valid || busy}>{busy ? "Speichern…" : "Speichern"}</button><button type="button" disabled={busy} onClick={cancel}>Abbrechen</button></div>

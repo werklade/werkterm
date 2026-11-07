@@ -3,13 +3,6 @@
 .session-fields label, .import-dialog label { display: grid; gap: 5px; }
 .session-fields input, .session-fields select, .import-dialog input, .import-dialog select { box-sizing: border-box; min-width: 0; padding: 7px; color: var(--fg-primary); background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: var(--radius); }
 .session-fields select { width: 100%; }
-.session-auth { display: grid; gap: 10px; }
-.session-auth-option { display: grid; gap: 5px; }
-.session-fields .session-auth-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.session-auth-choice input { margin: 0; padding: 0; accent-color: var(--focus-ring); }
-.session-auth-choice input:disabled + span { color: var(--fg-secondary); }
-.session-auth-option > .session-hint, .session-auth-input { margin-left: 20px; }
-.session-auth-input { display: grid; gap: 5px; }
 .session-target-fields { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 12px; }
 .session-path-field { display: flex; gap: 6px; }
 .session-path-field input { flex: 1; min-width: 0; }
