@@ -8,6 +8,7 @@ export function parseQuickConnect(input: string): QuickConnectTarget | null {
   const match = /^(?:([^\s@]+)@)?(?:\[([0-9a-fA-F:.]+)\]|([a-zA-Z0-9.-]+))(?::([0-9]+))?$/.exec(input.trim());
   if (!match) return null;
   const [, user, ipv6, hostname, portText] = match;
+  if (user && /[:/\\]/.test(user)) return null;
   const port = portText === undefined ? 22 : Number(portText);
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
   if (ipv6) {

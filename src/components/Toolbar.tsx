@@ -1,13 +1,13 @@
-import { MenuBar } from "./MenuBar";
-import { toolsMenuItems } from "../lib/menu";
+import { MenuBar, type AppMenu } from "./MenuBar";
 import { Icon, type IconName } from "./Icon";
-import type { ShellKind } from "../lib/pty";
-
-export function Toolbar({ hasWsl, onOpen, onSession, multiExec, onAction }: { hasWsl: boolean; onOpen: (kind: ShellKind) => void; onSession(): void; multiExec: boolean; onAction(action: string): void }) {
-  const items: { label: string; icon: IconName; kind?: ShellKind }[] = [
-    { label: "Terminal", icon: "terminal", kind: "local" },
-    ...(hasWsl ? [{ label: "WSL", icon: "tux" as const, kind: "wsl" as const }] : []),
-    { label: "Sessions", icon: "star" }, { label: "Tools", icon: "tools" }, { label: "Macros", icon: "macros" },
-  ];
-  return <div className="toolbar" aria-label="Werkzeugleiste">{items.map(item => item.label === "Tools" ? <MenuBar key="Tools" menus={[{ label: "Tools", mnemonic: 1, items: toolsMenuItems(multiExec) }]} onAction={onAction} toolbarIcon={<Icon name="tools" />} /> : <button key={item.label} type="button" className="toolbar-button" aria-label={item.label} aria-disabled={item.label === "Macros" || undefined} title={item.label === "Macros" ? "Makros folgen in einer späteren Version" : item.label} onClick={() => { if (item.kind) onOpen(item.kind); else if (item.label === "Sessions") onSession(); }}><Icon name={item.icon} /><span>{item.label}</span></button>)}</div>;
+export function Toolbar({ hasWsl, menus, shellName, multiExec, onAction }: { hasWsl: boolean; menus: AppMenu[]; shellName: string; multiExec: boolean; onAction(action: string): void }) {
+  const button = (label: string, icon: IconName, action: string, tooltip = label, disabled = false) => <button key={label} type="button" className={`toolbar-button ${action === "multiexec" && multiExec ? "active" : ""}`} aria-label={label} aria-pressed={action === "multiexec" ? multiExec : undefined} title={tooltip} disabled={disabled} onClick={() => onAction(action)}><Icon name={icon}/><span>{label}</span></button>;
+  const menu = (label: string, icon: IconName) => { const definition = menus.find(m => m.label === label); return definition && <MenuBar key={label} menus={[definition]} onAction={onAction} toolbarIcon={<Icon name={icon}/>}/>; };
+  return <div className="toolbar" aria-label="Werkzeugleiste">
+    {button("Session", "ssh", "newSession", "Neue Sitzung")}{menu("Sessions", "star")}
+    {button("Lokales Terminal", "terminal", "local", shellName)}{hasWsl && button("WSL", "tux", "wsl")}
+    {menu("Tools", "tools")}{menu("View", "view")}{menu("Split", "split")}
+    {button("MultiExec", "terminal", "multiexec")}{button("Settings", "settings", "settings")}{menu("Help", "help")}
+    {button("Macros", "macros", "macros", "Makros folgen", true)}<div className="toolbar-spacer"/>{button("Beenden", "power", "quit")}
+  </div>;
 }

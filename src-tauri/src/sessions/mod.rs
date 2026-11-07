@@ -1,5 +1,6 @@
 pub mod import_mobaxterm;
 pub mod import_windterm;
+pub mod recent;
 
 use serde::{Deserialize, Serialize};
 use std::{

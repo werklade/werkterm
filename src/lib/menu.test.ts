@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowMenuMnemonic, toolsMenuItems, menuMove, shortcutAction, shortcuts, type ShortcutEvent } from "./menu";
+import { allowMenuMnemonic, menuMove, shortcutAction, shortcuts, type ShortcutEvent } from "./menu";
 const event = (patch: Partial<ShortcutEvent>): ShortcutEvent => ({ key: "", code: "", ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...patch });
 it("preserves Alt combinations in terminals and editors", () => {
   const alt = event({ key: "t", altKey: true });
@@ -7,16 +7,6 @@ it("preserves Alt combinations in terminals and editors", () => {
   expect(allowMenuMnemonic(alt, false)).toBe(true);
   expect(allowMenuMnemonic({ ...alt, ctrlKey: true }, false)).toBe(false);
   expect(allowMenuMnemonic({ ...alt, metaKey: true }, false)).toBe(false);
-});
-it("defines the toolbar tools menu including checked state and placeholders", () => {
-  const items = toolsMenuItems(true);
-  expect(items.map(i => i.action)).toEqual(["multiexec", "settings", "separator", "tunnels", "jump"]);
-  expect(items[0]).toMatchObject({ checked: true, shortcut: "Strg+Umschalt+M" });
-  expect(toolsMenuItems(false)[0].checked).toBe(false);
-  expect(items[1].shortcut).toBe("Strg+,");
-  expect(items[2].separator).toBe(true);
-  for (const item of items.slice(3)) expect(item).toMatchObject({ disabled: true, tooltip: "folgt" });
-  expect(menuMove(1, "ArrowDown", items.map(i => !!i.disabled || !!i.separator))).toBe(0);
 });
 describe("menu navigation", () => {
   it("wraps and skips disabled entries in either direction", () => {

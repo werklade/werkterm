@@ -25,6 +25,7 @@ export interface BrowserTab {
   title: string;
   target?: string;
   savedSessionId?: string;
+  startCommand?: import("../lib/pty").StartCommand;
   saveDismissed?: boolean;
   sessionId?: number;
   cwd?: { host: string; path: string };

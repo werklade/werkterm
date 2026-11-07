@@ -17,7 +17,7 @@ function NumberSetting({ label, value, min, max, step, onValue }: { label: strin
     setDraft(String(next)); onValue(next);
   }} /></label>;
 }
-export function SettingsDialog({ settings, onChange, onClose }: { settings: Settings; onChange(settings: Settings): void; onClose(): void }) {
+export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: { settings: Settings; onChange(settings: Settings): void; onClose(): void; onClearRecents(): void }) {
   const dialog = useModal();
   const [tab, setTab] = useState("Terminal");
   const [error, setError] = useState("");
@@ -51,6 +51,7 @@ export function SettingsDialog({ settings, onChange, onClose }: { settings: Sett
       <div className="theme-preview" style={{ background: theme.background, color: theme.foreground }}><p>Werkterm · Textvorschau 0123456789</p><div>{ansiKeys.map(key => <span key={key} title={`${key}: ${theme[key]}`} style={{ background: theme[key] }} />)}</div></div>
       <button disabled={busy} onClick={() => void importColors()}>Farben aus MobaXterm importieren…</button>
     </> : <>{number("Schriftgröße", "editorFontSize", 8, 32)}{check("Zeilenumbruch standardmäßig an", "editorWrap")}<label>Tabbreite<select value={settings.editorTabSize} onChange={e => change({ editorTabSize: Number(e.target.value) as 2 | 4 | 8 })}>{[2, 4, 8].map(n => <option key={n}>{n}</option>)}</select></label></>}</div>
+    <button type="button" onClick={onClearRecents}>Zuletzt verwendet leeren</button>
     {error && <p role="alert">{error}</p>}<p>Änderungen gelten sofort.</p><div className="dialog-actions"><button onClick={() => change(tab === "Terminal" ? { fontFamily: defaultSettings.fontFamily, fontSize: 14, lineHeight: 1, cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: defaultSettings.theme } : { editorFontSize: 14, editorWrap: false, editorTabSize: 4 })}>Zurücksetzen</button><button autoFocus onClick={onClose}>Schließen</button></div>
   </dialog>;
 }

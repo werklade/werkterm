@@ -48,6 +48,8 @@ input::placeholder { color: var(--fg-muted); }
 .tab-close { padding: 0 9px; font-size: 18px; }
 .new-tab { display: flex; flex: none; position: relative; }
 .new-tab > button { padding: 0 10px; font-size: 18px; }
+.new-tab .toolbar-menu, .new-tab .menu-root { height: 100%; }
+.menu-icon-button { height: 100%; padding: 0 8px; font-size: 14px; }
 .shell-menu { position: absolute; top: 100%; right: 0; background: var(--bg-panel-alt); border: 1px solid var(--border-strong); min-width: 140px; padding: 4px; }
 .shell-menu button { padding: 8px; width: 100%; text-align: left; }
 .terminal-stack { position: relative; flex: 1; min-height: 0; background: var(--bg-content); }
@@ -125,3 +127,32 @@ input::placeholder { color: var(--fg-muted); }
 
 .toolbar-menu { display: flex; align-items: stretch; }
 .app-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+
+.toolbar-spacer { flex: 1; min-width: 12px; border-right: 1px solid var(--border); margin-right: 6px; }
+.toolbar-button.active { background: var(--accent); color: white; }
+.toolbar { overflow: visible; }
+.toolbar-standard .toolbar-button > span:not(.icon), .toolbar-small .toolbar-button > span:not(.icon) { display: none; }
+.toolbar-standard { --toolbar-height: 46px; }
+.toolbar-small { --toolbar-height: 34px; }
+.toolbar-small .toolbar-button { min-width: 32px; padding: 2px 6px; }
+.toolbar-small .toolbar-button .icon { width: 20px; height: 20px; }
+.sidebar-right { flex-direction: row-reverse; }
+.compact .terminal-panel { padding: 1px; }
+.compact .statusbar { padding: 1px 4px; }
+.app-menu { max-height: min(72vh, 680px); overflow-y: auto; }
+.menu-heading { padding: 7px 12px 3px; color: var(--fg-secondary); font-size: 11px; font-weight: bold; }
+.app-menu button > span { display: flex; align-items: center; gap: 6px; }
+.home { flex: 1; min-height: 0; overflow-y: auto; display: grid; place-items: center; padding: 24px; background: var(--bg-content); }
+.home-content { width: min(740px, 100%); text-align: center; }
+.home h1 { font-size: 32px; margin: 8px 0 24px; }
+.home h2 { font-size: 17px; margin-top: 28px; }
+.home-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; }
+.home button { border: 1px solid var(--border); border-radius: 5px; padding: 10px 14px; background: var(--bg-panel); }
+.home-search { width: 100%; margin-top: 26px; padding: 12px; }
+.home-results { max-height: 220px; overflow-y: auto; text-align: left; }
+.home-results button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; }
+.home-results [aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.recent-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.recent-grid button { display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; text-align: left; }
+.home-hint { color: var(--fg-secondary); margin-top: 36px; font-size: 12px; }
+.terminal-workspace:has(.home) > .terminal-stack { flex: 0; }

@@ -1,9 +1,12 @@
+import { Home } from "./components/Home";
+import { createMenus } from "./lib/actions";
+import { recentList, lastTabsList, terminalDescriptors, type Recent, type LastTab } from "./lib/history";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { HelpDialog } from "./components/HelpDialog";
 import { ImportDialog } from "./components/ImportDialog";
 import { normalizeSettings, selectedTheme } from "./lib/settings";
-import type { AppMenu } from "./components/MenuBar";
 import { MenuBar } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar, type BrowserTab } from "./components/Sidebar";
@@ -63,7 +66,7 @@ export default function App() {
   const beforeMultiExec = useRef<number | null>(null);
   const [unchecked, setUnchecked] = useState<Set<number>>(() => new Set());
   const [pasteRequest, setPasteRequest] = useState<{ lines: number; targets: number[]; data: string } | null>(null);
-  const [tabs, setTabs] = useState<BrowserTab[]>(() => [{ id: 1, kind: "local", title: `${localTitle()} 1`, exited: false, browserPath: "" }]);
+  const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [editors, setEditors] = useState<Record<number, EditorTabState>>({});
   const editorsRef = useRef(editors);
   editorsRef.current = editors;
@@ -86,12 +89,13 @@ export default function App() {
   }, []);
   const [closeEditorId, setCloseEditorId] = useState<number | null>(null);
   const [closeEditorBusy, setCloseEditorBusy] = useState(false);
-  const [activeId, setActiveId] = useState<number | null>(1);
+  const [activeId, setActiveId] = useState<number | null>(0);
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const [hasWsl, setHasWsl] = useState(false);
+  const [shellsLoaded, setShellsLoaded] = useState(false);
   const [transfer, setTransfer] = useState<QueueState>(null);
   const [status, setStatus] = useState("Bereit");
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
@@ -102,7 +106,31 @@ export default function App() {
   const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
   useEffect(reloadSessions, [reloadSessions]);
   const [settings, setSettings] = useState(loadSettings);
-  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const sidebarVisible = settings.sidebarVisible;
+  const setSidebarVisible = (value: boolean | ((current: boolean) => boolean)) => changeSettings({ ...settingsRef.current, sidebarVisible: typeof value === "function" ? value(settingsRef.current.sidebarVisible) : value });
+  const [temporaryMenu, setTemporaryMenu] = useState(false);
+  const [shellName, setShellName] = useState(localTitle);
+  const [recents, setRecents] = useState<Recent[]>([]);
+  const [lastTabs, setLastTabs] = useState<LastTab[]>([]);
+  const [restoreQueue, setRestoreQueue] = useState<LastTab[] | null>(null);
+  useEffect(() => {
+    void recentList().then(setRecents).catch(reason => setStatus(String(reason)));
+    void lastTabsList().then(setLastTabs).catch(reason => setStatus(String(reason)));
+    void invoke<string>("local_shell_name").then(setShellName).catch(reason => setStatus(String(reason)));
+  }, []);
+  useEffect(() => {
+    const show = (event: KeyboardEvent) => {
+      if ((event.key === "F10" || event.key === "Alt") && !document.querySelector("dialog[open]")) {
+        setTemporaryMenu(true);
+        requestAnimationFrame(() => document.querySelector<HTMLElement>('.menubar [data-top="0"]')?.focus());
+      }
+      if (event.key === "Escape") setTemporaryMenu(false);
+    };
+    const outside = (event: PointerEvent) => { if (!(event.target instanceof Element && event.target.closest(".menubar"))) setTemporaryMenu(false); };
+    document.addEventListener("keydown", show, true);
+    document.addEventListener("pointerdown", outside, true);
+    return () => { document.removeEventListener("keydown", show, true); document.removeEventListener("pointerdown", outside, true); };
+  }, []);
   const [sidebarPanel, setSidebarPanel] = useState(3);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
@@ -111,10 +139,10 @@ export default function App() {
   useEffect(() => { document.documentElement.style.setProperty("--bg-content", selectedTheme(settings).background); }, [settings]);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
   const promptQueue = useRef<QueuedPrompt[]>([]);
-  const liveTabs = useRef(new Set([1]));
+  const liveTabs = useRef(new Set<number>());
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const nextId = useRef(2);
+  const nextId = useRef(1);
   const sessions = useRef(new Map<number, number>());
   const sshTabs = useRef(new Set<number>());
   const [conflict, setConflict] = useState<FileDialog | null>(null);
@@ -159,7 +187,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void availableShells().then(shells => { if (!cancelled) setHasWsl(shells.includes("wsl")); }).catch((error: unknown) => {
+    void availableShells().then(shells => { if (!cancelled) { setHasWsl(shells.includes("wsl")); setShellsLoaded(true); } }).catch((error: unknown) => {
       if (!cancelled) setStatus(`Verfügbare Shells konnten nicht geladen werden: ${String(error)}`);
     });
     return () => { cancelled = true; };
@@ -175,11 +203,11 @@ export default function App() {
     setPrompts([...promptQueue.current]);
     for (const item of removed) void declinePrompt(item.prompt).catch(() => undefined);
   }, []);
-  const openTab = (kind: ShellKind) => {
+  const openTab = (kind: ShellKind, startCommand?: import("./lib/pty").StartCommand) => {
     if (windowClosing.current) return;
     const id = nextId.current++;
     liveTabs.current.add(id);
-    setTabs(current => [...current, { id, kind, title: `${kind === "wsl" ? "WSL" : localTitle()} ${id}`, exited: false, browserPath: "" }]);
+    setTabs(current => [...current, { id, kind, startCommand, title: startCommand ? ({ root: "Root", processes: "Prozesse", hardware: "Hardware" }[startCommand]) : (kind === "wsl" ? "WSL" : shellName), exited: false, browserPath: "" }]);
     setActiveId(id);
   };
   const connect = (target: string) => {
@@ -204,6 +232,16 @@ export default function App() {
     setActiveId(id);
     setStatus(`Verbinde mit ${session.name}…`);
   };
+  useEffect(() => {
+    if (restoreQueue === null || userSession || quickUserTarget || windowClosing.current) return;
+    if (tabs.some(t => t.kind === "ssh" && !t.exited && t.sessionId === undefined)) return;
+    if (!restoreQueue.length) { setRestoreQueue(null); return; }
+    const [tab, ...remaining] = restoreQueue;
+    setRestoreQueue(remaining);
+    if (tab.type === "local" || tab.type === "wsl") { if (tab.type === "local" || hasWsl) openTab(tab.type); }
+    else if (tab.type === "saved") { const session = savedSessions.find(s => s.id === tab.sessionId); if (session) connectSaved(session); }
+    else if (tab.type === "quick") connect(tab.target);
+  });
   const reportStatus = (message: string) => {
     setStatus(message);
     const id = activeIdRef.current;
@@ -216,7 +254,7 @@ export default function App() {
     const currentTabs = tabsRef.current;
     const index = currentTabs.findIndex(tab => tab.id === id);
     if (currentTabs[index]?.kind === "ssh" && currentTabs[index]?.sessionId === undefined && !currentTabs[index]?.exited) setStatus("Verbindungsaufbau abgebrochen");
-    if (activeIdRef.current === id) setActiveId(currentTabs[index + 1]?.id ?? currentTabs[index - 1]?.id ?? null);
+    if (activeIdRef.current === id) setActiveId(currentTabs[index + 1]?.id ?? currentTabs[index - 1]?.id ?? 0);
     setTabs(current => current.filter(tab => tab.id !== id));
   };
   const askEditorClose = (id: number): Promise<CloseAnswer> => {
@@ -256,6 +294,7 @@ export default function App() {
     return true;
   };
   const closeTab = (id: number) => {
+    if (id === 0) return;
     if (windowClosing.current || closing.current.size) return;
     if (!editorsRef.current[id]) { removeTab(id); return; }
     closing.current.add(id);
@@ -277,7 +316,11 @@ export default function App() {
       // Freeze every document so a previously clean tab cannot become dirty mid-sequence.
       for (const handle of [...editorHandles.current.values()]) { locked.push(handle); await handle.lock(); }
       const ids = Object.keys(editorsRef.current).map(Number);
-      if (await closeEditors(ids, false)) await getCurrentWindow().destroy();
+      if (await closeEditors(ids, false)) {
+        const restore = terminalDescriptors(tabsRef.current);
+        await invoke("last_tabs_save", { tabs: restore });
+        await getCurrentWindow().destroy();
+      }
     } catch (reason) { reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason)); }
     finally { for (const handle of locked) handle.unlock(); windowClosing.current = false; }
   };
@@ -313,7 +356,15 @@ export default function App() {
   }, [removePrompts, cancelTabTransfers]);
   const setSession = useCallback((id: number, sessionId: number | null) => {
     if (sessionId === null) cancelTabTransfers(id);
-    else if (liveTabs.current.has(id) && sshTabs.current.has(id)) sessions.current.set(id, sessionId);
+    else if (liveTabs.current.has(id) && sshTabs.current.has(id)) {
+      sessions.current.set(id, sessionId);
+      const tab = tabsRef.current.find(t => t.id === id);
+      if (tab) {
+        const at = Date.now();
+        const item: Recent = tab.savedSessionId ? { kind: "saved", sessionId: tab.savedSessionId, name: tab.title, at } : { kind: "quick", target: tab.target ?? "", at };
+        void invoke("recent_add", { item }).then(recentList).then(setRecents).catch(reason => setStatus(String(reason)));
+      }
+    }
     setTabs(current => current.map(tab => tab.id === id && !tab.exited ? { ...tab, sessionId: sessionId ?? undefined } : tab));
   }, [cancelTabTransfers]);
   const setCwd = useCallback((id: number, cwd: { host: string; path: string }) => {
@@ -378,7 +429,18 @@ export default function App() {
     }
   };
   const action = (name: string) => {
+    setTemporaryMenu(false);
+    if (name.startsWith("saved:")) { const session = savedSessions.find(s => s.id === name.slice(6)); if (session) connectSaved(session); return; }
+    if (name.startsWith("bars:")) { changeSettings({ ...settings, compact: false, bars: name.slice(5) as Settings["bars"] }); return; }
+    if (name.startsWith("size:")) { changeSettings({ ...settings, toolbarSize: name.slice(5) as Settings["toolbarSize"] }); return; }
     switch (name) {
+      case "root": case "processes": case "hardware": openTab("local", name); break;
+      case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: "Lokal", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(String(reason))); break;
+      case "compact": changeSettings({ ...settings, compact: !settings.compact }); break;
+      case "left": case "right": changeSettings({ ...settings, sidebarRight: name === "right" }); break;
+      case "tabNumbers": changeSettings({ ...settings, tabNumbers: !settings.tabNumbers }); break;
+      case "tabClose": changeSettings({ ...settings, tabClose: !settings.tabClose }); break;
+      case "single": setMultiExec(false); break;
       case "local": openTab("local"); break;
       case "wsl": if (hasWsl) openTab("wsl"); break;
       case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Quick connect"]')?.focus()); break;
@@ -407,7 +469,7 @@ export default function App() {
     }
   };
   const terminals = tabs.filter(tab => tab.kind !== "editor");
-  const gridVisible = multiExec && activeTab?.kind !== "editor";
+  const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor";
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
     const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
@@ -416,28 +478,20 @@ export default function App() {
     if (requiresPasteConfirmation(gridVisible, pasted, data)) { setPasteRequest(current => current ?? { lines, targets, data }); return; }
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus: AppMenu[] = [
-    { label: "Terminal", mnemonic: 0, items: [
-      { label: "Neues lokales Terminal", action: "local", shortcut: "Strg+Umschalt+T" },
-      ...(hasWsl ? [{ label: "Neues WSL-Terminal", action: "wsl" }] : []),
-      { label: "Quick connect…", action: "quick" }, { label: "Tab schließen", action: "close", shortcut: "Strg+Umschalt+W", disabled: activeId === null, tooltip: activeId === null ? "Kein Tab geöffnet" : undefined }, { label: "Beenden", action: "quit" },
-    ] },
-    { label: "Sessions", mnemonic: 0, items: [{ label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungen anzeigen", action: "sessions" }, { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" }] },
-    { label: "View", mnemonic: 0, items: [{ label: "Seitenleiste", action: "sidebar", checked: sidebarVisible }, { label: "SSH-Browser anzeigen", action: "browser" }, { label: "Monitoring-Leiste", action: "monitoring", checked: settings.monitoring }, { label: "Schrift größer", action: "larger", shortcut: "Strg+Umschalt+Plus" }, { label: "Schrift kleiner", action: "smaller", shortcut: "Strg+Umschalt+Minus" }, { label: "Schrift Standard", action: "resetFont", shortcut: "Strg+Umschalt+0" }, { label: "Vollbild", action: "fullscreen", shortcut: "F11" }] },
-    { label: "Tools", mnemonic: 1, items: [{ label: "MultiExec", action: "multiexec", checked: multiExec, shortcut: "Strg+Umschalt+M" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," }] },
-    { label: "Help", mnemonic: 0, items: [{ label: "Tastenkürzel", action: "shortcuts" }, { label: "Über Werkterm", action: "about" }] },
-  ];
-  return <div className="app-shell">
-    <MenuBar menus={menus} onAction={action} />
-    <Toolbar hasWsl={hasWsl} onOpen={openTab} onSession={() => setSessionDialog({})} multiExec={multiExec} onAction={action} />
-    <div className="workspace">
+  const menus = createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const restoreTabs = () => setRestoreQueue([...lastTabs]);
+  return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
+    <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
+    {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
+    <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
       {sidebarVisible && <Sidebar onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
-        <TabBar tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
+        <TabBar showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
+        {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} active={tab.id === activeId} visible={gridVisible || tab.id === activeId} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={gridVisible || tab.id === activeId} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
@@ -449,7 +503,6 @@ export default function App() {
               onStatusChange={status => setEditors(current => !current[id] || current[id].status === status ? current : { ...current, [id]: { ...current[id], status } })}
               onDocumentChange={document => setEditors(current => !current[id] ? current : { ...current, [id]: { ...current[id], document } })} /></div>;
           })}</Suspense>
-          {tabs.length === 0 && <div className="terminal-empty">Öffne ein Terminal über + oder die Werkzeugleiste.</div>}
         </div>
       </main>
     </div>
@@ -458,7 +511,7 @@ export default function App() {
       if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data, true); });
       setPasteRequest(null);
     }} />}
-    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
     {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}

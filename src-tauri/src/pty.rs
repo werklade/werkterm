@@ -862,3 +862,44 @@ mod tests {
         assert!(!manager.sessions().unwrap().contains_key(&id));
     }
 }
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartCommand {
+    Root,
+    Processes,
+    Hardware,
+}
+pub fn apply_start_command(
+    spec: &mut ShellSpec,
+    command: Option<StartCommand>,
+) -> Result<(), String> {
+    let Some(command) = command else {
+        return Ok(());
+    };
+    if !cfg!(target_os = "linux") {
+        return Err("Systemwerkzeuge sind nur unter Linux verfügbar".into());
+    }
+    match command {
+        StartCommand::Root => {
+            spec.program = "sudo".into();
+            spec.args = vec!["-i".into()];
+        }
+        StartCommand::Processes | StartCommand::Hardware => {
+            let command = match command {
+                StartCommand::Processes => {
+                    "if command -v htop >/dev/null 2>&1; then htop; else top; fi"
+                }
+                _ => {
+                    r#"for tool in lsblk lsusb lspci; do if command -v "$tool" >/dev/null 2>&1; then "$tool"; fi; done"#
+                }
+            };
+            spec.program = "/bin/sh".into();
+            spec.args = vec![
+                "-c".into(),
+                format!(r#"{command}; exec "${{SHELL:-/bin/sh}}" -i"#),
+            ];
+        }
+    }
+    Ok(())
+}

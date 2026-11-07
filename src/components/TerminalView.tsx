@@ -25,6 +25,7 @@ interface Props {
   kind: "local" | "wsl" | "ssh";
   target?: string;
   savedSessionId?: string;
+  startCommand?: import("../lib/pty").StartCommand;
   active: boolean;
   shellIntegration: boolean;
   sshPromptCommand: boolean;
@@ -38,7 +39,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
@@ -128,7 +129,7 @@ export function TerminalView({ visible, monitoringSession, onInput, gridFooter, 
       const dimensions = { cols: terminal.cols, rows: terminal.rows, onData, onExit: onExitChannel };
       const spawned = kind === "ssh"
         ? connectSsh({ ...dimensions, target: target ?? "", sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
-        : spawnPty({ ...dimensions, kind, shellIntegration: settings.current.shellIntegration });
+        : spawnPty({ ...dimensions, kind, startCommand, shellIntegration: settings.current.shellIntegration });
       void spawned.then(result => {
         connecting = false;
         const spawnedId = typeof result === "number" ? result : result.id;
@@ -170,7 +171,7 @@ export function TerminalView({ visible, monitoringSession, onInput, gridFooter, 
       };
     });
     return () => { cancelled = true; cleanup?.(); };
-  }, [id, kind, target, savedSessionId]);
+  }, [id, kind, target, savedSessionId, startCommand]);
 
   useEffect(() => {
     const current = runtime.current;

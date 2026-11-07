@@ -24,6 +24,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            sessions::recent::recent_list,
+            sessions::recent::recent_add,
+            sessions::recent::recent_clear,
+            sessions::recent::last_tabs_list,
+            sessions::recent::last_tabs_save,
+            commands::local_shell_name,
             terminal_colors::import_mobaxterm_colors,
             editor::editor_open_remote,
             editor::editor_open_local,

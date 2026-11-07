@@ -182,12 +182,13 @@ pub async fn pty_spawn(
     cols: u16,
     rows: u16,
     shell_integration: bool,
+    start_command: Option<crate::pty::StartCommand>,
     on_data: Channel<InvokeResponseBody>,
     on_exit: Channel<Option<u32>>,
 ) -> Result<u32, String> {
     let manager = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let spec = resolve_shell(
+        let mut spec = resolve_shell(
             kind,
             Platform::current(),
             std::env::var("SHELL").ok(),
@@ -195,6 +196,7 @@ pub async fn pty_spawn(
             program_in_path,
         )
         .map_err(|error| error.to_string())?;
+        crate::pty::apply_start_command(&mut spec, start_command)?;
         manager
             .spawn(
                 &spec,
@@ -613,4 +615,19 @@ pub async fn ssh_chmod(
             },
         )
         .await
+}
+
+#[tauri::command]
+pub fn local_shell_name() -> String {
+    if cfg!(windows) {
+        return "PowerShell".into();
+    }
+    std::env::var("SHELL")
+        .ok()
+        .and_then(|s| {
+            std::path::Path::new(&s)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "sh".into())
 }
