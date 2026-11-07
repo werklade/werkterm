@@ -60,7 +60,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         // The jackhammer shakes Tux quickly; the shovel only rocks him with each scoop.
         const wobble = tux.state !== "dig" ? 0 : hammering ? (Math.floor(now / 45) % 2 ? 1 : -1) * Math.max(1, cellWidth / 10) : (scoop === 1 ? 1 : scoop === 3 ? -1 : 0) * Math.max(1, cellWidth / 8);
         const x = tux.x * cellWidth + wobble, y = (tux.y + (tux.state === "dig" ? sink : 0)) * cellHeight + (hammering && Math.floor(now / 60) % 2 ? Math.max(1, cellHeight / 16) : 0);
-        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.sliding ? sprites.slide : tux.state === "fall" ? (tux.vy > 2 ? (Math.floor(now / 90) % 2 ? sprites.flapUp : sprites.flapDown) : sprites.fall) : tux.state === "dig" ? (hammering ? sprites.stand : [sprites.digUp, sprites.digDown, sprites.stand, sprites.digDown][scoop]) : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.sideA : sprites.sideB) : sprites.wave;
+        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.sliding ? sprites.slide : tux.state === "fall" ? (tux.vy > 2 ? (Math.floor(now / 90) % 2 ? sprites.flapUp : sprites.flapDown) : sprites.fall) : tux.state === "dig" ? (hammering ? sprites.stand : (tux.age % .75) / .75 < .35 ? sprites.digDown : sprites.digUp) : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.sideA : sprites.sideB) : sprites.wave;
         const hidden = tux.state === "gone" || (tux.state === "exit" && tux.leave > LEAVE.wave + LEAVE.slip);
         if (tux.state === "dig") hole(digSpan(tux), sink);
         const corner = () => {
@@ -91,13 +91,20 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
             context.fillStyle = "#d94f2a"; context.fillRect(jx, 9 * pixel, 3 * pixel, pixel);
             context.fillStyle = "#cfd6db"; context.fillRect(jx + pixel, 14 * pixel, pixel, 2 * pixel + chisel);
           } else {
-            // Front view: the shovel beside the body is lifted and driven into the ground.
-            const phase = (tux.age * 1.4) % 1;
-            const lift = Math.round((phase < .6 ? phase / .6 : 1 - (phase - .6) / .4) * 5) * pixel;
-            const sx = 6 * pixel, top = 4 * pixel + (5 * pixel - lift);
-            context.fillStyle = "#8a5a2b"; context.fillRect(sx, top, pixel, 9 * pixel);
-            context.fillRect(sx - pixel, top, 3 * pixel, pixel);
-            context.fillStyle = "#9aa5ad"; context.fillRect(sx - pixel, top + 9 * pixel, 3 * pixel, 3 * pixel);
+            // Front view, sideways shovelling: stab into the ground in front, then swing the
+            // loaded blade out to one side; the side alternates with every stroke.
+            const stroke = .75, t = (tux.age % stroke) / stroke, side = Math.floor(tux.age / stroke) % 2 ? 1 : -1;
+            const ease = (v: number) => 1 - (1 - v) * (1 - v);
+            const angle = t < .35 ? side * -1.9 * (1 - ease(t / .35)) : side * 1.9 * ease((t - .35) / .65);
+            const push = t < .35 ? Math.round(ease(t / .35)) * pixel : 0;
+            const gx = 0, gy = 9 * pixel + push, dx = Math.sin(angle), dy = Math.cos(angle);
+            context.fillStyle = "#8a5a2b";
+            for (let i = 0; i <= 7; i++) context.fillRect(gx + dx * i * pixel - pixel / 2, gy + dy * i * pixel - pixel / 2, pixel, pixel);
+            const bx = gx + dx * 8.5 * pixel, by = gy + dy * 8.5 * pixel;
+            context.save(); context.translate(bx, by); context.rotate(-angle);
+            context.fillStyle = "#9aa5ad"; context.fillRect(-1.5 * pixel, -pixel, 3 * pixel, 3 * pixel);
+            if (t >= .35 && t < .9) { context.fillStyle = "#7a5a36"; context.fillRect(-pixel, -2 * pixel, 2 * pixel, pixel); }
+            context.restore();
           }
         }
         context.restore();
