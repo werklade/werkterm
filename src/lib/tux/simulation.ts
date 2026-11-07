@@ -13,13 +13,27 @@ const solid = (platforms: Platform[], holes: Hole[], row: number, x: number) =>
   platforms.some(p => p.y === row && x >= p.start && x < p.end) && !holes.some(h => h.row === row && x >= h.start && x < h.end);
 /** A dig spans wider than the ~5-cell sprite so the damage shows beside it. */
 export const digSpan = (t: { x: number; floor: number }): Hole => ({ row: t.floor, start: Math.floor(t.x) - 3, end: Math.floor(t.x) + 4 });
-export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit"; age: number; wait: number; floor: number }
-export function createTux(x: number, direction = 1, wait = 0): Tux { return { x, y: -2, vy: 0, direction, state: "fall", age: 0, wait, floor: -1 }; }
-export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number, random = Math.random, holes: Hole[] = []): void {
+export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit" | "gone"; age: number; wait: number; floor: number; leave: number }
+/** Leaving: wave while the corner folds open, slip behind it, then close it. */
+export const LEAVE = { wave: 1.6, slip: .5, close: .5 };
+export function createTux(x: number, direction = 1, wait = 0): Tux { return { x, y: -2, vy: 0, direction, state: "fall", age: 0, wait, floor: -1, leave: -1 }; }
+export function stepTux(t: Tux, dt: number, platforms: Platform[], rows: number, random = Math.random, holes: Hole[] = [], cols = Infinity): void {
   dt = Math.max(0, Math.min(dt, .1));
   if (t.wait > 0) { t.wait -= dt; return; }
   t.age += dt;
-  if (t.state === "exit") { t.x += t.direction * dt * 6; return; }
+  if (t.state === "gone") return;
+  if (t.state === "exit") {
+    if (t.leave < 0) {
+      t.x += t.direction * dt * 6;
+      const edge = t.direction > 0 ? cols - 2.5 : 2.5;
+      if (t.direction > 0 ? t.x >= edge : t.x <= edge) { t.x = edge; t.leave = 0; }
+    } else {
+      t.leave += dt;
+      if (t.leave > LEAVE.wave && t.leave <= LEAVE.wave + LEAVE.slip) t.x += t.direction * dt * 6;
+      if (t.leave >= LEAVE.wave + LEAVE.slip + LEAVE.close) t.state = "gone";
+    }
+    return;
+  }
   if (t.state === "dig") {
     if (t.age > .9) { holes.push(digSpan(t)); t.state = "fall"; t.y += 1; t.vy = 0; t.age = 0; }
     return;

@@ -38,6 +38,15 @@ it("leaves a hole that later walkers fall through", () => {
   for (let i = 0; i < 10 && walker.state === "walk"; i++) stepTux(walker, .1, platforms, 10, () => 1, holes);
   expect(walker.state).toBe("fall"); expect(walker.x).toBeLessThan(8);
 });
+it("waves at the edge, slips behind the corner and is gone", () => {
+  const tux = createTux(5, 1); Object.assign(tux, { state: "exit", y: 6 });
+  for (let i = 0; i < 20 && tux.leave < 0; i++) stepTux(tux, .1, [], 6, Math.random, [], 10);
+  expect(tux.leave).toBe(0); expect(tux.x).toBe(7.5);
+  for (let i = 0; i < 15; i++) stepTux(tux, .1, [], 6, Math.random, [], 10);
+  expect(tux.x).toBe(7.5); expect(tux.state).toBe("exit");
+  for (let i = 0; i < 12; i++) stepTux(tux, .1, [], 6, Math.random, [], 10);
+  expect(tux.x).toBeGreaterThan(7.5); expect(tux.state).toBe("gone");
+});
 it("resets inactivity for input and output", () => {
   const clock = new IdleClock(0);
   expect(clock.remaining(60000, 60000)).toBe(0);

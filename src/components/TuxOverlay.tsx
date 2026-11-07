@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { createTux, digSpan, IdleClock, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
+import { createTux, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
@@ -47,30 +47,39 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
       for (let i = 0; i < tuxes.length; i++) {
         const tux = tuxes[i];
         if (motion.matches) { tux.x = terminal.cols / 2; tux.y = terminal.rows; tux.state = "walk"; }
-        else stepTux(tux, dt, platforms, terminal.rows, Math.random, holes);
+        else stepTux(tux, dt, platforms, terminal.rows, Math.random, holes, terminal.cols);
         if (tux.wait > 0) continue;
         const pixel = Math.max(1, Math.floor(cellHeight * 2 / 16));
         const size = pixel * 16;
         const x = tux.x * cellWidth, y = (tux.y + (tux.state === "dig" ? Math.min(1, tux.age / .9) : 0)) * cellHeight;
-        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
+        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.state === "fall" ? sprites.fall : tux.state === "dig" ? sprites.dig : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.walk1 : sprites.walk2) : sprites.wave;
+        const hidden = tux.state === "gone" || (tux.state === "exit" && tux.leave > LEAVE.wave + LEAVE.slip);
         if (tux.state === "dig") hole(digSpan(tux), Math.min(1, tux.age / .9));
+        const corner = () => {
+          if (tux.state !== "exit" || tux.leave < 0) return;
+          const edge = tux.direction > 0 ? width : 0;
+          const full = size * 1.3, t = tux.leave;
+          // The corner opens slowly while Tux waves, stays open while he slips behind it, then closes.
+          const flap = t < LEAVE.wave ? full * (t / LEAVE.wave) : t < LEAVE.wave + LEAVE.slip ? full : full * Math.max(0, 1 - (t - LEAVE.wave - LEAVE.slip) / LEAVE.close);
+          if (flap <= 0) return;
+          context.fillStyle = "#243746"; context.beginPath(); context.moveTo(edge, height); context.lineTo(edge - tux.direction * flap, height); context.lineTo(edge, height - flap); context.closePath(); context.fill();
+          context.strokeStyle = "#8baab6"; context.stroke();
+        };
+        const waving = tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave;
+        if (waving) corner();
+        if (!hidden) {
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
         sprite.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
         context.restore();
+        }
         if (tux.state === "dig") {
           context.fillStyle = "#c4a67d";
           for (let p = 0; p < 7; p++) { const phase = (tux.age * 3 + p / 7) % 1; context.fillRect(x + (p - 3) * phase * 13, y - Math.sin(phase * Math.PI) * 16, 3, 3); }
         }
-        if (tux.state === "exit") {
-          const edge = tux.direction > 0 ? width : 0;
-          const distance = Math.abs(x - edge);
-          if (distance < size * 1.5) {
-            const flap = size * Math.max(0, 1 - Math.abs(distance / size - .4));
-            context.fillStyle = "#243746"; context.beginPath(); context.moveTo(edge, height); context.lineTo(edge - tux.direction * flap, height); context.lineTo(edge, height - flap); context.closePath(); context.fill();
-            context.strokeStyle = "#8baab6"; context.stroke();
-          }
-          if (x < -size || x > width + size) tuxes[i] = createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4);
+        if (!waving) corner();
+        if (tux.state === "gone") {
+          tuxes[i] = createTux(Math.random() * terminal.cols, Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4);
         }
       }
       // Reduced motion needs only occasional blink updates, no continuous RAF loop.
