@@ -1,0 +1,15 @@
+.import-dialog { width: 900px; max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); overflow-y: auto; }
+.import-selection-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.import-selection-actions span { margin-right: auto; }
+.import-table-scroll { overflow: auto; max-height: 36vh; border: 1px solid var(--border-strong); margin-bottom: 10px; }
+.import-dialog table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.import-dialog th, .import-dialog td { padding: 8px; text-align: left; border-bottom: 1px solid var(--border-strong); overflow-wrap: anywhere; }
+.import-dialog th { position: sticky; top: 0; background: var(--bg-toolbar); }
+.import-dialog input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+.import-duplicate-label { display: block; color: var(--warning); font-size: 11px; }
+.import-warnings { padding-left: 20px; color: var(--warning); }
+.import-onekeys { margin-top: 16px; border: 1px solid var(--border-strong); min-width: 0; }
+.import-onekey { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border-strong); }
+.import-onekey:last-child { border-bottom: 0; }
+.import-onekey-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 600px) { .import-onekey-fields { grid-template-columns: 1fr; } }

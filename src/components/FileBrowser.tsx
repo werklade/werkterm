@@ -16,6 +16,8 @@ export interface BrowserTab {
   kind: "local" | "wsl" | "ssh";
   title: string;
   target?: string;
+  savedSessionId?: string;
+  saveDismissed?: boolean;
   sessionId?: number;
   cwd?: { host: string; path: string };
   browserPath: string;

@@ -12,6 +12,7 @@ interface Props {
   id: number;
   kind: "local" | "wsl" | "ssh";
   target?: string;
+  savedSessionId?: string;
   active: boolean;
   shellIntegration: boolean;
   sshPromptCommand: boolean;
@@ -34,7 +35,7 @@ function terminalTheme(styles: CSSStyleDeclaration): ITheme {
   };
 }
 
-export function TerminalView({ id, kind, target, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ id, kind, target, savedSessionId, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const activeRef = useRef(active);
@@ -97,7 +98,7 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
       if (activeRef.current) terminal.focus();
       const dimensions = { cols: terminal.cols, rows: terminal.rows, onData, onExit: onExitChannel };
       const spawned = kind === "ssh"
-        ? connectSsh({ ...dimensions, target: target ?? "", connectToken, onPrompt: onPromptChannel })
+        ? connectSsh({ ...dimensions, target: target ?? "", sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
         : spawnPty({ ...dimensions, kind, shellIntegration: settings.current.shellIntegration });
       void spawned.then(result => {
         connecting = false;
@@ -135,7 +136,7 @@ export function TerminalView({ id, kind, target, active, shellIntegration, sshPr
       };
     });
     return () => { cancelled = true; cleanup?.(); };
-  }, [id, kind, target]);
+  }, [id, kind, target, savedSessionId]);
 
   useEffect(() => {
     if (!active) return;

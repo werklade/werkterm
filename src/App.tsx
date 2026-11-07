@@ -5,6 +5,9 @@ import { Sidebar, type BrowserTab } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { HostKeyDialog } from "./components/HostKeyDialog";
 import { SecretDialog } from "./components/SecretDialog";
+import { SessionDialog } from "./components/SessionDialog";
+import { SessionUserDialog } from "./components/SessionUserDialog";
+import { listSessions, sessionTarget, type SavedSession } from "./lib/sessions";
 import { availableShells, type ShellKind } from "./lib/pty";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
@@ -30,6 +33,12 @@ export default function App() {
   const [hasWsl, setHasWsl] = useState(false);
   const [transfer, setTransfer] = useState<QueueState>(null);
   const [status, setStatus] = useState("Bereit");
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [sessionDialog, setSessionDialog] = useState<{ session?: SavedSession; tabId?: number } | null>(null);
+  const [userSession, setUserSession] = useState<SavedSession | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
+  useEffect(reloadSessions, [reloadSessions]);
   const [settings, setSettings] = useState(loadSettings);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
   const promptQueue = useRef<QueuedPrompt[]>([]);
@@ -113,6 +122,15 @@ export default function App() {
     setActiveId(id);
     setStatus(`Verbinde mit ${parsed.user}@${parsed.host}…`);
   };
+  const connectSaved = (session: SavedSession, userOverride?: string) => {
+    if (!session.user && !userOverride) { setUserSession(session); return; }
+    const id = nextId.current++;
+    liveTabs.current.add(id);
+    sshTabs.current.add(id);
+    setTabs(current => [...current, { id, kind: "ssh", target: sessionTarget(session, userOverride), savedSessionId: session.id, title: session.name, exited: false, browserPath: "" }]);
+    setActiveId(id);
+    setStatus(`Verbinde mit ${session.name}…`);
+  };
   const closeTab = (id: number) => {
     cancelTabTransfers(id);
     liveTabs.current.delete(id);
@@ -172,16 +190,20 @@ export default function App() {
   };
   const currentPrompt = prompts[0];
   const activeTab = tabs.find(tab => tab.id === activeId) ?? null;
+  const quickTarget = activeTab?.kind === "ssh" && activeTab.sessionId !== undefined && !activeTab.exited && !activeTab.savedSessionId && !activeTab.saveDismissed ? parseQuickConnect(activeTab.target ?? "") : null;
+  const offerSave = quickTarget && sessionsLoaded && !savedSessions.some(session => session.host.toLowerCase() === quickTarget.host.toLowerCase() && session.port === quickTarget.port && session.user === quickTarget.user);
+  const dismissSave = (tabId: number) => setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, saveDismissed: true } : tab));
 
   return <div className="app-shell">
     <MenuBar />
     <Toolbar hasWsl={hasWsl} onOpen={openTab} />
     <div className="workspace">
-      <Sidebar transferQueue={transferQueue} onStatus={setStatus} onConnect={connect} tab={activeTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
+      <Sidebar savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={setStatus} onConnect={connect} tab={activeTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <TabBar tabs={tabs} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
+        {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, session: { id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         <div className="terminal-stack">
-          <Suspense fallback={null}>{tabs.map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind} target={tab.target} active={tab.id === activeId}
+          <Suspense fallback={null}>{tabs.map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind} target={tab.target} savedSessionId={tab.savedSessionId} active={tab.id === activeId}
             shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           {tabs.length === 0 && <div className="terminal-empty">Öffne ein Terminal über + oder die Werkzeugleiste.</div>}
@@ -189,6 +211,8 @@ export default function App() {
       </main>
     </div>
     <footer className="statusbar" role="status" aria-live="polite"><span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    {sessionDialog && <SessionDialog session={sessionDialog.session} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={() => { if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); }} />}
+    {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}
     {conflict && <FileActionDialog key={conflictSequence} prompt={conflict} />}
     {currentPrompt?.prompt.type === "hostKey" && <HostKeyDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
     {currentPrompt?.prompt.type === "secret" && <SecretDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}

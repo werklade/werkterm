@@ -1,0 +1,12 @@
+.session-dialog { width: 460px; max-height: calc(100vh - 48px); overflow-y: auto; }
+.session-fields { border: 0; padding: 0; margin: 0; display: grid; gap: 12px; min-width: 0; }
+.session-fields label, .import-dialog label { display: grid; gap: 5px; }
+.session-fields input, .session-fields select, .import-dialog input, .import-dialog select { box-sizing: border-box; min-width: 0; padding: 7px; color: var(--fg-primary); background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: var(--radius); }
+.session-fields select { width: 100%; }
+.session-target-fields { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 12px; }
+.session-path-field { display: flex; gap: 6px; }
+.session-path-field input { flex: 1; min-width: 0; }
+.session-path-field button, .import-dialog button { padding: 6px 9px; border: 1px solid var(--border-strong); background: var(--bg-toolbar); border-radius: var(--radius); }
+.session-hint { color: var(--fg-secondary); font-size: 12px; margin: 0; }
+.session-error { color: var(--danger); }
+.session-dialog :focus-visible, .import-dialog :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
