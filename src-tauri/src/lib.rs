@@ -38,6 +38,7 @@ pub fn run() {
             sessions::recent::last_tabs_list,
             sessions::recent::last_tabs_save,
             commands::local_shell_name,
+            commands::platform,
             terminal_colors::import_mobaxterm_colors,
             editor::editor_open_remote,
             editor::editor_open_local,

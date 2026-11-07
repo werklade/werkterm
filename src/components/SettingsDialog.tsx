@@ -25,7 +25,7 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: 
   const current = useRef(settings); current.current = settings;
   const change = (patch: Partial<Settings>) => onChange(normalizeSettings({ ...current.current, ...patch }));
   const number = (label: string, key: "fontSize" | "lineHeight" | "scrollback" | "editorFontSize", min: number, max: number, step = 1) => <NumberSetting key={key} label={label} value={settings[key]} min={min} max={max} step={step} onValue={value => change({ [key]: value })} />;
-  const check = (label: string, key: "cursorBlink" | "editorWrap") => <label className="settings-check"><input type="checkbox" checked={settings[key]} onChange={e => change({ [key]: e.target.checked })} />{label}</label>;
+  const check = (label: string, key: "cursorBlink" | "editorWrap" | "confirmCloseSsh") => <label className="settings-check"><input type="checkbox" checked={settings[key]} onChange={e => change({ [key]: e.target.checked })} />{label}</label>;
   const importColors = async () => {
     setBusy(true); setError("");
     try {
@@ -46,6 +46,7 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: 
       <label>Schriftart<input list="mono-fonts" value={settings.fontFamily} onChange={e => change({ fontFamily: e.target.value })} /></label><datalist id="mono-fonts">{["Cascadia Mono", "DejaVu Sans Mono", "Consolas", "Liberation Mono", "Ubuntu Mono", "monospace"].map(font => <option key={font} value={font} />)}</datalist>
       {number("Schriftgröße", "fontSize", 8, 32)}{number("Zeilenhöhe", "lineHeight", 1, 2, .1)}
       <label>Cursorform<select value={settings.cursorStyle} onChange={e => change({ cursorStyle: e.target.value as Settings["cursorStyle"] })}><option value="block">Block</option><option value="bar">Strich</option><option value="underline">Unterstrich</option></select></label>
+      {check("Vor dem Trennen aktiver SSH-Verbindungen fragen", "confirmCloseSsh")}
       {check("Cursor blinkt", "cursorBlink")}{number("Scrollback", "scrollback", 1000, 100000)}
       <label>Farbschema<select value={settings.theme} onChange={e => change({ theme: e.target.value })}>{[...Object.keys(terminalThemes), ...(settings.importedTheme ? ["MobaXterm (importiert)"] : [])].map(name => <option key={name}>{name}</option>)}</select></label>
       <div className="theme-preview" style={{ background: theme.background, color: theme.foreground }}><p>Werkterm · Textvorschau 0123456789</p><div>{ansiKeys.map(key => <span key={key} title={`${key}: ${theme[key]}`} style={{ background: theme[key] }} />)}</div></div>

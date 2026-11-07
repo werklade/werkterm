@@ -185,3 +185,17 @@ it("preserves backslashes in POSIX remote filenames", async () => {
   expect(f.states[f.states.length - 1]?.text).toContain("a\\b");
   f.attempt(0).work.resolve(); await tick();
 });
+
+it("counts active and pending transfers by session and excludes cancellation", async () => {
+  const f = setup();
+  f.queue.enqueue([upload("a", 1), download("b", 1), upload("c", 2)]);
+  expect(f.queue.countSession(1)).toBe(2);
+  expect(f.queue.countSession(2)).toBe(1);
+  expect(f.queue.countSession(3)).toBe(0);
+  f.queue.cancelSession(1);
+  expect(f.queue.countSession(1)).toBe(0);
+  f.attempt(0).work.resolve(); await tick();
+  expect(f.queue.countSession(2)).toBe(1);
+  f.attempt(1).work.resolve(); await tick();
+  expect(f.queue.countSession(2)).toBe(0);
+});

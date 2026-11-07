@@ -1,3 +1,6 @@
+import { SshCloseDialog } from "./components/SshCloseDialog";
+import { activeSshTabs, shouldConfirmSsh, closeAfterSsh } from "./lib/sshClose";
+import { shouldFocusMenu } from "./lib/menu";
 import { SplitLayout, paneStyle, useSplitRatios } from "./components/SplitLayout";
 import { assignPane, cleanPanes, paneCount, seedPanes, type SplitMode } from "./lib/split";
 import { ToolDialog } from "./components/ToolDialog";
@@ -94,6 +97,7 @@ export default function App() {
       .catch(reason => setStatus(String(reason)));
     return () => { disposed = true; unlisten?.(); };
   }, []);
+  const [sshClose, setSshClose] = useState<{ message: string; transfers: number; quitting: boolean; answer(accepted: boolean, never: boolean): void } | null>(null);
   const [closeEditorId, setCloseEditorId] = useState<number | null>(null);
   const [closeEditorBusy, setCloseEditorBusy] = useState(false);
   const [activeId, setActiveId] = useState<number | null>(0);
@@ -127,7 +131,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     const show = (event: KeyboardEvent) => {
-      if ((event.key === "F10" || event.key === "Alt") && !document.querySelector("dialog[open]")) {
+      if (shouldFocusMenu(event, !!(document.activeElement?.closest(".terminal-panel, .xterm, .editor-view, .cm-editor"))) && !document.querySelector("dialog[open]")) {
         setTemporaryMenu(true);
         requestAnimationFrame(() => document.querySelector<HTMLElement>('.menubar [data-top="0"]')?.focus());
       }
@@ -300,13 +304,26 @@ export default function App() {
     }
     return true;
   };
+  const askSshClose = async (ids?: number[]): Promise<boolean> => {
+    const candidates = tabsRef.current.filter(tab => !ids || ids.includes(tab.id));
+    if (!shouldConfirmSsh(candidates, settingsRef.current.confirmCloseSsh)) return true;
+    const active = activeSshTabs(candidates);
+    const transfers = active.reduce((count, tab) => count + transferQueue.countSession(tab.sessionId!), 0);
+    const target = parseQuickConnect(active[0].target ?? "");
+    const destination = target ? `${target.user}@${target.host}` : active[0].title;
+    const message = ids ? `Verbindung zu ${destination} ist aktiv. Wirklich trennen?` : `${active.length} aktive SSH-Verbindung(en) werden getrennt. Beenden?`;
+    return new Promise(resolve => setSshClose({ message, transfers, quitting: !ids, answer: (accepted, never) => {
+      if (never) changeSettings({ ...settingsRef.current, confirmCloseSsh: false });
+      setSshClose(null); resolve(accepted);
+    } }));
+  };
   const closeTab = (id: number) => {
-    if (id === 0) return;
-    if (windowClosing.current || closing.current.size) return;
-    if (!editorsRef.current[id]) { removeTab(id); return; }
+    if (id === 0 || windowClosing.current || closing.current.size) return;
     closing.current.add(id);
-    void closeEditors([id], true).catch(reason => reportStatus(String(reason)))
-      .finally(() => closing.current.delete(id));
+    void closeAfterSsh(() => askSshClose([id]), async () => {
+      if (editorsRef.current[id]) return closeEditors([id], true);
+      removeTab(id); return true;
+    }).catch(reason => reportStatus(String(reason))).finally(() => closing.current.delete(id));
   };
   const answerEditorClose = (answer: CloseAnswer) => {
     if (closeEditorBusy) return;
@@ -319,11 +336,13 @@ export default function App() {
     windowClosing.current = true;
     const locked: EditorHandle[] = [];
     try {
-      await Promise.all(pendingOpens.current.values());
-      // Freeze every document so a previously clean tab cannot become dirty mid-sequence.
-      for (const handle of [...editorHandles.current.values()]) { locked.push(handle); await handle.lock(); }
-      const ids = Object.keys(editorsRef.current).map(Number);
-      if (await closeEditors(ids, false)) {
+      const approved = await closeAfterSsh(() => askSshClose(), async () => {
+        await Promise.all(pendingOpens.current.values());
+        // Freeze every document so a clean tab cannot become dirty mid-sequence.
+        for (const handle of [...editorHandles.current.values()]) { locked.push(handle); await handle.lock(); }
+        return closeEditors(Object.keys(editorsRef.current).map(Number), false);
+      });
+      if (approved) {
         const restore = terminalDescriptors(tabsRef.current);
         await invoke("last_tabs_save", { tabs: restore });
         await getCurrentWindow().destroy();
@@ -553,6 +572,7 @@ export default function App() {
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
     {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
+    {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
     {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={() => { if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); }} />}
     {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}

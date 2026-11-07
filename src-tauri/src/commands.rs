@@ -631,3 +631,8 @@ pub fn local_shell_name() -> String {
         })
         .unwrap_or_else(|| "sh".into())
 }
+
+#[tauri::command]
+pub fn platform() -> &'static str {
+    std::env::consts::OS
+}

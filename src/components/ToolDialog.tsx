@@ -62,6 +62,8 @@ function PortsTool() {
 }
 
 function KeygenTool({ onCopy }: { onCopy(value: string): void }) {
+  const [platform, setPlatform] = useState<string | null>(null);
+  const [encrypted, setEncrypted] = useState(false);
   const [start, setStart] = useState<KeyStart | null>(null);
   const [kind, setKind] = useState("ed25519");
   const [bits, setBits] = useState(3072);
@@ -71,6 +73,8 @@ function KeygenTool({ onCopy }: { onCopy(value: string): void }) {
   const [visible, setVisible] = useState(false);
   const [repeatVisible, setRepeatVisible] = useState(false);
   const [result, setResult] = useState<PublicKey | null>(null);
+  const [unsafeSaveOpen, setUnsafeSaveOpen] = useState(false);
+  const unsafeSaveAnswer = useRef<((answer: boolean) => void) | null>(null);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
   const overwriteAnswer = useRef<((answer: boolean) => void) | null>(null);
   const [generatedKind, setGeneratedKind] = useState("ed25519");
@@ -81,26 +85,31 @@ function KeygenTool({ onCopy }: { onCopy(value: string): void }) {
     let disposed = false;
     mounted.current = true;
     let id: number | undefined;
+    void invoke<string>("platform").then(value => { if (!disposed) setPlatform(value); }).catch(() => { if (!disposed) setMessage("Plattform konnte nicht ermittelt werden."); });
     void invoke<KeyStart>("keygen_begin").then(value => {
       id = value.id;
       if (disposed) { void invoke("keygen_close", { id }).catch(() => undefined); return; }
       setStart(value); setComment(value.comment);
     }).catch(() => { if (!disposed) setMessage("Schlüsseldialog konnte nicht vorbereitet werden."); });
-    return () => { disposed = true; mounted.current = false; overwriteAnswer.current?.(false); overwriteAnswer.current = null; if (id !== undefined) void invoke("keygen_close", { id }).catch(() => undefined); };
+    return () => { disposed = true; mounted.current = false; overwriteAnswer.current?.(false); overwriteAnswer.current = null; unsafeSaveAnswer.current?.(false); unsafeSaveAnswer.current = null; if (id !== undefined) void invoke("keygen_close", { id }).catch(() => undefined); };
   }, []);
   const generate = async () => {
     if (!start || busy || password !== repeat) return;
     setBusy(true); setMessage(""); setResult(null);
     try {
       const value = await invoke<PublicKey>("keygen_generate", { id: start.id, kind, bits, comment, passphrase: password });
-      if (mounted.current) { setResult(value); setGeneratedKind(kind); }
+      if (mounted.current) { setResult(value); setGeneratedKind(kind); setEncrypted(password.length > 0); }
     } catch { if (mounted.current) setMessage("Schlüssel konnte nicht erzeugt werden."); }
     finally { if (mounted.current) { setPassword(""); setRepeat(""); setBusy(false); } }
   };
   const saveKey = async (privateKey: boolean) => {
-    if (!start || !result || busy) return;
+    if (!start || !result || busy || platform === null) return;
     setBusy(true); setMessage("");
     try {
+      if (privateKey && platform === "windows" && !encrypted) {
+        const accepted = await new Promise<boolean>(resolve => { unsafeSaveAnswer.current = resolve; setUnsafeSaveOpen(true); });
+        if (!accepted || !mounted.current) return;
+      }
       const name = generatedKind === "ed25519" ? "id_ed25519" : "id_rsa";
       const path = await save({ title: privateKey ? "Privaten Schlüssel speichern" : "Öffentlichen Schlüssel speichern", defaultPath: await join(start.directory, name + (privateKey ? "" : ".pub")) });
       if (!path || !mounted.current) return;
@@ -118,6 +127,7 @@ function KeygenTool({ onCopy }: { onCopy(value: string): void }) {
     finally { if (mounted.current) setBusy(false); }
   };
   return <div className="keygen-tool">
+    {platform === "windows" && <p role="alert"><strong>Unter Windows werden die Dateirechte nicht eingeschränkt – Passphrase verwenden</strong></p>}
     <label>Typ<select disabled={busy} value={kind} onChange={event => setKind(event.target.value)}><option value="ed25519">Ed25519</option><option value="rsa">RSA</option></select></label>
     {kind === "rsa" && <label>Schlüssellänge<select disabled={busy} value={bits} onChange={event => setBits(Number(event.target.value))}><option value={3072}>3072 Bit</option><option value={4096}>4096 Bit</option></select></label>}
     <label>Kommentar<input disabled={busy} value={comment} maxLength={1024} onChange={event => setComment(event.target.value)} /></label>
@@ -125,7 +135,8 @@ function KeygenTool({ onCopy }: { onCopy(value: string): void }) {
     <label>Passphrase wiederholen<PasswordField disabled={busy} autoComplete="new-password" value={repeat} visible={repeatVisible} onToggle={() => setRepeatVisible(value => !value)} onChange={event => setRepeat(event.target.value)} /></label>
     {password !== repeat && <p role="alert">Passphrasen stimmen nicht überein.</p>}
     <button disabled={!start || busy || password !== repeat} onClick={() => void generate()}>{busy ? "Bitte warten…" : "Erzeugen"}</button>
-    {result && <><label>Öffentlicher Schlüssel<textarea readOnly rows={4} value={result.public_key} /></label><button onClick={() => onCopy(result.public_key)}>Kopieren</button><p className="key-fingerprint">{result.fingerprint}</p><div className="tool-controls"><button disabled={busy} onClick={() => void saveKey(true)}>Privaten Schlüssel speichern…</button><button disabled={busy} onClick={() => void saveKey(false)}>Öffentlichen Schlüssel speichern…</button></div></>}
+    {result && <><label>Öffentlicher Schlüssel<textarea readOnly rows={4} value={result.public_key} /></label><button onClick={() => onCopy(result.public_key)}>Kopieren</button><p className="key-fingerprint">{result.fingerprint}</p><div className="tool-controls"><button disabled={busy || platform === null} onClick={() => void saveKey(true)}>Privaten Schlüssel speichern…</button><button disabled={busy || platform === null} onClick={() => void saveKey(false)}>Öffentlichen Schlüssel speichern…</button></div></>}
+    {unsafeSaveOpen && <UnencryptedKeyDialog onAnswer={answer => { setUnsafeSaveOpen(false); unsafeSaveAnswer.current?.(answer); unsafeSaveAnswer.current = null; }} />}
     {overwriteOpen && <OverwriteDialog onAnswer={answer => { setOverwriteOpen(false); overwriteAnswer.current?.(answer); overwriteAnswer.current = null; }} />}
     {message && <p role="status">{message}</p>}
   </div>;
@@ -137,5 +148,14 @@ function OverwriteDialog({ onAnswer }: { onAnswer(answer: boolean): void }) {
     <h2 id="key-overwrite-title">Schlüsseldatei überschreiben?</h2>
     <p>Diese Datei existiert bereits. Ihr bisheriger Inhalt geht beim Überschreiben verloren. Vorhandene Schlüssel vorher sichern.</p>
     <div className="dialog-actions"><button autoFocus onClick={() => onAnswer(false)}>Abbrechen</button><button onClick={() => onAnswer(true)}>Überschreiben</button></div>
+  </dialog>;
+}
+
+function UnencryptedKeyDialog({ onAnswer }: { onAnswer(answer: boolean): void }) {
+  const dialog = useModal();
+  return <dialog ref={dialog} className="ssh-dialog" aria-modal="true" aria-labelledby="key-unencrypted-title" onCancel={event => { event.preventDefault(); onAnswer(false); }}>
+    <h2 id="key-unencrypted-title">Privaten Schlüssel ohne Passphrase speichern?</h2>
+    <p>Unter Windows werden die Dateirechte nicht eingeschränkt – Passphrase verwenden. Trotzdem ohne Passphrase speichern?</p>
+    <div className="dialog-actions"><button autoFocus onClick={() => onAnswer(false)}>Abbrechen</button><button onClick={() => onAnswer(true)}>Speichern</button></div>
   </dialog>;
 }

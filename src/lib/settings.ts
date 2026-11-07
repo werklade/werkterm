@@ -1,5 +1,6 @@
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 export interface Settings {
+  confirmCloseSsh: boolean;
   splitMode: "single" | "columns" | "rows" | "quad";
   bars: "menu" | "toolbar" | "both"; toolbarSize: "small" | "standard" | "labels";
   compact: boolean; sidebarVisible: boolean; sidebarRight: boolean; tabNumbers: boolean; tabClose: boolean;
@@ -9,6 +10,7 @@ export interface Settings {
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
 }
 export const defaultSettings: Settings = {
+  confirmCloseSsh: true,
   splitMode: "single",
   bars: "both", toolbarSize: "labels", compact: false, sidebarVisible: true, sidebarRight: false, tabNumbers: false, tabClose: true,
   followTerminalFolder: true, shellIntegration: true, sshPromptCommand: true, monitoring: true,
@@ -20,7 +22,7 @@ const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
   const v = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const result = { ...defaultSettings };
-  for (const key of ["followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
+  for (const key of ["confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
   for (const [key, min, max] of [["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
     const value = v[key]; if (typeof value === "number" && Number.isFinite(value)) result[key] = Math.max(min, Math.min(max, key === "lineHeight" ? value : Math.round(value)));
   }

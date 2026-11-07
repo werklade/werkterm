@@ -31,6 +31,12 @@ export function menuMove(index: number, key: string, disabled: boolean[]): numbe
   return -1;
 }
 
-export function allowMenuMnemonic(e: ShortcutEvent, terminalOrEditor: boolean): boolean {
-  return e.altKey && !e.ctrlKey && !e.metaKey && !terminalOrEditor;
+export function allowMenuMnemonic(e: ShortcutEvent & { getModifierState?(key: string): boolean }, terminalOrEditor: boolean): boolean {
+  return !e.getModifierState?.("AltGraph") && e.altKey && !e.ctrlKey && !e.metaKey && !terminalOrEditor;
+}
+
+export function shouldFocusMenu(e: Pick<ShortcutEvent, "key" | "ctrlKey" | "altKey" | "metaKey" | "shiftKey"> & { getModifierState?(key: string): boolean }, terminalOrEditor: boolean): boolean {
+  if (e.getModifierState?.("AltGraph") || (e.ctrlKey && e.altKey)) return false;
+  if (e.key === "F10") return !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
+  return e.key === "Alt" && !terminalOrEditor && !e.ctrlKey && !e.metaKey;
 }

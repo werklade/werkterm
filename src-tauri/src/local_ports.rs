@@ -72,7 +72,12 @@ fn parse_netstat(input: &str) -> Vec<LocalPort> {
             let fields: Vec<_> = line.split_whitespace().collect();
             let protocol = *fields.first()?;
             let pid = match protocol {
-                "TCP" if fields.len() == 5 && matches!(fields[3], "LISTENING" | "ABHÖREN") => {
+                "TCP"
+                    if fields.len() == 5
+                        && (fields[3].starts_with("LISTEN")
+                            || fields[3].starts_with("ABH")
+                            || matches!(fields[2], "0.0.0.0:0" | "[::]:0")) =>
+                {
                     fields[4]
                 }
                 "UDP" if fields.len() == 4 => fields[3],
@@ -87,7 +92,11 @@ fn parse_netstat(input: &str) -> Vec<LocalPort> {
                 protocol: protocol.into(),
                 address: address.trim_start_matches('[').trim_end_matches(']').into(),
                 port,
-                pid: pid.parse().ok(),
+                pid: if protocol == "TCP" {
+                    Some(pid.parse().ok()?)
+                } else {
+                    pid.parse().ok()
+                },
                 process: None,
             })
         })
@@ -246,6 +255,12 @@ mod tests {
         assert_eq!(parse_proc(rows, "UDP").len(), 2);
         assert_eq!(parse_proc(rows, "TCP")[0].1, 42);
         assert!(proc_address("wrong:1234").is_none());
+    }
+    #[test]
+    fn windows_oem_listeners() {
+        let bytes = b"TCP 0.0.0.0:22 0.0.0.0:0 ABH\x99REN 123\nTCP [::]:80 [::]:0 UNKNOWN 456\nTCP 127.0.0.1:90 1.2.3.4:50 ESTABLISHED 7\nTCP 0.0.0.0:99 0.0.0.0:0 LISTENING nope";
+        assert_eq!(parse_netstat(&String::from_utf8_lossy(bytes)).len(), 2);
+        assert_eq!(parse_netstat("TCP [::]:22 [::]:0 ABHÖREN 9").len(), 1);
     }
     #[test]
     fn windows_parsers_support_ipv6_and_csv() {

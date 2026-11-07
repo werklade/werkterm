@@ -63,6 +63,30 @@ fn read(path: &Path) -> Result<Vec<Recent>, String> {
         Err(e) => Err(e.to_string()),
     }
 }
+// Only malformed content is recovered; filesystem errors remain visible.
+fn recover_corrupt(path: &Path, valid: impl FnOnce(&[u8]) -> bool) -> Result<(), String> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    };
+    if !valid(&bytes) {
+        let backup = path.with_extension("json.bak");
+        match fs::remove_file(&backup) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+        fs::rename(path, backup).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+fn save_tabs(path: &Path, tabs: &[LastTab]) -> Result<(), String> {
+    recover_corrupt(path, |bytes| {
+        serde_json::from_slice::<Vec<LastTab>>(bytes).is_ok()
+    })?;
+    atomic(path, &tabs)
+}
 fn atomic(path: &Path, value: &impl Serialize) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     let parent = path.parent().ok_or("Ungültiger Pfad")?;
@@ -100,6 +124,9 @@ fn add(path: &Path, item: Recent) -> Result<(), String> {
     if let Recent::Quick { target, .. } = &item {
         validate_target(target)?;
     }
+    recover_corrupt(path, |bytes| {
+        serde_json::from_slice::<History>(bytes).is_ok_and(|h| h.version == 1)
+    })?;
     let mut items = read(path)?;
     prepend(&mut items, item);
     atomic(path, &History { version: 1, items })
@@ -151,7 +178,7 @@ pub fn last_tabs_save(app: tauri::AppHandle, tabs: Vec<LastTab>) -> Result<(), S
             validate_target(target)?;
         }
     }
-    atomic(&path(&app, "last-tabs.json")?, &tabs)
+    save_tabs(&path(&app, "last-tabs.json")?, &tabs)
 }
 #[cfg(test)]
 mod tests {
@@ -259,9 +286,38 @@ mod tests {
                     at: 1
                 }
             )
-            .is_err()
+            .is_ok()
         );
-        assert_eq!(fs::read_to_string(&path).unwrap(), "broken");
+        assert_eq!(read(&path).unwrap().len(), 1);
+        assert_eq!(
+            fs::read_to_string(path.with_extension("json.bak")).unwrap(),
+            "broken"
+        );
+        fs::write(&path, "broken again").unwrap();
+        add(
+            &path,
+            Recent::Quick {
+                target: "u@host".into(),
+                at: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(path.with_extension("json.bak")).unwrap(),
+            "broken again"
+        );
+        let tabs_path = dir.join("last-tabs.json");
+        fs::write(&tabs_path, "invalid").unwrap();
+        save_tabs(&tabs_path, &[LastTab::Local {}]).unwrap();
+        assert_eq!(
+            fs::read_to_string(tabs_path.with_extension("json.bak")).unwrap(),
+            "invalid"
+        );
+        save_tabs(&tabs_path, &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(tabs_path.with_extension("json.bak")).unwrap(),
+            "invalid"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }
