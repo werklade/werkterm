@@ -300,9 +300,19 @@ pub async fn ssh_connect(
         Some(id) => Some(crate::sessions::find(&app, &id).await?),
         None => None,
     };
-    if let Some(session) = &session {
+    let stored_password = if let Some(session) = &session {
         crate::sessions::validate_target(session, &target)?;
-    }
+        if session.auth == crate::sessions::SessionAuth::Password {
+            crate::secrets::get_password(format!("session:{}", session.id))
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let prompter = Arc::new(TauriPrompter {
         connect_token,
         pending: Arc::clone(pending.inner()),
@@ -314,6 +324,7 @@ pub async fn ssh_connect(
             connect_token,
             target,
             session,
+            stored_password,
             cols,
             rows,
             ssh_dir()?.join("known_hosts"),

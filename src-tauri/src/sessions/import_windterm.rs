@@ -35,12 +35,16 @@ struct PublicOneKey {
     kind: String,
 }
 
+pub(super) fn parse_json<T: serde::de::DeserializeOwned>(text: &str) -> serde_json::Result<T> {
+    serde_json::from_str(text.trim_start_matches('\u{feff}'))
+}
+
 pub fn parse(text: &str, one_keys: Option<&str>, home: &Path) -> Result<ImportPreview, String> {
-    let sessions: Vec<WindSession> = serde_json::from_str(text.trim_start_matches('\u{feff}'))
-        .map_err(|_| "Ungültige WindTerm-Sitzungsdatei".to_owned())?;
+    let sessions: Vec<WindSession> =
+        parse_json(text).map_err(|_| "Ungültige WindTerm-Sitzungsdatei".to_owned())?;
     let mut result = ImportPreview::default();
     if let Some(text) = one_keys {
-        match serde_json::from_str::<Vec<PublicOneKey>>(text.trim_start_matches('\u{feff}')) {
+        match parse_json::<Vec<PublicOneKey>>(text) {
             Ok(keys) => {
                 result.one_keys = keys
                     .into_iter()
@@ -128,6 +132,20 @@ pub fn parse(text: &str, one_keys: Option<&str>, home: &Path) -> Result<ImportPr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_bom_in_sessions_profiles_and_onekeys() {
+        let profiles: serde_json::Value = parse_json("\u{feff}{\"path\":\"profile\"}").unwrap();
+        assert_eq!(profiles["path"], "profile");
+        let result = parse(
+            "\u{feff}[{\"session.protocol\":\"SSH\",\"session.label\":\"Test\",\"session.target\":\"host\"}]",
+            Some("\u{feff}[{\"uuid\":\"key\",\"name\":\"Name\"}]"),
+            Path::new("home"),
+        ).unwrap();
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.one_keys.len(), 1);
+        assert!(result.warnings.is_empty());
+    }
 
     #[test]
     fn import_keys_survive_reordering() {

@@ -265,14 +265,17 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
     let _guard = STORAGE_LOCK.lock().await;
     let path = config_path(&app)?;
     let mut sessions = read_file(path.clone()).await?;
+    let delete_secret = sessions
+        .iter()
+        .any(|session| session.id == id && session.auth == SessionAuth::Password);
     sessions.retain(|session| session.id != id);
-    persist_with_secret(
-        path,
-        sessions,
-        format!("session:{id}"),
-        Some(SecretChange::Delete),
-    )
-    .await
+    persist(path, sessions).await?;
+    if delete_secret {
+        crate::secrets::delete_password(format!("session:{id}"))
+            .await
+            .map_err(|error| format!("Sitzung wurde gelöscht; Schlüsselbund: {error}"))?;
+    }
+    Ok(())
 }
 
 enum SecretChange {
@@ -367,7 +370,7 @@ pub fn mark_duplicates(preview: &mut ImportPreview, sessions: &[SavedSession]) {
         candidate.duplicate_of = sessions
             .iter()
             .find(|session| {
-                session.host.eq_ignore_ascii_case(&candidate.host)
+                session.host.to_lowercase() == candidate.host.to_lowercase()
                     && session.port == candidate.port
                     && session.user == candidate.user
             })
@@ -442,7 +445,7 @@ pub async fn sessions_import_preview(
             "windterm" => {
                 let text = std::str::from_utf8(&bytes)
                     .map_err(|_| "Importdatei ist kein UTF-8".to_owned())?;
-                let value: serde_json::Value = serde_json::from_str(text)
+                let value: serde_json::Value = import_windterm::parse_json(text)
                     .map_err(|_| "WindTerm-Datei ist beschädigt".to_owned())?;
                 let sessions_path = if value.is_object() {
                     let directory = value
@@ -518,19 +521,49 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
         .collect()
 }
 
+#[derive(Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub imported: u32,
+    pub skipped_duplicates: u32,
+}
+
+fn append_unique_imports(
+    sessions: &mut Vec<SavedSession>,
+    imported: Vec<SavedSession>,
+) -> Result<ImportResult, String> {
+    let mut result = ImportResult::default();
+    for session in imported {
+        let duplicate = sessions.iter().any(|saved| {
+            saved.host.to_lowercase() == session.host.to_lowercase()
+                && saved.port == session.port
+                && saved.user == session.user
+        });
+        let count = if duplicate {
+            &mut result.skipped_duplicates
+        } else {
+            sessions.push(session);
+            &mut result.imported
+        };
+        *count = count
+            .checked_add(1)
+            .ok_or_else(|| "Zu viele Importsitzungen".to_owned())?;
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 pub async fn sessions_import_commit(
     app: tauri::AppHandle,
     candidates: Vec<ImportSelection>,
-) -> Result<u32, String> {
+) -> Result<ImportResult, String> {
     let imported = prepare_import(candidates)?;
-    let count = u32::try_from(imported.len()).map_err(|_| "Zu viele Importsitzungen".to_owned())?;
     let _guard = STORAGE_LOCK.lock().await;
     let path = config_path(&app)?;
     let mut sessions = read_file(path.clone()).await?;
-    sessions.extend(imported);
+    let result = append_unique_imports(&mut sessions, imported)?;
     persist(path, sessions).await?;
-    Ok(count)
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -684,6 +717,58 @@ mod tests {
             .is_err()
         );
     }
+    #[test]
+    fn import_commit_skips_existing_and_batch_duplicates_after_mapping() {
+        let mut existing = sample();
+        existing.host = "münchen.example.test".into();
+        let mut same_target = existing.clone();
+        same_target.id = "other".into();
+        same_target.host = same_target.host.to_uppercase();
+        let mut preview = ImportPreview {
+            candidates: vec![ImportCandidate {
+                key: "windterm:unicode".into(),
+                name: same_target.name.clone(),
+                folder: same_target.folder.clone(),
+                host: same_target.host.clone(),
+                port: same_target.port,
+                user: same_target.user.clone(),
+                key_path: None,
+                one_key: None,
+                duplicate_of: None,
+            }],
+            ..Default::default()
+        };
+        mark_duplicates(&mut preview, std::slice::from_ref(&existing));
+        assert_eq!(
+            preview.candidates[0].duplicate_of.as_deref(),
+            Some("sample")
+        );
+        let mut other_user = same_target.clone();
+        other_user.user = Some("bob".into());
+        let mut other_port = other_user.clone();
+        other_port.port = 2200;
+        let mut sessions = vec![existing];
+        let result = append_unique_imports(
+            &mut sessions,
+            vec![same_target, other_user.clone(), other_user, other_port],
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            ImportResult {
+                imported: 2,
+                skipped_duplicates: 2
+            }
+        );
+        assert_eq!(sessions.len(), 3);
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "imported": 2, "skippedDuplicates": 2
+            })
+        );
+    }
+
     #[test]
     fn windows_1252_and_home() {
         assert_eq!(decode_ini(b"caf\xe9 \x80"), "café €");

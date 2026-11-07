@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { applyOneKeyMappings, commitImport, defaultImportSelection, importDefaultPath, previewImport,
-  sessionTarget, type ImportPreview, type OneKeyMapping, type SessionAuth } from "../lib/sessions";
+import { applyOneKeyMappings, commitImport, defaultImportSelection, deselectNewImportDuplicates, importDefaultPath, listSessions, markImportDuplicates, previewImport,
+  sessionTarget, type ImportPreview, type ImportResult, type OneKeyMapping, type SavedSession, type SessionAuth } from "../lib/sessions";
 import { useModal } from "./useModal";
 import "./SessionDialog.css";
 import "./ImportDialog.css";
@@ -9,7 +9,7 @@ import "./ImportDialog.css";
 interface Props {
   source: "mobaxterm" | "windterm";
   onClose: () => void;
-  onImported: (count: number) => void;
+  onImported: (result: ImportResult) => void;
 }
 
 export function ImportDialog({ source, onClose, onImported }: Props) {
@@ -19,6 +19,7 @@ export function ImportDialog({ source, onClose, onImported }: Props) {
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [mappings, setMappings] = useState<Record<string, OneKeyMapping>>({});
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const sourceName = source === "mobaxterm" ? "MobaXterm" : "WindTerm";
@@ -43,19 +44,27 @@ export function ImportDialog({ source, onClose, onImported }: Props) {
     if (!path.trim() || busy) return;
     setBusy(true); setError("");
     try {
-      const value = await previewImport(source, path);
-      setSelected(defaultImportSelection(value.candidates));
+      const [value, sessions] = await Promise.all([previewImport(source, path), listSessions()]);
       const entries = new Map<string, OneKeyMapping>();
       for (const key of value.oneKeys) entries.set(key.uuid, { user: key.name || null, auth: { type: "default" } });
       for (const candidate of value.candidates) {
         if (candidate.oneKey && !entries.has(candidate.oneKey)) entries.set(candidate.oneKey, { user: null, auth: { type: "default" } });
       }
-      setMappings(Object.fromEntries(entries)); setPreview(value);
+      const initialMappings = Object.fromEntries(entries);
+      const resolved = markImportDuplicates(applyOneKeyMappings(value.candidates, initialMappings), sessions);
+      setSelected(defaultImportSelection(resolved.map(selection => selection.candidate)));
+      setSavedSessions(sessions); setMappings(initialMappings); setPreview(value);
     } catch (reason) { setError(typeof reason === "string" ? reason : "Importvorschau konnte nicht geladen werden."); }
     finally { setBusy(false); }
   };
   const updateMapping = (key: string, changes: Partial<OneKeyMapping>) => {
-    setMappings(previous => ({ ...previous, [key]: { ...previous[key], ...changes } }));
+    const nextMappings = { ...mappings, [key]: { ...mappings[key], ...changes } };
+    if (preview) {
+      const previous = markImportDuplicates(applyOneKeyMappings(preview.candidates, mappings), savedSessions);
+      const next = markImportDuplicates(applyOneKeyMappings(preview.candidates, nextMappings), savedSessions);
+      setSelected(current => deselectNewImportDuplicates(current, previous, next));
+    }
+    setMappings(nextMappings);
   };
   const browseKey = async (key: string) => {
     try {
@@ -64,8 +73,8 @@ export function ImportDialog({ source, onClose, onImported }: Props) {
     } catch { setError("Schlüsseldatei konnte nicht ausgewählt werden."); }
   };
   const usedKeys = preview ? [...new Set(preview.candidates.flatMap(candidate => candidate.oneKey ? [candidate.oneKey] : []))] : [];
-  const selectedCandidates = preview?.candidates.filter(candidate => selected.has(candidate.key)) ?? [];
-  const selections = applyOneKeyMappings(selectedCandidates, mappings);
+  const resolved = markImportDuplicates(applyOneKeyMappings(preview?.candidates ?? [], mappings), savedSessions);
+  const selections = resolved.filter(selection => selected.has(selection.candidate.key));
   const valid = selections.length > 0 && selections.every(selection => selection.auth.type !== "keyFile" || selection.auth.path.trim() !== "");
   const cancel = () => { if (!busy) onClose(); };
   return <dialog ref={dialog} className="ssh-dialog import-dialog" aria-modal="true" aria-labelledby={`${id}-title`} onCancel={event => { event.preventDefault(); cancel(); }}>
@@ -87,12 +96,12 @@ export function ImportDialog({ source, onClose, onImported }: Props) {
           <button type="button" disabled={busy} onClick={() => setSelected(new Set(preview.candidates.map(candidate => candidate.key)))}>Alle</button>
           <button type="button" disabled={busy} onClick={() => setSelected(new Set())}>Keine</button></div>
         <div className="import-table-scroll"><table><thead><tr><th scope="col">Auswahl</th><th scope="col">Name</th><th scope="col">Ordner</th><th scope="col">Ziel</th><th scope="col">Schlüssel</th></tr></thead>
-          <tbody>{preview.candidates.map(candidate => <tr key={candidate.key} className={candidate.duplicateOf ? "import-duplicate" : undefined}>
+          <tbody>{resolved.map(({ candidate, user }) => <tr key={candidate.key} className={candidate.duplicateOf ? "import-duplicate" : undefined}>
             <td><input type="checkbox" aria-label={`${candidate.name} importieren`} disabled={busy} checked={selected.has(candidate.key)} onChange={event => {
               const checked = event.target.checked;
               setSelected(previous => { const next = new Set(previous); if (checked) next.add(candidate.key); else next.delete(candidate.key); return next; });
             }} /></td><td>{candidate.name}{candidate.duplicateOf && <span className="import-duplicate-label">Duplikat</span>}</td><td>{candidate.folder || "—"}</td>
-            <td>{sessionTarget(candidate)}</td><td>{candidate.oneKey ? preview.oneKeys.find(key => key.uuid === candidate.oneKey)?.name ?? candidate.oneKey : candidate.keyPath ?? "Standard"}</td>
+            <td>{sessionTarget({ ...candidate, user })}</td><td>{candidate.oneKey ? preview.oneKeys.find(key => key.uuid === candidate.oneKey)?.name ?? candidate.oneKey : candidate.keyPath ?? "Standard"}</td>
           </tr>)}</tbody></table></div>
         <p className="session-hint">{preview.skipped} übersprungen (keine SSH-Sitzungen)</p>
         {preview.warnings.length > 0 && <ul className="import-warnings">{preview.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}

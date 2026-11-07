@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  applyOneKeyMappings, buildSessionTree, commitImport, defaultImportSelection,
-  deleteSession, importDefaultPath, keyringAvailable, listSessions, previewImport,
+  applyOneKeyMappings, buildSessionTree, commitImport, defaultImportSelection, deselectNewImportDuplicates,
+  deleteSession, importDefaultPath, keyringAvailable, listSessions, markImportDuplicates, previewImport,
   saveSession, searchSessions, sessionLabel, sessionTarget, validateSession,
   type ImportCandidate, type SavedSession,
 } from "./sessions";
@@ -56,16 +56,39 @@ describe("session helpers", () => {
   });
 
   it("applies OneKey users and auth without changing the source candidates", () => {
-    const candidates = [candidate({ oneKey: "shared" }), candidate({ key: "key", keyPath: "~/id_ed25519" }),
+    const candidates = [candidate({ user: null, oneKey: "shared" }), candidate({ key: "key", keyPath: "~/id_ed25519" }),
       candidate({ key: "plain" }), candidate({ key: "unknown", oneKey: "unknown" })];
     const result = applyOneKeyMappings(candidates, { shared: { user: "bob", auth: { type: "ask" } } });
     expect(result.map(item => [item.user, item.auth])).toEqual([
       ["bob", { type: "ask" }], ["alice", { type: "keyFile", path: "~/id_ed25519" }],
       ["alice", { type: "default" }], ["alice", { type: "default" }],
     ]);
-    expect(candidates[0].user).toBe("alice");
-    expect(applyOneKeyMappings([candidate({ oneKey: "shared" })],
+    expect(candidates[0].user).toBeNull();
+    expect(applyOneKeyMappings([candidate({ user: null, oneKey: "shared" })],
       { shared: { user: null, auth: { type: "default" } } })[0].user).toBeNull();
+  });
+
+  it("preserves explicit users, including empty users, while applying OneKey auth", () => {
+    const result = applyOneKeyMappings([candidate({ oneKey: "shared" }), candidate({ user: "", oneKey: "shared" })],
+      { shared: { user: "bob", auth: { type: "ask" } } });
+    expect(result.map(item => [item.user, item.auth])).toEqual([["alice", { type: "ask" }], ["", { type: "ask" }]]);
+  });
+
+  it("rechecks final mapped targets and deselects only newly recognized duplicates", () => {
+    const candidates = [candidate({ user: null, oneKey: "shared" }),
+      candidate({ key: "other-port", port: 2222 }), candidate({ key: "other-user", user: "Alice" }),
+      candidate({ key: "known" }), candidate({ key: "stale", host: "other.test", duplicateOf: "old" })];
+    const saved = [sample({ host: "SERVER.TEST" })];
+    const previous = markImportDuplicates(applyOneKeyMappings(candidates, {}), saved);
+    const next = markImportDuplicates(applyOneKeyMappings(candidates,
+      { shared: { user: "alice", auth: { type: "default" } } }), saved);
+    expect(previous.map(item => item.candidate.duplicateOf)).toEqual([null, null, null, "one", null]);
+    expect(next.map(item => item.candidate.duplicateOf)).toEqual(["one", null, null, "one", null]);
+    const selected = new Set(candidates.map(item => item.key));
+    expect([...deselectNewImportDuplicates(selected, previous, next)])
+      .toEqual(["other-port", "other-user", "known", "stale"]);
+    expect(selected.size).toBe(5);
+    expect(candidates[4].duplicateOf).toBe("old");
   });
 
   it("validates required fields, integer port range and nonempty key paths", () => {

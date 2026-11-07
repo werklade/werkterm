@@ -43,6 +43,7 @@ export interface ImportSelection {
   auth: SessionAuth;
 }
 export interface OneKeyMapping { user: string | null; auth: SessionAuth }
+export interface ImportResult { imported: number; skippedDuplicates: number }
 export interface SessionFolder {
   name: string;
   path: string;
@@ -60,7 +61,7 @@ export const importDefaultPath = (source: ImportSource) =>
 export const previewImport = (source: ImportSource, path: string) =>
   invoke<ImportPreview>("sessions_import_preview", { source, path });
 export const commitImport = (candidates: ImportSelection[]) =>
-  invoke<number>("sessions_import_commit", { candidates });
+  invoke<ImportResult>("sessions_import_commit", { candidates });
 
 /** Folder paths are logical session categories, not operating-system paths. */
 export function buildSessionTree(sessions: readonly SavedSession[]): SessionFolder {
@@ -119,11 +120,31 @@ export function applyOneKeyMappings(
       ? mappings[candidate.oneKey] : undefined;
     return {
       candidate,
-      user: mapping ? mapping.user : candidate.user,
+      user: candidate.user === null && mapping ? mapping.user : candidate.user,
       auth: mapping ? { ...mapping.auth } : candidate.keyPath
         ? { type: "keyFile", path: candidate.keyPath } : { type: "default" },
     };
   });
+}
+
+/** Recheck final targets after OneKey users have been applied. */
+export function markImportDuplicates(
+  selections: readonly ImportSelection[], sessions: readonly SavedSession[],
+): ImportSelection[] {
+  return selections.map(selection => {
+    const duplicate = sessions.find(session => session.host.toLowerCase() === selection.candidate.host.toLowerCase()
+      && session.port === selection.candidate.port && session.user === selection.user);
+    return { ...selection, candidate: { ...selection.candidate, duplicateOf: duplicate?.id ?? null } };
+  });
+}
+
+export function deselectNewImportDuplicates(
+  selected: ReadonlySet<string>, previous: readonly ImportSelection[], next: readonly ImportSelection[],
+): Set<string> {
+  const previousDuplicates = new Set(previous.filter(item => item.candidate.duplicateOf !== null).map(item => item.candidate.key));
+  const newlyDuplicated = new Set(next.filter(item => item.candidate.duplicateOf !== null
+    && !previousDuplicates.has(item.candidate.key)).map(item => item.candidate.key));
+  return new Set([...selected].filter(key => !newlyDuplicated.has(key)));
 }
 
 /** Matches the persisted backend validation before attempting an IPC call. */

@@ -312,6 +312,7 @@ async fn authenticate(
     target: &SshTarget,
     prompter: &dyn Prompter,
     session: Option<&crate::sessions::SavedSession>,
+    stored_password: Option<String>,
 ) -> Result<(), String> {
     if agent_auth(handle, &target.user).await {
         return Ok(());
@@ -385,11 +386,7 @@ async fn authenticate(
             }
         }
     }
-    if let Some(session) =
-        session.filter(|session| session.auth == crate::sessions::SessionAuth::Password)
-        && let Ok(Some(secret)) =
-            crate::secrets::get_password(format!("session:{}", session.id)).await
-    {
+    if let Some(secret) = stored_password {
         let result = handle.authenticate_password(&target.user, &secret).await;
         drop(secret);
         if result.is_ok_and(|result| result.success()) {
@@ -625,6 +622,7 @@ impl SshManager {
             connect_token,
             target,
             None,
+            None,
             cols,
             rows,
             known_hosts_path,
@@ -641,6 +639,7 @@ impl SshManager {
         connect_token: u32,
         target: SshTarget,
         session: Option<crate::sessions::SavedSession>,
+        stored_password: Option<String>,
         cols: u16,
         rows: u16,
         known_hosts_path: PathBuf,
@@ -672,6 +671,7 @@ impl SshManager {
             .connect_inner(
                 target,
                 session,
+                stored_password,
                 cols,
                 rows,
                 known_hosts_path,
@@ -715,6 +715,7 @@ impl SshManager {
         self: &Arc<Self>,
         target: SshTarget,
         session: Option<crate::sessions::SavedSession>,
+        stored_password: Option<String>,
         cols: u16,
         rows: u16,
         known_hosts_path: PathBuf,
@@ -800,7 +801,13 @@ impl SshManager {
         )
         .await?;
         if let Err(error) = phase(
-            authenticate(&mut handle, &target, prompter.as_ref(), session.as_ref()),
+            authenticate(
+                &mut handle,
+                &target,
+                prompter.as_ref(),
+                session.as_ref(),
+                stored_password,
+            ),
             canceled,
             prompts,
         )
