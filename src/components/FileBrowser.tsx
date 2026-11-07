@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Icon, type IconName } from "./Icon";
-import { FileActionDialog, type FileDialog, type ConflictAnswer } from "./FileActionDialog";
+import { FileActionDialog, type FileDialog } from "./FileActionDialog";
 import { listLocalDir, listSshDir, type DirEntry, type DirListing } from "../lib/fs";
 import { childPath, parentPath } from "../lib/paths";
 import { formatSize } from "../lib/formatSize";
 import type { Settings } from "../lib/settings";
-import { allocateTransferId, cancelTransfer, countEntries, createFile, deleteEntry, downloadFile, localFileName, makeDirectory, remoteChild, transferText, uploadFile, type TransferProgress, type TransferStatus } from "../lib/transfers";
+import { countEntries, createFile, deleteEntry, makeDirectory, remoteChild } from "../lib/transfers";
+import type { TransferQueueHandle } from "../lib/transferQueue";
 import "./FileBrowser.css";
 
 export interface BrowserTab {
@@ -27,7 +27,7 @@ interface Props {
   onSettings: (settings: Settings) => void;
   onPath: (id: number, path: string) => void;
   onStatus: (message: string) => void;
-  onTransfer: (status: TransferStatus | null) => void;
+  transferQueue: TransferQueueHandle;
 }
 type Action = "up" | "refresh" | "download" | "upload" | "mkdir" | "create" | "delete";
 const actions: { icon: IconName; label: string; action?: Action }[] = [
@@ -47,7 +47,7 @@ const settingLabels: { key: keyof Settings; label: string; title: string }[] = [
 ];
 const isDirectory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
 
-export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onTransfer }: Props) {
+export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, transferQueue }: Props) {
   const [listing, setListing] = useState<DirListing | null>(null);
   const [input, setInput] = useState(tab?.browserPath ?? "");
   const [loading, setLoading] = useState(false);
@@ -61,12 +61,10 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onTra
   const promptRef = useRef<FileDialog | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const operation = useRef(false);
-  const stopped = useRef(false);
   const mounted = useRef(true);
-  const activeTransfer = useRef<number | null>(null);
   const request = useRef(0);
-  const callbacks = useRef({ onPath, onStatus, onTransfer });
-  callbacks.current = { onPath, onStatus, onTransfer };
+  const callbacks = useRef({ onPath, onStatus });
+  callbacks.current = { onPath, onStatus };
   const id = tab?.id;
   const kind = tab?.kind;
   const path = tab?.browserPath ?? "";
@@ -78,13 +76,9 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onTra
     mounted.current = true;
     return () => {
       mounted.current = false;
-      stopped.current = true;
       const pending = promptRef.current;
       if (pending?.type === "name") pending.answer(null);
       else if (pending?.type === "delete") pending.answer(false);
-      else if (pending?.type === "conflict") pending.answer("cancel");
-      if (activeTransfer.current !== null) void cancelTransfer(activeTransfer.current).catch(() => undefined);
-      callbacks.current.onTransfer(null);
     };
   }, []);
   useEffect(() => {
@@ -138,63 +132,21 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onTra
   const run = async (work: () => Promise<void>) => {
     if (!writable || operation.current) return;
     operation.current = true;
-    stopped.current = false;
     setBusy(true);
     setError("");
     try { await work(); } catch (reason: unknown) { fail(reason); }
     finally {
-      activeTransfer.current = null;
       operation.current = false;
-      if (mounted.current) { setBusy(false); callbacks.current.onTransfer(null); refresh(); }
+      if (mounted.current) { setBusy(false); refresh(); }
     }
-  };
-  const cancel = () => {
-    stopped.current = true;
-    const pending = promptRef.current;
-    if (pending?.type === "conflict") pending.answer("cancel");
-    if (activeTransfer.current !== null) void cancelTransfer(activeTransfer.current).catch(fail);
-  };
-  const transfer = async (direction: "↑" | "↓", name: string, work: (transferId: number, channel: Channel<TransferProgress>) => Promise<void>) => {
-    if (stopped.current || !mounted.current) return;
-    const transferId = allocateTransferId();
-    activeTransfer.current = transferId;
-    const update = (progress: TransferProgress) => {
-      if (mounted.current && activeTransfer.current === progress.transferId) callbacks.current.onTransfer({ text: transferText(direction, name, progress), cancel });
-    };
-    update({ transferId, done: 0, total: null });
-    const channel = new Channel<TransferProgress>(update);
-    try { await work(transferId, channel); }
-    finally { activeTransfer.current = null; }
-  };
-  const uploadQueue = async (paths: string[], targetId: number, targetDir: string) => {
-    let overwriteAll = false;
-    let directorySeen = false;
-    for (const localPath of paths) {
-      if (stopped.current || !mounted.current) break;
-      const name = localFileName(localPath);
-      const upload = (overwrite: boolean) => transfer("↑", name, (transferId, channel) => uploadFile(targetId, localPath, targetDir, overwrite, transferId, channel));
-      try { await upload(overwriteAll); }
-      catch (reason: unknown) {
-        const message = String(reason);
-        if (message.startsWith("DIRECTORY:")) { directorySeen = true; fail("Ordner-Upload folgt später"); continue; }
-        if (!message.startsWith("EXISTS:")) throw reason;
-        if (!mounted.current || stopped.current) break;
-        const answer = await ask<ConflictAnswer>(answer => ({ type: "conflict", name, answer }));
-        if (answer === "cancel") { stopped.current = true; break; }
-        if (answer === "skip") continue;
-        overwriteAll = answer === "all";
-        await upload(true);
-      }
-      refresh();
-    }
-    if (!stopped.current && mounted.current) callbacks.current.onStatus(directorySeen ? "Ordner-Upload folgt später" : "Upload abgeschlossen");
   };
   const uploadPaths = (paths: string[]) => {
     if (sessionId === undefined || !listing) return;
-    const targetId = sessionId;
-    const targetDir = listing.path;
-    void run(() => uploadQueue(paths, targetId, targetDir));
+    transferQueue.enqueue(paths.map(localPath => ({ kind: "upload", sessionId, localPath, remoteDir: listing.path })));
   };
+  useEffect(() => transferQueue.onFinished(event => {
+    if (event.sessionId === sessionId && event.dir === (listing?.path ?? path)) setRevision(value => value + 1);
+  }), [transferQueue, sessionId, listing?.path, path]);
   const perform = (action: Action | undefined) => {
     if (action === "up") { navigate(parentPath(listing?.path ?? path)); return; }
     if (action === "refresh") { refresh(); return; }
@@ -205,12 +157,11 @@ export function FileBrowser({ tab, settings, onSettings, onPath, onStatus, onTra
     void run(async () => {
       if (action === "upload") {
         const paths = await open({ multiple: true, directory: false, title: "Dateien auswählen" });
-        if (paths && mounted.current) await uploadQueue(paths, targetId, targetDir);
+        if (paths) transferQueue.enqueue(paths.map(localPath => ({ kind: "upload", sessionId: targetId, localPath, remoteDir: targetDir })));
       } else if (action === "download" && entry && !isDirectory(entry)) {
         const localPath = await save({ defaultPath: entry.name, title: "Datei speichern" });
-        if (!localPath || !mounted.current) return;
-        await transfer("↓", entry.name, (transferId, channel) => downloadFile(targetId, remoteChild(targetDir, entry.name), localPath, transferId, channel));
-        if (mounted.current) callbacks.current.onStatus("Download abgeschlossen");
+        if (!localPath) return;
+        transferQueue.enqueue([{ kind: "download", sessionId: targetId, remotePath: remoteChild(targetDir, entry.name), localPath }]);
       } else if (action === "mkdir" || action === "create") {
         const name = await ask<string | null>(answer => ({ type: "name", directory: action === "mkdir", answer }));
         if (name === null || !mounted.current) return;
