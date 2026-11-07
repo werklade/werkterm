@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyOneKeyMappings, buildSessionTree, commitImport, defaultImportSelection, deselectNewImportDuplicates,
-  deleteSession, importDefaultPath, initialSessionAuthType, keyringAvailable, listSessions, markImportDuplicates, previewImport,
+  deleteSession, jumpHostOptions, jumpHostHint, importDefaultPath, initialSessionAuthType, keyringAvailable, listSessions, markImportDuplicates, previewImport,
   saveSession, searchSessions, sessionLabel, sessionTarget, validateSession,
   type ImportCandidate, type SavedSession,
 } from "./sessions";
@@ -145,4 +145,24 @@ it("validates keepalive boundaries with legacy defaults", () => {
     expect(validateSession(sample({ keepaliveInterval }))).toContain("Keepalive");
   for (const keepaliveMax of [0, 101, 1.5, NaN])
     expect(validateSession(sample({ keepaliveMax }))).toContain("Keepalive");
+});
+
+describe("jump host selection", () => {
+  it("excludes itself, non SSH sessions and direct or indirect cycles", () => {
+    const sessions = [sample({ id: "target" }), sample({ id: "direct", jumpSessionId: "target" }),
+      sample({ id: "indirect", jumpSessionId: "direct" }), sample({ id: "local", kind: "local" }),
+      sample({ id: "gateway" }), sample({ id: "a", jumpSessionId: "b" }), sample({ id: "b", jumpSessionId: "a" }),
+      sample({ id: "missing", jumpSessionId: "unknown" })];
+    expect(jumpHostOptions(sessions, "target").map(s => s.id)).toEqual(["gateway"]);
+  });
+  it("allows new sessions to select valid chains up to five gateways", () => {
+    const sessions = Array.from({ length: 6 }, (_, i) => sample({ id: String(i), jumpSessionId: i ? String(i - 1) : null }));
+    expect(jumpHostOptions(sessions).map(s => s.id)).toEqual(["0", "1", "2", "3", "4"]);
+    expect(jumpHostOptions(sessions, "5").map(s => s.id)).toEqual(["0", "1", "2", "3", "4"]);
+  });
+  it("renders a gateway name without changing direct session labels", () => {
+    const gateway = sample({ id: "gw", name: "Gateway" });
+    expect(jumpHostHint(sample({ jumpSessionId: "gw" }), [gateway])).toBe("über Gateway");
+    expect(jumpHostHint(sample(), [gateway])).toBe("");
+  });
 });

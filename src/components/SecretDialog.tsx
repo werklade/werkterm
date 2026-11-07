@@ -13,7 +13,7 @@ export function SecretDialog({ prompt, onAnswer, title }: Props) {
   const dialog = useModal();
   const secret = usePasswordInput();
   const cancel = () => { secret.reset(); onAnswer(null); };
-  const label = title ?? `${prompt.kind === "password" ? "Passwort" : "Passphrase"} für ${prompt.label}`;
+  const label = title ?? `${prompt.kind === "username" ? "Benutzer" : prompt.kind === "password" ? "Passwort" : "Passphrase"} für ${prompt.label}`;
   return <dialog ref={dialog} className="ssh-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-title" onCancel={event => { event.preventDefault(); cancel(); }}>
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();
@@ -26,7 +26,7 @@ export function SecretDialog({ prompt, onAnswer, title }: Props) {
       onAnswer(value);
     }}>
       <h2 id="secret-title">{label}</h2>
-      <PasswordField autoFocus autoComplete="off" aria-label={label} value={secret.value} visible={secret.visible} onToggle={secret.toggle} onChange={event => secret.change(event.target.value)} />
+      {prompt.kind === "username" ? <input autoFocus required autoComplete="off" aria-label={label} value={secret.value} onChange={event => secret.change(event.target.value)} /> : <PasswordField autoFocus autoComplete="off" aria-label={label} value={secret.value} visible={secret.visible} onToggle={secret.toggle} onChange={event => secret.change(event.target.value)} />}
       <div className="dialog-actions">
         <button type="submit">OK</button>
         <button type="button" onClick={cancel}>Abbrechen</button>

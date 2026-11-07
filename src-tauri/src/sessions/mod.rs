@@ -48,6 +48,8 @@ pub struct SavedSession {
     pub keepalive_interval: u32,
     #[serde(default = "default_keepalive_max")]
     pub keepalive_max: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -79,12 +81,23 @@ pub struct ImportPreview {
     pub one_keys: Vec<OneKeyRef>,
     pub skipped: u32,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub gateways: std::collections::HashMap<String, ImportGateway>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportGateway {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportSelection {
     pub candidate: ImportCandidate,
+    #[serde(default)]
+    pub gateway: Option<ImportGateway>,
     pub user: Option<String>,
     pub auth: SessionAuth,
 }
@@ -147,6 +160,63 @@ pub fn validate(session: &SavedSession) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve gateways in connection order, excluding the destination itself.
+/// Five gateways are allowed; the destination is not counted as a hop.
+pub fn resolve_jump_chain<'a>(
+    session: &SavedSession,
+    sessions: &'a [SavedSession],
+) -> Result<Vec<&'a SavedSession>, String> {
+    let mut seen = std::collections::HashSet::from([session.id.as_str()]);
+    let mut next = session.jump_session_id.as_deref();
+    let mut chain = Vec::new();
+    while let Some(id) = next {
+        if !seen.insert(id) {
+            return Err("Jump-host-Kette enthält einen Zyklus".into());
+        }
+        let hop = sessions
+            .iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| "Jump host wurde nicht gefunden".to_owned())?;
+        if hop.kind != "ssh" {
+            return Err(format!("Jump host {} ist keine SSH-Sitzung", hop.name));
+        }
+        chain.push(hop);
+        if chain.len() > 5 {
+            return Err("Jump-host-Kette darf höchstens 5 Hops enthalten".into());
+        }
+        next = hop.jump_session_id.as_deref();
+    }
+    chain.reverse();
+    Ok(chain)
+}
+
+pub fn validate_jump_hosts(sessions: &[SavedSession]) -> Result<(), String> {
+    for session in sessions {
+        resolve_jump_chain(session, sessions)?;
+    }
+    Ok(())
+}
+
+pub fn validate_delete(id: &str, sessions: &[SavedSession]) -> Result<(), String> {
+    let names: Vec<_> = sessions
+        .iter()
+        .filter(|s| {
+            s.jump_session_id.as_deref() == Some(id)
+                || resolve_jump_chain(s, sessions)
+                    .is_ok_and(|chain| chain.iter().any(|hop| hop.id == id))
+        })
+        .map(|s| s.name.as_str())
+        .collect();
+    if names.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Sitzung wird als Jump host verwendet von: {}",
+            names.join(", ")
+        ))
+    }
+}
+
 pub fn validate_target(
     session: &SavedSession,
     target: &crate::ssh::SshTarget,
@@ -181,12 +251,14 @@ pub fn load(path: &Path) -> Result<Vec<SavedSession>, String> {
             return Err("Sitzungsdatei enthält ungültige IDs".into());
         }
     }
+    validate_jump_hosts(&file.sessions)?;
     Ok(file.sessions)
 }
 
 fn write_atomic(path: &Path, sessions: Vec<SavedSession>) -> Result<(), String> {
     // Validate existing contents before creating a temporary file: corruption must never be overwritten.
     load(path)?;
+    validate_jump_hosts(&sessions)?;
     let bytes = serde_json::to_vec_pretty(&SessionFile {
         version: 1,
         sessions,
@@ -285,6 +357,18 @@ pub async fn find(app: &tauri::AppHandle, id: &str) -> Result<SavedSession, Stri
         .ok_or_else(|| "Gespeicherte Sitzung wurde nicht gefunden".into())
 }
 
+pub async fn jump_chain(
+    app: &tauri::AppHandle,
+    session: &SavedSession,
+) -> Result<Vec<SavedSession>, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    let sessions = read_file(config_path(app)?).await?;
+    Ok(resolve_jump_chain(session, &sessions)?
+        .into_iter()
+        .cloned()
+        .collect())
+}
+
 #[tauri::command]
 pub async fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SavedSession>, String> {
     let _guard = STORAGE_LOCK.lock().await;
@@ -305,6 +389,10 @@ pub async fn sessions_save(
         session.id = new_id();
     }
     let previous = sessions.iter().position(|s| s.id == session.id);
+    let mut proposed = sessions.clone();
+    proposed.retain(|s| s.id != session.id);
+    proposed.push(session.clone());
+    validate_jump_hosts(&proposed)?;
     let account = format!("session:{}", session.id);
     let password = password.filter(|value| !value.is_empty());
     if session.auth == SessionAuth::Password && password.is_none() {
@@ -331,6 +419,7 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
     let _guard = STORAGE_LOCK.lock().await;
     let path = config_path(&app)?;
     let mut sessions = read_file(path.clone()).await?;
+    validate_delete(&id, &sessions)?;
     let delete_secret = sessions.iter().any(|session| session.id == id);
     sessions.retain(|session| session.id != id);
     persist(path, sessions).await?;
@@ -558,7 +647,9 @@ pub async fn sessions_import_preview(
     .await
     .map_err(|_| "Importvorschau fehlgeschlagen".to_owned())??;
     let _guard = STORAGE_LOCK.lock().await;
-    mark_duplicates(&mut preview, &read_file(config_path(&app)?).await?);
+    let sessions = read_file(config_path(&app)?).await?;
+    mark_duplicates(&mut preview, &sessions);
+    import_mobaxterm::warn_unmapped_gateways(&mut preview, &sessions);
     Ok(preview)
 }
 
@@ -590,6 +681,7 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                 source: Some(source),
                 keepalive_interval: 30,
                 keepalive_max: 3,
+                jump_session_id: None,
             };
             validate(&session)?;
             Ok(session)
@@ -602,6 +694,8 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
 pub struct ImportResult {
     pub imported: u32,
     pub skipped_duplicates: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 fn append_unique_imports(
@@ -628,16 +722,55 @@ fn append_unique_imports(
     Ok(result)
 }
 
+fn apply_import_gateways(
+    sessions: &mut [SavedSession],
+    pending: &[(String, ImportGateway)],
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for (id, gateway) in pending {
+        let matches = import_mobaxterm::gateway_matches(gateway, sessions);
+        if let Some(index) = sessions.iter().position(|s| s.id == *id) {
+            if matches.len() == 1 && matches[0] != *id {
+                sessions[index].jump_session_id = Some(matches[0].clone());
+            } else {
+                warnings.push(format!(
+                    "Gateway {} für {} nicht zugeordnet",
+                    gateway.host, sessions[index].name
+                ));
+            }
+        }
+    }
+    warnings
+}
+
 #[tauri::command]
 pub async fn sessions_import_commit(
     app: tauri::AppHandle,
     candidates: Vec<ImportSelection>,
 ) -> Result<ImportResult, String> {
+    let gateways: Vec<_> = candidates
+        .iter()
+        .map(|selection| {
+            selection
+                .candidate
+                .key
+                .starts_with("mobaxterm:")
+                .then(|| selection.gateway.clone())
+                .flatten()
+        })
+        .collect();
     let imported = prepare_import(candidates)?;
+    let pending: Vec<_> = imported
+        .iter()
+        .zip(gateways)
+        .filter_map(|(session, gateway)| gateway.map(|gateway| (session.id.clone(), gateway)))
+        .collect();
     let _guard = STORAGE_LOCK.lock().await;
     let path = config_path(&app)?;
     let mut sessions = read_file(path.clone()).await?;
-    let result = append_unique_imports(&mut sessions, imported)?;
+    let mut result = append_unique_imports(&mut sessions, imported)?;
+    result.warnings = apply_import_gateways(&mut sessions, &pending);
+    validate_jump_hosts(&sessions)?;
     persist(path, sessions).await?;
     Ok(result)
 }
@@ -663,6 +796,149 @@ mod tests {
         invalid.kind = "local".into();
         assert!(validate(&invalid).is_err());
     }
+    #[test]
+    fn jump_serialization_keeps_version_one_and_legacy_defaults() {
+        let old = serde_json::to_value(sample()).unwrap();
+        assert!(old.get("jumpSessionId").is_none());
+        let legacy: SavedSession = serde_json::from_value(old).unwrap();
+        assert_eq!(legacy.jump_session_id, None);
+        let mut new = legacy;
+        new.jump_session_id = Some("gateway".into());
+        let file = SessionFile {
+            version: 1,
+            sessions: vec![new.clone()],
+        };
+        let encoded = serde_json::to_string(&file).unwrap();
+        let decoded: SessionFile = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.sessions, vec![new]);
+    }
+
+    fn jump_sample(id: &str, jump: Option<&str>) -> SavedSession {
+        SavedSession {
+            id: id.into(),
+            name: id.into(),
+            jump_session_id: jump.map(str::to_owned),
+            ..sample()
+        }
+    }
+
+    #[test]
+    fn jump_validation_rejects_self_unknown_non_ssh_and_cycles() {
+        for sessions in [
+            vec![jump_sample("a", Some("a"))],
+            vec![jump_sample("a", Some("missing"))],
+            vec![jump_sample("a", Some("b")), jump_sample("b", Some("a"))],
+            vec![
+                jump_sample("a", Some("b")),
+                jump_sample("b", Some("c")),
+                jump_sample("c", Some("a")),
+            ],
+            vec![
+                jump_sample("a", Some("b")),
+                SavedSession {
+                    kind: "local".into(),
+                    ..jump_sample("b", None)
+                },
+            ],
+        ] {
+            assert!(validate_jump_hosts(&sessions).is_err());
+        }
+        let sessions = vec![jump_sample("a", Some("b")), jump_sample("b", None)];
+        validate_jump_hosts(&sessions).unwrap();
+        assert!(validate_delete("a", &sessions).is_ok());
+        let error = validate_delete("b", &sessions).unwrap_err();
+        assert!(error.contains('a'));
+    }
+
+    #[test]
+    fn jump_chain_is_outermost_first_and_allows_exactly_five_gateways() {
+        let mut sessions = vec![jump_sample("target", Some("1"))];
+        for index in 1..=5 {
+            sessions.push(jump_sample(&index.to_string(), None));
+            if index < 5 {
+                sessions[index].jump_session_id = Some((index + 1).to_string());
+            }
+        }
+        let chain = resolve_jump_chain(&sessions[0], &sessions).unwrap();
+        assert_eq!(
+            chain.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            ["5", "4", "3", "2", "1"]
+        );
+        assert!(
+            resolve_jump_chain(&jump_sample("direct", None), &sessions)
+                .unwrap()
+                .is_empty()
+        );
+        sessions[5].jump_session_id = Some("6".into());
+        sessions.push(jump_sample("6", None));
+        assert!(
+            resolve_jump_chain(&sessions[0], &sessions)
+                .unwrap_err()
+                .contains("5 Hops")
+        );
+        sessions[5].jump_session_id = Some("target".into());
+        assert!(
+            resolve_jump_chain(&sessions[0], &sessions)
+                .unwrap_err()
+                .contains("Zyklus")
+        );
+    }
+
+    #[test]
+    fn jump_delete_lists_every_dependent_session() {
+        let sessions = vec![
+            jump_sample("first", Some("gateway")),
+            jump_sample("second", Some("gateway")),
+            jump_sample("gateway", None),
+            jump_sample("indirect", Some("first")),
+        ];
+        let error = validate_delete("gateway", &sessions).unwrap_err();
+        assert!(error.contains("first"));
+        assert!(error.contains("second"));
+        assert!(error.contains("indirect"));
+    }
+
+    #[test]
+    fn import_maps_existing_and_new_gateways_but_never_ambiguous_targets() {
+        let target = SavedSession {
+            host: "target.test".into(),
+            ..jump_sample("target", None)
+        };
+        let gateway = ImportGateway {
+            host: "SRV1.example.test".into(),
+            port: 22,
+            user: "alice".into(),
+        };
+        let pending = vec![("target".into(), gateway.clone())];
+        let mut sessions = vec![target.clone(), jump_sample("gateway", None)];
+        assert!(apply_import_gateways(&mut sessions, &pending).is_empty());
+        assert_eq!(sessions[0].jump_session_id.as_deref(), Some("gateway"));
+        for alternatives in [
+            vec![],
+            vec![jump_sample("one", None), jump_sample("two", None)],
+            vec![SavedSession {
+                port: 2222,
+                ..jump_sample("wrong-port", None)
+            }],
+            vec![SavedSession {
+                user: Some("bob".into()),
+                ..jump_sample("wrong-user", None)
+            }],
+        ] {
+            let mut sessions = vec![target.clone()];
+            sessions.extend(alternatives);
+            assert_eq!(apply_import_gateways(&mut sessions, &pending).len(), 1);
+            assert!(sessions[0].jump_session_id.is_none());
+        }
+        let mut sessions = vec![jump_sample("gateway", None)];
+        assert_eq!(
+            apply_import_gateways(&mut sessions, &[("gateway".into(), gateway)]).len(),
+            1
+        );
+        assert!(sessions[0].jump_session_id.is_none());
+    }
+
     fn sample() -> SavedSession {
         SavedSession {
             kind: default_kind(),
@@ -676,6 +952,7 @@ mod tests {
             source: None,
             keepalive_interval: 30,
             keepalive_max: 3,
+            jump_session_id: None,
         }
     }
 
@@ -791,6 +1068,7 @@ mod tests {
         assert!(preview.candidates[0].duplicate_of.is_none());
         let imported = prepare_import(vec![ImportSelection {
             candidate: candidate.clone(),
+            gateway: None,
             user: None,
             auth: SessionAuth::Password,
         }])
@@ -802,11 +1080,13 @@ mod tests {
             prepare_import(vec![
                 ImportSelection {
                     candidate,
+                    gateway: None,
                     user: None,
                     auth: SessionAuth::Ask
                 },
                 ImportSelection {
                     candidate: invalid,
+                    gateway: None,
                     user: None,
                     auth: SessionAuth::Ask
                 }
@@ -854,7 +1134,8 @@ mod tests {
             result,
             ImportResult {
                 imported: 2,
-                skipped_duplicates: 2
+                skipped_duplicates: 2,
+                warnings: Vec::new(),
             }
         );
         assert_eq!(sessions.len(), 3);

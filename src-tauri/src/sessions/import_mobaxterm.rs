@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{ImportCandidate, ImportPreview};
+use super::{ImportCandidate, ImportGateway, ImportPreview, SavedSession};
 
 pub struct ImportBases {
     pub home: PathBuf,
@@ -56,6 +56,75 @@ pub(super) fn expand_home(value: &str, home: &Path) -> String {
         }
     } else {
         value.to_owned()
+    }
+}
+
+/// Single-gateway legacy SSH payload: indices include the initial session type 0.
+/// Host/port/user are at 8/9/10, hence 7/8/9 in our fields after skip(1).
+/// Verified against https://github.com/maferick/cablebag/blob/e97faf7017a2d324d8b9502c080373ab1ab84472/src-tauri/src/importers.rs
+fn parse_gateway(fields: &[&str]) -> Result<Option<ImportGateway>, String> {
+    let host = fields.get(7).copied().unwrap_or("").trim();
+    if host.is_empty() {
+        return Ok(None);
+    }
+    let invalid = || host.to_owned();
+    let port = fields
+        .get(8)
+        .and_then(|p| p.parse::<u16>().ok())
+        .filter(|p| *p != 0)
+        .ok_or_else(invalid)?;
+    let user = fields.get(9).copied().unwrap_or("").trim();
+    // Multi-gateway/encoded payloads are deliberately not interpreted as a hostname.
+    if user.is_empty()
+        || host.chars().any(|c| c.is_whitespace() || c.is_control())
+        || host.contains(['|', ';', ',', '@', '>', '<', '/', '\\'])
+        || user.chars().any(|c| c.is_whitespace() || c.is_control())
+        || user.contains(['|', ';', ',', '@', '>', '<'])
+    {
+        return Err(invalid());
+    }
+    Ok(Some(ImportGateway {
+        host: host.into(),
+        port,
+        user: user.into(),
+    }))
+}
+
+pub fn gateway_matches(gateway: &ImportGateway, sessions: &[SavedSession]) -> Vec<String> {
+    sessions
+        .iter()
+        .filter(|s| {
+            s.kind == "ssh"
+                && s.host.eq_ignore_ascii_case(&gateway.host)
+                && s.port == gateway.port
+                && s.user.as_deref() == Some(gateway.user.as_str())
+        })
+        .map(|s| s.id.clone())
+        .collect()
+}
+
+pub fn warn_unmapped_gateways(preview: &mut ImportPreview, sessions: &[SavedSession]) {
+    for candidate in &preview.candidates {
+        if let Some(gateway) = preview.gateways.get(&candidate.key) {
+            let existing = gateway_matches(gateway, sessions).len();
+            let imported = preview
+                .candidates
+                .iter()
+                .filter(|c| {
+                    c.key != candidate.key
+                        && c.duplicate_of.is_none()
+                        && c.host.eq_ignore_ascii_case(&gateway.host)
+                        && c.port == gateway.port
+                        && c.user.as_deref() == Some(gateway.user.as_str())
+                })
+                .count();
+            if existing + imported != 1 {
+                preview.warnings.push(format!(
+                    "Gateway {} für {} nicht zugeordnet",
+                    gateway.host, candidate.name
+                ));
+            }
+        }
     }
 }
 
@@ -120,8 +189,19 @@ pub fn parse(text: &str, bases: &ImportBases) -> Result<ImportPreview, String> {
                 .map(|v| v.trim())
                 .filter(|v| !v.is_empty())
         };
+        let key = format!("mobaxterm:{section}:{name}");
+        match parse_gateway(&fields) {
+            Ok(Some(gateway)) => {
+                result.gateways.insert(key.clone(), gateway);
+            }
+            Ok(None) => (),
+            Err(host) => result.warnings.push(format!(
+                "Gateway {host} für {} nicht zugeordnet (unbekanntes Format)",
+                name.trim()
+            )),
+        }
         result.candidates.push(ImportCandidate {
-            key: format!("mobaxterm:{section}:{name}"),
+            key,
             name: name.trim().into(),
             folder: folder.clone(),
             host: host.into(),
@@ -145,6 +225,89 @@ mod tests {
             app_data: PathBuf::from("C:\\AppData"),
             documents: PathBuf::from("C:\\Documents"),
         }
+    }
+
+    fn gateway_fixture(host: &str, port: &str, user: &str) -> String {
+        // Payload positions (including type): 8=host, 9=port, 10=user, 14=key.
+        let fields = [
+            "0",
+            "target.test",
+            "22",
+            "alice",
+            "",
+            "-1",
+            "-1",
+            "",
+            host,
+            port,
+            user,
+            "0",
+            "0",
+            "0",
+            "",
+            "",
+            "-1",
+        ];
+        format!(
+            "[Bookmarks]\nTarget=#109#{}#terminal\nGateway=#109#0%gateway.test%2222%bob#terminal\n",
+            fields.join("%")
+        )
+    }
+
+    #[test]
+    fn reads_only_explicit_single_gateway_host_port_user() {
+        let mut preview = parse(&gateway_fixture("gateway.test", "2222", "bob"), &bases()).unwrap();
+        let gateway = preview.gateways.get("mobaxterm:Bookmarks:Target").unwrap();
+        assert_eq!(
+            (&*gateway.host, gateway.port, &*gateway.user),
+            ("gateway.test", 2222, "bob")
+        );
+        warn_unmapped_gateways(&mut preview, &[]);
+        assert!(preview.warnings.is_empty());
+        preview.candidates.pop();
+        warn_unmapped_gateways(&mut preview, &[]);
+        assert_eq!(
+            preview.warnings,
+            ["Gateway gateway.test für Target nicht zugeordnet"]
+        );
+    }
+
+    #[test]
+    fn rejects_uncertain_gateway_formats_without_guessing_defaults() {
+        for (host, port, user) in [
+            ("gateway.test", "", "bob"),
+            ("gateway.test", "0", "bob"),
+            ("gateway.test", "invalid", "bob"),
+            ("gateway.test", "22", ""),
+            ("first|second", "22", "bob"),
+            ("first;second", "22", "bob"),
+        ] {
+            let preview = parse(&gateway_fixture(host, port, user), &bases()).unwrap();
+            assert!(preview.gateways.is_empty());
+            assert!(
+                preview
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("nicht zugeordnet"))
+            );
+        }
+        let preview = parse(&gateway_fixture("", "22", ""), &bases()).unwrap();
+        assert!(preview.gateways.is_empty());
+        assert!(preview.warnings.is_empty());
+    }
+
+    #[test]
+    fn warns_when_multiple_imported_gateway_sessions_match() {
+        let text = format!(
+            "{}Other=#109#0%gateway.test%2222%bob#terminal\n",
+            gateway_fixture("gateway.test", "2222", "bob")
+        );
+        let mut preview = parse(&text, &bases()).unwrap();
+        warn_unmapped_gateways(&mut preview, &[]);
+        assert_eq!(
+            preview.warnings,
+            ["Gateway gateway.test für Target nicht zugeordnet"]
+        );
     }
 
     #[test]

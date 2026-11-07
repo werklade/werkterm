@@ -118,6 +118,7 @@ pub fn ssh_dir() -> Result<PathBuf, String> {
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SecretKind {
+    Username,
     Password,
     Passphrase,
 }
@@ -206,7 +207,7 @@ impl client::Handler for Handler {
         let accepted = tokio::time::timeout(
             Duration::from_secs(120),
             self.prompter.confirm_host_key(
-                self.target.host.clone(),
+                format!("{}@{}", self.target.user, self.target.host),
                 self.target.port,
                 key.algorithm().to_string(),
                 key.fingerprint(keys::HashAlg::Sha256).to_string(),
@@ -243,6 +244,7 @@ struct Session {
     monitor_closed: std::sync::atomic::AtomicBool,
     socket: SetupSocket,
     handle: Arc<Handle>,
+    jumps: Vec<Handle>,
     writer: Arc<ChannelWriteHalf<client::Msg>>,
     sftp: std::sync::OnceLock<Arc<SftpSession>>,
     sudo_sftp: Mutex<Option<Arc<SftpSession>>>,
@@ -356,7 +358,16 @@ async fn authenticate(
                 let mut key = None;
                 for _ in 0..3 {
                     let Some(secret) = prompter
-                        .ask_secret(SecretKind::Passphrase, path.to_string_lossy().into_owned())
+                        .ask_secret(
+                            SecretKind::Passphrase,
+                            format!(
+                                "{}@{}:{} – {}",
+                                target.user,
+                                target.host,
+                                target.port,
+                                path.display()
+                            ),
+                        )
                         .await
                     else {
                         break;
@@ -408,7 +419,7 @@ async fn authenticate(
         let Some(secret) = prompter
             .ask_secret(
                 SecretKind::Password,
-                format!("{}@{}", target.user, target.host),
+                format!("{}@{}:{}", target.user, target.host, target.port),
             )
             .await
         else {
@@ -502,8 +513,33 @@ fn quote(path: &str) -> String {
 const PHASE_TIMEOUT: Duration = Duration::from_secs(15);
 const CANCELED: &str = "Verbindungsaufbau abgebrochen";
 
-// A duplicated socket lets us terminate even a handshake task that russh has
-// already spawned internally when its connect future is dropped.
+trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> SshTransport for T {}
+
+async fn hop_target(
+    session: &crate::sessions::SavedSession,
+    prompter: &dyn Prompter,
+) -> Result<SshTarget, String> {
+    let user = match session.user.as_deref().filter(|u| !u.is_empty()) {
+        Some(user) => user.to_owned(),
+        None => prompter
+            .ask_secret(
+                SecretKind::Username,
+                format!("{} ({}:{})", session.name, session.host, session.port),
+            )
+            .await
+            .filter(|user| !user.trim().is_empty())
+            .ok_or_else(|| "Benutzereingabe abgebrochen".to_owned())?,
+    };
+    let host = if session.host.contains(':') {
+        format!("[{}]", session.host)
+    } else {
+        session.host.clone()
+    };
+    format!("{user}@{host}:{}", session.port).parse()
+}
+
+// A duplicated socket terminates russh handshake tasks even when their future is dropped.
 struct SetupSocket(Option<std::net::TcpStream>);
 impl Drop for SetupSocket {
     fn drop(&mut self) {
@@ -659,7 +695,7 @@ impl SshManager {
             connect_token,
             target,
             None,
-            None,
+            Vec::new(),
             cols,
             rows,
             known_hosts_path,
@@ -676,7 +712,7 @@ impl SshManager {
         connect_token: u32,
         target: SshTarget,
         session: Option<crate::sessions::SavedSession>,
-        stored_password: Option<String>,
+        jump_sessions: Vec<crate::sessions::SavedSession>,
         cols: u16,
         rows: u16,
         known_hosts_path: PathBuf,
@@ -708,7 +744,7 @@ impl SshManager {
             .connect_inner(
                 target,
                 session,
-                stored_password,
+                jump_sessions,
                 cols,
                 rows,
                 known_hosts_path,
@@ -752,7 +788,7 @@ impl SshManager {
         self: &Arc<Self>,
         target: SshTarget,
         session: Option<crate::sessions::SavedSession>,
-        stored_password: Option<String>,
+        jump_sessions: Vec<crate::sessions::SavedSession>,
         cols: u16,
         rows: u16,
         known_hosts_path: PathBuf,
@@ -765,6 +801,19 @@ impl SshManager {
         if cols == 0 || rows == 0 {
             return Err("Terminalgröße muss größer als null sein".into());
         }
+        let mut hop_targets = Vec::new();
+        for hop in &jump_sessions {
+            hop_targets.push(
+                phase(hop_target(hop, prompter.as_ref()), canceled, prompts)
+                    .await
+                    .map_err(|error| format!("Jump host {}: {error}", hop.name))?,
+            );
+        }
+        let first_target = hop_targets.first().unwrap_or(&target);
+        let first_error = |error: String| match jump_sessions.first() {
+            Some(hop) => format!("Jump host {}: {error}", hop.name),
+            None => error,
+        };
         let started = tokio::time::Instant::now();
         // Try every resolved address like OpenSSH does: "localhost" may resolve to an
         // unreachable ::1 first (e.g. WSL mirrored networking), which only times out.
@@ -772,7 +821,7 @@ impl SshManager {
             async {
                 tokio::time::timeout(
                     Duration::from_secs(5),
-                    tokio::net::lookup_host((target.host.as_str(), target.port)),
+                    tokio::net::lookup_host((first_target.host.as_str(), first_target.port)),
                 )
                 .await
                 .map_err(|_| "Zeitüberschreitung bei der Namensauflösung".to_owned())?
@@ -782,7 +831,8 @@ impl SshManager {
             canceled,
             prompts,
         )
-        .await?;
+        .await
+        .map_err(first_error)?;
         let mut last_error = String::from("Host konnte nicht aufgelöst werden");
         let mut connected = None;
         for address in addresses {
@@ -812,57 +862,114 @@ impl SshManager {
                 Err(error) => last_error = error,
             }
         }
-        let stream = connected.ok_or(last_error)?.into_std().map_err(ssh_error)?;
+        let stream = connected
+            .ok_or(last_error)
+            .map_err(first_error)?
+            .into_std()
+            .map_err(ssh_error)?;
         let mut setup_socket = SetupSocket(Some(stream.try_clone().map_err(ssh_error)?));
         let stream = tokio::net::TcpStream::from_std(stream).map_err(ssh_error)?;
-        let config = Arc::new(client::Config {
-            keepalive_interval: {
-                let seconds = session.as_ref().map_or(30, |s| s.keepalive_interval);
-                (seconds != 0).then(|| Duration::from_secs(u64::from(seconds)))
-            },
-            keepalive_max: session.as_ref().map_or(3, |s| s.keepalive_max as usize),
-            inactivity_timeout: None,
-            ..Default::default()
-        });
-        let (prompt_active, _prompt_state) = tokio::sync::watch::channel(false);
-        let connecting = client::connect_stream(
-            config,
-            stream,
-            Handler {
-                target: target.clone(),
-                path: known_hosts_path,
-                prompter: prompter.clone(),
-                prompt_active,
-            },
-        );
-        let mut handle = phase(
-            async { connecting.await.map_err(|e| e.to_string()) },
-            canceled,
-            prompts,
-        )
-        .await?;
-        if let Err(error) = phase(
-            authenticate(
-                &mut handle,
-                &target,
-                prompter.as_ref(),
-                session.as_ref(),
-                stored_password,
-            ),
-            canceled,
-            prompts,
-        )
-        .await
-        {
-            if let Some(socket) = &setup_socket.0 {
-                let _ = socket.shutdown(std::net::Shutdown::Both);
-            }
-            let _ = tokio::time::timeout(
-                PHASE_TIMEOUT,
-                handle.disconnect(Disconnect::ByApplication, "", ""),
+        // All russh tasks are rooted in setup_socket. Dropping it tears down every
+        // transport, including a handshake future canceled before it returned a handle.
+        let mut transport: Box<dyn SshTransport> = Box::new(stream);
+        let mut jumps: Vec<Handle> = Vec::new();
+        let mut handle;
+        let mut index = 0;
+        loop {
+            let hop = jump_sessions.get(index);
+            let hop_session = hop.or(session.as_ref());
+            let hop_target = hop_targets.get(index).unwrap_or(&target);
+            let label_error = |error: String| match hop {
+                Some(hop) => format!("Jump host {}: {error}", hop.name),
+                None => error,
+            };
+            let config = Arc::new(client::Config {
+                keepalive_interval: {
+                    let seconds = hop_session.map_or(30, |s| s.keepalive_interval);
+                    (seconds != 0).then(|| Duration::from_secs(u64::from(seconds)))
+                },
+                keepalive_max: hop_session.map_or(3, |s| s.keepalive_max as usize),
+                inactivity_timeout: None,
+                ..Default::default()
+            });
+            let (prompt_active, _prompt_state) = watch::channel(false);
+            handle = phase(
+                async {
+                    client::connect_stream(
+                        config,
+                        transport,
+                        Handler {
+                            target: hop_target.clone(),
+                            path: known_hosts_path.clone(),
+                            prompter: prompter.clone(),
+                            prompt_active,
+                        },
+                    )
+                    .await
+                    .map_err(|e| e.to_string())
+                },
+                canceled,
+                prompts,
             )
-            .await;
-            return Err(error);
+            .await
+            .map_err(label_error)?;
+            let password = if let Some(saved) = hop_session {
+                if saved.auth == crate::sessions::SessionAuth::Password {
+                    phase(
+                        async {
+                            Ok(
+                                crate::secrets::get_password(format!("session:{}", saved.id))
+                                    .await
+                                    .ok()
+                                    .flatten(),
+                            )
+                        },
+                        canceled,
+                        prompts,
+                    )
+                    .await
+                    .map_err(label_error)?
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            phase(
+                authenticate(
+                    &mut handle,
+                    hop_target,
+                    prompter.as_ref(),
+                    hop_session,
+                    password,
+                ),
+                canceled,
+                prompts,
+            )
+            .await
+            .map_err(label_error)?;
+            if hop.is_none() {
+                break;
+            }
+            let next = match jump_sessions.get(index + 1) {
+                Some(hop) => (hop.host.clone(), hop.port),
+                None => (target.host.clone(), target.port),
+            };
+            let channel = phase(
+                async {
+                    handle
+                        .channel_open_direct_tcpip(next.0, u32::from(next.1), "127.0.0.1", 0)
+                        .await
+                        .map_err(ssh_error)
+                },
+                canceled,
+                prompts,
+            )
+            .await
+            .map_err(label_error)?;
+            transport = Box::new(channel.into_stream());
+            jumps.push(handle);
+            index += 1;
         }
         let setup = phase(
             async { handle.channel_open_session().await.map_err(ssh_error) },
@@ -896,6 +1003,7 @@ impl SshManager {
             monitor_closed: std::sync::atomic::AtomicBool::new(false),
             socket: SetupSocket(setup_socket.0.take()),
             handle: Arc::new(handle),
+            jumps,
             writer: Arc::new(writer),
             sftp: std::sync::OnceLock::new(),
             sudo_sftp: Mutex::new(None),
@@ -908,7 +1016,15 @@ impl SshManager {
         let manager = Arc::downgrade(self);
         tokio::spawn(async move {
             let session = reader_session;
-            let code = pump_terminal(&mut reader, &mut stopped, on_data.as_mut(), &replies).await;
+            let code = tokio::select! {
+                code = pump_terminal(&mut reader, &mut stopped, on_data.as_mut(), &replies) => code,
+                _ = async {
+                    loop {
+                        if session.jumps.iter().any(Handle::is_closed) { break; }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                }, if !session.jumps.is_empty() => None,
+            };
             session.monitor_closed.store(true, Ordering::Release);
             monitor::stop_session(&session).await;
             // Wake setup immediately if the shell ends while SFTP is negotiated.
@@ -919,6 +1035,13 @@ impl SshManager {
                 session.handle.disconnect(Disconnect::ByApplication, "", ""),
             )
             .await;
+            for hop in session.jumps.iter().rev() {
+                let _ = tokio::time::timeout(
+                    PHASE_TIMEOUT,
+                    hop.disconnect(Disconnect::ByApplication, "", ""),
+                )
+                .await;
+            }
             if let Some(socket) = &session.socket.0 {
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             }
@@ -1443,6 +1566,59 @@ mod tests {
         assert!(answers.try_recv().unwrap());
         assert!(!answers.try_recv().unwrap());
     }
+    #[tokio::test]
+    async fn jump_username_uses_saved_user_or_a_host_specific_prompt() {
+        struct UserPrompt {
+            answer: Option<&'static str>,
+            labels: std::sync::Mutex<Vec<String>>,
+        }
+        impl Prompter for UserPrompt {
+            fn confirm_host_key(
+                &self,
+                _: String,
+                _: u16,
+                _: String,
+                _: String,
+            ) -> PromptFuture<bool> {
+                panic!("target resolution must not contact a server")
+            }
+            fn ask_secret(&self, kind: SecretKind, label: String) -> PromptFuture<Option<String>> {
+                assert!(matches!(kind, SecretKind::Username));
+                self.labels.lock().unwrap().push(label);
+                let answer = self.answer.map(str::to_owned);
+                Box::pin(async move { answer })
+            }
+        }
+        let mut saved: crate::sessions::SavedSession = serde_json::from_value(serde_json::json!({
+            "id": "gw", "name": "Gateway", "folder": "", "host": "::1", "port": 2222,
+            "user": "saved-user", "auth": { "type": "ask" }, "source": null
+        }))
+        .unwrap();
+        let prompt = UserPrompt {
+            answer: Some("prompt-user"),
+            labels: Default::default(),
+        };
+        assert_eq!(
+            hop_target(&saved, &prompt).await.unwrap().user,
+            "saved-user"
+        );
+        assert!(prompt.labels.lock().unwrap().is_empty());
+        saved.user = None;
+        let target = hop_target(&saved, &prompt).await.unwrap();
+        assert_eq!(
+            (target.user.as_str(), target.host.as_str(), target.port),
+            ("prompt-user", "::1", 2222)
+        );
+        assert_eq!(*prompt.labels.lock().unwrap(), ["Gateway (::1:2222)"]);
+        for answer in [None, Some(""), Some("bad user")] {
+            let prompt = UserPrompt {
+                answer,
+                labels: Default::default(),
+            };
+            assert!(hop_target(&saved, &prompt).await.is_err());
+        }
+    }
+
     struct NoPrompts;
     impl Prompter for NoPrompts {
         fn confirm_host_key(&self, _: String, _: u16, _: String, _: String) -> PromptFuture<bool> {
@@ -1626,7 +1802,7 @@ mod tests {
             Box::pin(async move {
                 match kind {
                     SecretKind::Password => std::env::var("WERKTERM_TEST_SSH_PASSWORD").ok(),
-                    SecretKind::Passphrase => None,
+                    SecretKind::Username | SecretKind::Passphrase => None,
                 }
             })
         }

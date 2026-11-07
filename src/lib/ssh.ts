@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 export type SshPrompt =
   | { type: "hostKey"; requestId: number; host: string; port: number; keyType: string; fingerprint: string }
-  | { type: "secret"; requestId: number; kind: "password" | "passphrase"; label: string };
+  | { type: "secret"; requestId: number; kind: "username" | "password" | "passphrase"; label: string };
 
 export interface ConnectOptions {
   target: string;

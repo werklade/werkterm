@@ -83,7 +83,7 @@ export function ImportDialog({ source, onClose, onImported }: Props) {
       if (!preview) { void loadPreview(); return; }
       if (!valid || busy) return;
       setBusy(true); setError("");
-      void commitImport(selections).then(onImported, reason => {
+      void commitImport(selections.map(selection => ({ ...selection, gateway: preview.gateways?.[selection.candidate.key] }))).then(onImported, reason => {
         setError(typeof reason === "string" ? reason : "Sitzungen konnten nicht importiert werden."); setBusy(false);
       });
     }}>

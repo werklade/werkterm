@@ -19,6 +19,7 @@ export interface SavedSession {
   source: ImportSource | null;
   keepaliveInterval?: number;
   keepaliveMax?: number;
+  jumpSessionId?: string | null;
 }
 
 export interface ImportCandidate {
@@ -34,19 +35,22 @@ export interface ImportCandidate {
 }
 
 export interface OneKeyRef { uuid: string; name: string; kind: string }
+export interface ImportGateway { host: string; port: number; user: string }
 export interface ImportPreview {
   candidates: ImportCandidate[];
   oneKeys: OneKeyRef[];
   skipped: number;
   warnings: string[];
+  gateways?: Record<string, ImportGateway>;
 }
 export interface ImportSelection {
   candidate: ImportCandidate;
+  gateway?: ImportGateway;
   user: string | null;
   auth: SessionAuth;
 }
 export interface OneKeyMapping { user: string | null; auth: SessionAuth }
-export interface ImportResult { imported: number; skippedDuplicates: number }
+export interface ImportResult { imported: number; skippedDuplicates: number; warnings?: string[] }
 export interface SessionFolder {
   name: string;
   path: string;
@@ -167,4 +171,26 @@ export function validateSession(session: SavedSession): string | null {
   if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535) return "Port muss zwischen 1 und 65535 liegen";
   if (session.auth.type === "keyFile" && !session.auth.path.trim()) return "Schlüsselpfad darf nicht leer sein";
   return null;
+}
+
+/** Reject self references, existing cycles, missing hops and chains beyond five gateways. */
+export function jumpHostOptions(sessions: readonly SavedSession[], sessionId?: string): SavedSession[] {
+  const byId = new Map(sessions.map(session => [session.id, session]));
+  return sessions.filter(candidate => {
+    const seen = new Set(sessionId ? [sessionId] : []);
+    let hop: SavedSession | undefined = candidate;
+    let count = 0;
+    while (hop) {
+      if (hop.kind !== "ssh" || seen.has(hop.id) || ++count > 5) return false;
+      seen.add(hop.id);
+      if (!hop.jumpSessionId) return true;
+      hop = byId.get(hop.jumpSessionId);
+    }
+    return false;
+  });
+}
+
+export function jumpHostHint(session: SavedSession, sessions: readonly SavedSession[]): string {
+  if (!session.jumpSessionId) return "";
+  return `über ${sessions.find(item => item.id === session.jumpSessionId)?.name ?? "unbekannten Jump host"}`;
 }

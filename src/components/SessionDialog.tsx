@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { initialSessionAuthType, keyringAvailable, saveSession, type SavedSession, type SessionAuth } from "../lib/sessions";
+import { initialSessionAuthType, jumpHostOptions, sessionLabel, keyringAvailable, saveSession, type SavedSession, type SessionAuth } from "../lib/sessions";
 import { useModal } from "./useModal";
 import { PasswordField } from "./PasswordField";
 import { usePasswordInput } from "../lib/passwordInput";
@@ -21,6 +21,8 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const [folder, setFolder] = useState(session?.folder ?? "");
   const [host, setHost] = useState(session?.host ?? "");
   const [keepaliveInterval, setKeepaliveInterval] = useState(session?.keepaliveInterval ?? 30);
+  const [jumpSessionId, setJumpSessionId] = useState(session?.jumpSessionId ?? "");
+  const jumpOptions = jumpHostOptions(sessions, session?.id);
   const [keepaliveMax, setKeepaliveMax] = useState(session?.keepaliveMax ?? 3);
   const [port, setPort] = useState(String(session?.port ?? 22));
   const [user, setUser] = useState(session?.user ?? "");
@@ -54,6 +56,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const valid = name.trim().length > 0 && host.length > 0 && !/[\s\p{Cc}]/u.test(host)
     && Number.isInteger(keepaliveInterval) && keepaliveInterval >= 0 && keepaliveInterval <= 3600
     && Number.isInteger(keepaliveMax) && keepaliveMax >= 1 && keepaliveMax <= 100
+    && (!jumpSessionId || jumpOptions.some(hop => hop.id === jumpSessionId))
     && validPort && (authType !== "keyFile" || keyPath.trim().length > 0);
   const clearPassword = () => {
     password.reset();
@@ -75,7 +78,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
       clearPassword();
       setBusy(true); setError("");
       void saveSession({ kind: session?.kind ?? "ssh", id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host,
-        port: Number(port), keepaliveInterval, keepaliveMax, user: user.trim() || null,
+        port: Number(port), keepaliveInterval, keepaliveMax, jumpSessionId: jumpSessionId || null, user: user.trim() || null,
         auth: authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType },
         source: session?.source ?? null }, secret).then(onSaved, reason => {
         setError(sessionSaveError(reason));
@@ -98,7 +101,12 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {authType === "keyFile" && <label>Schlüsseldatei<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></label>}
         {authType === "password" && <label>Passwort<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
-        <details><summary>Erweitert</summary><p>Keepalive erkennt unterbrochene Verbindungen. Intervall 0 schaltet es aus.</p><label>Intervall (Sekunden)<input type="number" required min={0} max={3600} value={keepaliveInterval} onChange={e => setKeepaliveInterval(Number(e.target.value))} /></label><label>Unbeantwortete Keepalives<input type="number" required min={1} max={100} value={keepaliveMax} onChange={e => setKeepaliveMax(Number(e.target.value))} /></label></details>
+        <details><summary>Erweitert</summary>
+          <label>Jump host<select value={jumpSessionId} onChange={event => setJumpSessionId(event.target.value)}>
+            <option value="">(keiner)</option>
+            {jumpOptions.map(hop => <option key={hop.id} value={hop.id}>{hop.name} ({sessionLabel(hop)})</option>)}
+          </select></label>
+          <small className="session-hint">Verbindung läuft über diese Sitzung (wie ssh -J).</small><p>Keepalive erkennt unterbrochene Verbindungen. Intervall 0 schaltet es aus.</p><label>Intervall (Sekunden)<input type="number" required min={0} max={3600} value={keepaliveInterval} onChange={e => setKeepaliveInterval(Number(e.target.value))} /></label><label>Unbeantwortete Keepalives<input type="number" required min={1} max={100} value={keepaliveMax} onChange={e => setKeepaliveMax(Number(e.target.value))} /></label></details>
       </fieldset>
       {error && <p role="alert" className="session-error">{error}</p>}
       <div className="dialog-actions"><button type="submit" disabled={!valid || busy}>{busy ? "Speichern…" : "Speichern"}</button><button type="button" disabled={busy} onClick={cancel}>Abbrechen</button></div>
