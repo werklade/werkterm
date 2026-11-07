@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { groundAhead, MAX_FALL, createTux, IdleClock, platformsFromLines, stepTux } from "./simulation";
+import { groundAhead, MAX_FALL, TUX_COLORS, createTux, IdleClock, platformsFromLines, stepTux } from "./simulation";
 import { sprites } from "./sprites";
 it("extracts contiguous non-space platforms and empty rows", () => {
   expect(platformsFromLines(["  abc d ", "   ", "x"])).toEqual([{ start: 2, end: 5, y: 0 }, { start: 6, end: 7, y: 0 }, { start: 0, end: 1, y: 2 }]);
@@ -85,5 +85,14 @@ it("picks a shovel or a jackhammer for each dig", () => {
     let first = true;
     stepTux(tux, .1, platforms, 10, () => { const value = first ? 0 : roll; first = false; return value; }, [], 30);
     expect(tux.state).toBe("dig"); expect(tux.tool).toBe(tool);
+  }
+});
+it("uses only dark body colours that differ from belly, beak, helmet and tools", () => {
+  const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  for (const color of TUX_COLORS) {
+    const [r, g, b] = rgb(color);
+    expect(0.299 * r + 0.587 * g + 0.114 * b).toBeLessThan(90);           // dark, so white belly and orange stay visible
+    expect(Math.max(r, g, b) - Math.min(r, g, b) > 20 || color === TUX_COLORS[0]).toBe(true); // not grey like the jackhammer
+    expect(r > g && g > b && r - b > 40).toBe(false);                      // not brown/orange like shovel, dirt or helmet
   }
 });

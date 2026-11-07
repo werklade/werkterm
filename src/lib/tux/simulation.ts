@@ -22,8 +22,12 @@ export function groundAhead(platforms: Platform[], holes: Hole[], row: number, x
   return n;
 }
 export interface Tux { x: number; y: number; vy: number; direction: number; state: "fall" | "walk" | "dig" | "exit" | "gone"; age: number; wait: number; floor: number; leave: number; sliding: boolean; tool: "shovel" | "jackhammer"; color: string }
-/** Body colours (replace the black parts only); the first one is the classic Tux. */
-export const TUX_COLORS = ["#182735", "#4b5560", "#2f5d34", "#22406e", "#5a2d6e", "#7a2e2e", "#1f5f63", "#6b4a1f"];
+/**
+ * Body colours (replace the black parts only); the first one is the classic Tux.
+ * All dark and saturated: never white, orange/yellow (beak, feet, helmet), grey (jackhammer)
+ * or brown (shovel, dirt), so the details stay visible.
+ */
+export const TUX_COLORS = ["#182735", "#1e4d2b", "#1f3f7a", "#4b2470", "#6e1f3f", "#135a5e", "#3b1f6e", "#0f4a3a"];
 /** Flapping caps the fall speed (rows/s); stretches longer than SLIDE_MIN cells are crossed on the belly. */
 export const MAX_FALL = 3.5, SLIDE_MIN = 10, SLIDE_SPEED = 9;
 /** Half the sprite width in cells: Tux stays this far from the terminal edges. */
