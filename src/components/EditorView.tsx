@@ -163,7 +163,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   }
   function fail(error: unknown) {
     const message = String(error);
-    const labels: Record<string, string> = { SESSION_CLOSED: "Die SSH-Sitzung ist geschlossen. Der Editor bleibt mit Ihrem Inhalt geöffnet.", ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", BINARY: "Binärdateien können nicht bearbeitet werden.", TOO_LARGE: "Die Datei ist größer als 10 MB." };
+    const labels: Record<string, string> = { SUDO_INACTIVE: "sudo-Modus ist nicht mehr aktiv. Aktivieren Sie ihn in der SSH-Sitzung erneut. Ihr Inhalt bleibt im Editor erhalten.", SESSION_CLOSED: "Die SSH-Sitzung ist geschlossen. Der Editor bleibt mit Ihrem Inhalt geöffnet.", ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", BINARY: "Binärdateien können nicht bearbeitet werden.", TOO_LARGE: "Die Datei ist größer als 10 MB." };
     const prefix = message.split(":", 1)[0];
     const readable = prefix === "WRITE_FAILED" ? message.slice("WRITE_FAILED: ".length) : labels[prefix] ?? `Speichern fehlgeschlagen: ${message}`;
     if (mounted.current) { setNotice(readable); callbacks.current.onStatusChange(readable); }

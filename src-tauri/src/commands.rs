@@ -575,3 +575,42 @@ pub async fn ssh_delete(
 ) -> Result<(), String> {
     state.delete(id, path, recursive).await
 }
+
+#[tauri::command]
+pub async fn ssh_sudo_enable(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    password: Option<String>,
+) -> Result<(), String> {
+    state.sudo_enable(id, password).await
+}
+#[tauri::command]
+pub async fn ssh_sudo_disable(state: State<'_, Arc<SshManager>>, id: u32) -> Result<(), String> {
+    state.sudo_disable(id).await
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn ssh_chmod(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    path: String,
+    mode: u32,
+    recursive: bool,
+    scope: crate::ssh::permissions::Scope,
+    dir_mode: Option<u32>,
+    file_mode: Option<u32>,
+) -> Result<crate::ssh::permissions::ChmodResult, String> {
+    state
+        .chmod(
+            id,
+            path,
+            crate::ssh::permissions::Options {
+                mode,
+                recursive,
+                scope,
+                dir_mode,
+                file_mode,
+            },
+        )
+        .await
+}

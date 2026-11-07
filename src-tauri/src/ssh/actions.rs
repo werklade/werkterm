@@ -56,7 +56,7 @@ fn validate_path(path: &str) -> Result<(), String> {
         Ok(())
     }
 }
-fn action_path(path: &str) -> Result<String, String> {
+pub(super) fn action_path(path: &str) -> Result<String, String> {
     validate_path(path)?;
     if path.is_empty() || path.split('/').any(|part| part == "." || part == "..") {
         return Err("Ungültiger Pfad".into());
@@ -141,12 +141,11 @@ async fn existing(sftp: &SftpSession, path: &str) -> Result<Option<FileAttribute
 }
 
 impl SshManager {
-    async fn action_sftp(&self, id: u32) -> Result<Arc<SftpSession>, String> {
-        self.session(id)
-            .await?
-            .sftp
-            .get()
-            .cloned()
+    pub(super) async fn action_sftp(&self, id: u32) -> Result<Arc<SftpSession>, String> {
+        let session = self.session(id).await?;
+        let sudo = session.sudo_sftp.lock().await;
+        sudo.clone()
+            .or_else(|| session.sftp.get().cloned())
             .ok_or_else(|| "Nur mit SFTP verfügbar".into())
     }
     async fn begin_transfer(&self, transfer_id: u32) -> Result<watch::Receiver<bool>, String> {
@@ -423,9 +422,6 @@ impl SshManager {
                 }
                 let child = remote_join(&path, &name)?;
                 count += 1;
-                if count > 100_000 {
-                    return Ok(100_001);
-                }
                 let meta = sftp
                     .symlink_metadata(child.clone())
                     .await

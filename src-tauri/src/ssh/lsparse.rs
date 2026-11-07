@@ -142,6 +142,10 @@ pub fn parse(output: &str) -> Result<Vec<DirEntry>, String> {
             continue;
         }
         entries.push(DirEntry {
+            uid: None,
+            gid: None,
+            user: None,
+            group: None,
             name,
             kind: kind.into(),
             size,

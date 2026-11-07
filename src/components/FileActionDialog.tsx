@@ -5,7 +5,7 @@ import { useModal } from "./useModal";
 export type ConflictAnswer = "overwrite" | "skip" | "all" | "cancel";
 export type FileDialog =
   | { type: "name"; directory: boolean; answer: (name: string | null) => void }
-  | { type: "delete"; message: string; answer: (accepted: boolean) => void }
+  | { type: "delete"; message: string; confirmLabel?: string; answer: (accepted: boolean) => void }
   | { type: "conflict"; name: string; answer: (answer: ConflictAnswer) => void };
 
 export function FileActionDialog({ prompt }: { prompt: FileDialog }) {
@@ -24,7 +24,7 @@ export function FileActionDialog({ prompt }: { prompt: FileDialog }) {
       {prompt.type === "name" && <><input autoFocus aria-label="Name" value={name} onChange={event => setName(event.target.value)} aria-invalid={name.length > 0 && !validRemoteName(name)} />{name.length > 0 && !validRemoteName(name) && <p role="alert">Ungültiger Name</p>}</>}
       <div className="dialog-actions">
         {prompt.type === "name" && <button type="submit" disabled={!validRemoteName(name)}>Erstellen</button>}
-        {prompt.type === "delete" && <button type="button" onClick={() => prompt.answer(true)}>Endgültig löschen</button>}
+        {prompt.type === "delete" && <button type="button" onClick={() => prompt.answer(true)}>{prompt.confirmLabel ?? "Endgültig löschen"}</button>}
         {prompt.type === "conflict" && <><button type="button" onClick={() => prompt.answer("overwrite")}>Überschreiben</button><button type="button" onClick={() => prompt.answer("skip")}>Überspringen</button><button type="button" onClick={() => prompt.answer("all")}>Alle überschreiben</button></>}
         <button autoFocus={prompt.type !== "name"} type="button" onClick={cancel}>Abbrechen</button>
       </div>

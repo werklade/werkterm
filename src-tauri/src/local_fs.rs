@@ -88,6 +88,10 @@ pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirLis
             "other"
         };
         entries.push(DirEntry {
+            uid: None,
+            gid: None,
+            user: None,
+            group: None,
             name,
             kind: kind.to_owned(),
             size: metadata.len(),
@@ -107,6 +111,7 @@ pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirLis
             .then_with(|| a.name.cmp(&b.name))
     });
     Ok(DirListing {
+        sudo: false,
         path: display_path,
         mode: "local".to_owned(),
         entries,

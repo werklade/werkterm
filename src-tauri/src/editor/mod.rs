@@ -113,8 +113,14 @@ fn io_error(error: impl std::fmt::Display) -> String {
 }
 
 pub enum DocumentSource {
-    Remote { session_id: u32, path: String },
-    Local { path: PathBuf },
+    Remote {
+        session_id: u32,
+        path: String,
+        sudo: bool,
+    },
+    Local {
+        path: PathBuf,
+    },
 }
 pub struct DocumentEntry {
     pub source: DocumentSource,
@@ -357,8 +363,12 @@ async fn load(
                 Some(local_identity(&meta)),
             )
         }
-        DocumentSource::Remote { session_id, path } => {
-            let sftp = ssh.editor_sftp(*session_id).await?;
+        DocumentSource::Remote {
+            session_id,
+            path,
+            sudo,
+        } => {
+            let sftp = ssh.editor_sftp(*session_id, *sudo).await?;
             let meta = sftp.metadata(path.clone()).await.map_err(io_error)?;
             if !meta.is_regular() {
                 return Err("Nur reguläre Dateien können bearbeitet werden".into());
@@ -443,6 +453,7 @@ pub async fn editor_open_remote(
     let mut entry = DocumentEntry {
         source: DocumentSource::Remote {
             session_id: id,
+            sudo: ssh.sudo_active(id).await?,
             path: path.clone(),
         },
         cache_path: Some(cache_path.clone()),
@@ -572,8 +583,12 @@ async fn save_entry(
                 entry.local_identity = Some(local_identity(&metadata));
                 local_stamp(&metadata)
             }
-            DocumentSource::Remote { session_id, path } => {
-                let sftp = ssh.editor_sftp(*session_id).await?;
+            DocumentSource::Remote {
+                session_id,
+                path,
+                sudo,
+            } => {
+                let sftp = ssh.editor_sftp(*session_id, *sudo).await?;
                 let mut remote = sftp
                     .open_with_flags(path.clone(), OpenFlags::WRITE)
                     .await
@@ -610,7 +625,7 @@ async fn save_entry(
     }
     .await;
     let stamp = result.map_err(|error| {
-        if error.starts_with("CONFLICT:") {
+        if error.starts_with("CONFLICT:") || error.starts_with("SUDO_INACTIVE:") {
             error
         } else {
             write_failed(entry.cache_path.as_deref())
@@ -879,6 +894,7 @@ mod tests {
         let mut entry = DocumentEntry {
             source: DocumentSource::Remote {
                 session_id: 99,
+                sudo: false,
                 path: "file".into(),
             },
             cache_path: None,
@@ -899,6 +915,39 @@ mod tests {
                 .await
                 .unwrap_err(),
             write_failed(None)
+        );
+    }
+    #[tokio::test]
+    async fn unavailable_sudo_preserves_editor_baseline_and_error_category() {
+        let ssh = SshManager::default();
+        let baseline = b"original".to_vec();
+        let mut entry = DocumentEntry {
+            source: DocumentSource::Remote {
+                session_id: 99,
+                path: "file".into(),
+                sudo: true,
+            },
+            cache_path: None,
+            mtime: Some(17),
+            size: baseline.len() as u64,
+            permissions: Some(0o640),
+            display_path: "file".into(),
+            local_modified: None,
+            local_identity: None,
+            baseline: baseline.clone(),
+        };
+        assert_eq!(
+            save_entry(&mut entry, &ssh, b"unsaved edits", false)
+                .await
+                .unwrap_err(),
+            "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv"
+        );
+        assert_eq!(entry.baseline, baseline);
+        assert_eq!(entry.permissions, Some(0o640));
+        assert_eq!(entry.mtime, Some(17));
+        assert_eq!(
+            load(&mut entry, 1, &ssh).await.unwrap_err(),
+            "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv"
         );
     }
     #[tokio::test]

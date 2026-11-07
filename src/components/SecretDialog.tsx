@@ -4,14 +4,15 @@ import { useModal } from "./useModal";
 
 interface Props {
   prompt: Extract<SshPrompt, { type: "secret" }>;
+  title?: string;
   onAnswer: (secret: string | null) => void;
 }
 
-export function SecretDialog({ prompt, onAnswer }: Props) {
+export function SecretDialog({ prompt, onAnswer, title }: Props) {
   const dialog = useModal();
   const [secret, setSecret] = useState("");
   const cancel = () => { setSecret(""); onAnswer(null); };
-  const label = `${prompt.kind === "password" ? "Passwort" : "Passphrase"} für ${prompt.label}`;
+  const label = title ?? `${prompt.kind === "password" ? "Passwort" : "Passphrase"} für ${prompt.label}`;
   return <dialog ref={dialog} className="ssh-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-title" onCancel={event => { event.preventDefault(); cancel(); }}>
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();

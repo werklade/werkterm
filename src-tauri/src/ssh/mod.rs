@@ -1,5 +1,7 @@
 mod actions;
 pub mod lsparse;
+pub mod permissions;
+mod sudo;
 pub use actions::TransferProgress;
 
 use russh::{ChannelMsg, ChannelWriteHalf, Disconnect, client, keys};
@@ -26,12 +28,17 @@ pub struct DirEntry {
     pub kind: String,
     pub size: u64,
     pub permissions: u32,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub user: Option<String>,
+    pub group: Option<String>,
     pub modified: Option<u64>,
     pub target_is_dir: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DirListing {
+    pub sudo: bool,
     pub path: String,
     pub mode: String,
     pub entries: Vec<DirEntry>,
@@ -235,6 +242,7 @@ struct Session {
     handle: Arc<Handle>,
     writer: Arc<ChannelWriteHalf<client::Msg>>,
     sftp: std::sync::OnceLock<Arc<SftpSession>>,
+    sudo_sftp: Mutex<Option<Arc<SftpSession>>>,
     stop: Mutex<Option<oneshot::Sender<()>>>,
     done: tokio::sync::Notify,
     finished: std::sync::atomic::AtomicBool,
@@ -881,6 +889,7 @@ impl SshManager {
             handle: Arc::new(handle),
             writer: Arc::new(writer),
             sftp: std::sync::OnceLock::new(),
+            sudo_sftp: Mutex::new(None),
             stop: Mutex::new(Some(stop)),
             done: tokio::sync::Notify::new(),
             finished: std::sync::atomic::AtomicBool::new(false),
@@ -901,6 +910,12 @@ impl SshManager {
             .await;
             if let Some(socket) = &session.socket.0 {
                 let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+            if let Some(sftp) = session.sudo_sftp.lock().await.take() {
+                let _ = sftp.close().await;
+            }
+            if let Some(sftp) = session.sftp.get() {
+                let _ = sftp.close().await;
             }
             // Read immediately, but do not remove a session before publication.
             if registration.await == Ok(true)
@@ -1054,13 +1069,27 @@ impl SshManager {
         let _ = registered.send(true);
         Ok(SshConnection { id, mode })
     }
-    pub(crate) async fn editor_sftp(&self, id: u32) -> Result<Arc<SftpSession>, String> {
-        let session = self
-            .session(id)
-            .await
-            .map_err(|_| "SESSION_CLOSED: SSH-Sitzung beendet".to_owned())?;
+    pub(crate) async fn editor_sftp(
+        &self,
+        id: u32,
+        sudo: bool,
+    ) -> Result<Arc<SftpSession>, String> {
+        let unavailable = if sudo {
+            "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv"
+        } else {
+            "SESSION_CLOSED: SSH-Sitzung beendet"
+        };
+        let session = self.session(id).await.map_err(|_| unavailable.to_owned())?;
         if session.finished.load(Ordering::Acquire) {
-            return Err("SESSION_CLOSED: SSH-Sitzung beendet".into());
+            return Err(unavailable.into());
+        }
+        if sudo {
+            return session
+                .sudo_sftp
+                .lock()
+                .await
+                .clone()
+                .ok_or_else(|| "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv".into());
         }
         session
             .sftp
@@ -1114,7 +1143,10 @@ impl SshManager {
             return Err("Ungültiger Verzeichnispfad".into());
         }
         let home = path.is_empty() || path == "~";
-        let (path, mode, mut entries) = if let Some(sftp) = session.sftp.get() {
+        let elevated = session.sudo_sftp.lock().await.clone();
+        let sudo = elevated.is_some();
+        let active_sftp = elevated.or_else(|| session.sftp.get().cloned());
+        let (path, mode, mut entries) = if let Some(sftp) = active_sftp {
             let path = sftp
                 .canonicalize(if home { "." } else { &path })
                 .await
@@ -1145,6 +1177,10 @@ impl SshManager {
                     kind: kind.into(),
                     size: meta.size.unwrap_or(0),
                     permissions: meta.permissions.unwrap_or(0) & 0o7777,
+                    uid: meta.uid,
+                    gid: meta.gid,
+                    user: meta.user,
+                    group: meta.group,
                     modified: meta.mtime.map(u64::from),
                     target_is_dir,
                 });
@@ -1176,6 +1212,7 @@ impl SshManager {
         };
         sort_entries(&mut entries);
         Ok(DirListing {
+            sudo,
             path,
             mode: mode.into(),
             entries,

@@ -305,6 +305,10 @@ export default function App() {
       return { ...tab, cwd, browserPath: follow ? cwd.path : tab.browserPath };
     }));
   }, []);
+  const setBrowserAccess = useCallback((id: number, sessionId: number, mode: "sftp" | "exec" | "local", sudo: boolean) => {
+    setTabs(current => current.map(tab => tab.id === id && tab.sessionId === sessionId && !tab.exited
+      ? { ...tab, browserAccess: { sessionId, mode, sudo } } : tab));
+  }, []);
   const setPath = useCallback((id: number, browserPath: string) => {
     setTabs(current => current.map(tab => tab.id === id ? { ...tab, browserPath } : tab));
   }, []);
@@ -346,7 +350,7 @@ export default function App() {
     <MenuBar />
     <Toolbar hasWsl={hasWsl} onOpen={openTab} />
     <div className="workspace">
-      <Sidebar onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
+      <Sidebar onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />
       <main className="terminal-workspace" aria-label="Terminalbereich">
         <TabBar tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}

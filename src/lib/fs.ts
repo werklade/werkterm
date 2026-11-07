@@ -5,11 +5,16 @@ export interface DirEntry {
   kind: "dir" | "file" | "symlink" | "other";
   size: number;
   permissions: number;
+  uid?: number | null;
+  gid?: number | null;
+  user?: string | null;
+  group?: string | null;
   modified: number | null;
   targetIsDir: boolean;
 }
 
 export interface DirListing {
+  sudo?: boolean;
   path: string;
   mode: "sftp" | "exec" | "local";
   entries: DirEntry[];
