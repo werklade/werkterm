@@ -17,7 +17,15 @@ const panels: { name: string; icon: IconName; placeholder: string }[] = [
   { name: "Macros", icon: "macros", placeholder: "Makros folgen in einer späteren Version" },
   { name: "SSH-Browser", icon: "globe", placeholder: "Keine SSH-Sitzung verbunden" },
 ];
+import type { MenuItem } from "./MenuBar";
+const toolIcons: Partial<Record<string, IconName>> = {
+  local: "terminal", root: "terminal", processes: "view", hardware: "tools", tux: "tux", openFile: "file", ascii: "edit",
+  keygen: "permissions", ports: "globe", tunnels: "jump", multiexec: "multiexec", settings: "settings",
+};
 interface Props {
+  /** Entries of the Tools menu, shown as the Tools panel. */
+  toolItems?: MenuItem[];
+  onToolAction?: (action: string) => void;
   onMultiExec: () => void;
   active: number; onActive(value: number): void; onOpenSettings(): void;
   onStatus: (message: string) => void;
@@ -34,7 +42,7 @@ interface Props {
   onAccess: (id: number, sessionId: number, mode: "sftp" | "exec" | "local", sudo: boolean) => void;
   onPath: (id: number, path: string) => void;
 }
-export function Sidebar({ onMultiExec, active, onActive: setActive, onOpenSettings, onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
+export function Sidebar({ toolItems = [], onToolAction, onMultiExec, active, onActive: setActive, onOpenSettings, onOpenFile, onStatus, onConnect, tab, settings, onSettings, onPath, onAccess, transferQueue, savedSessions, onSavedConnect, onEditSession, onReloadSessions }: Props) {
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [width, setWidth] = useState(() => clampPanel(loadWidth("werkterm.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
   useEffect(() => {
@@ -52,7 +60,7 @@ export function Sidebar({ onMultiExec, active, onActive: setActive, onOpenSettin
     </form>
     <div className="sidebar-content"><nav className="sidebar-icons" aria-label="Seitenbereiche">{panels.map((panel, index) => <button type="button" key={panel.name} aria-label={panel.name} aria-pressed={active === index} title={panel.name} onClick={() => setActive(index)}><Icon name={panel.icon} /></button>)}</nav>
       <section className="sidebar-panel" aria-label={panels[active].name}><h2>{panels[active].name}</h2>
-        {active === 0 ? <SessionsPanel sessions={savedSessions} onConnect={onSavedConnect} onEdit={onEditSession} onReload={onReloadSessions} onStatus={onStatus} /> : active === 3 ? (tab?.kind === "telnet" || tab?.kind === "serial") ? <p className="empty-state">Für Telnet/Seriell nicht verfügbar</p> : <FileBrowser onOpenFile={onOpenFile} key={tab?.id ?? "none"} tab={tab} settings={settings} onSettings={onSettings} onPath={onPath} onAccess={onAccess} onStatus={onStatus} transferQueue={transferQueue} /> : active === 1 ? <div className="tools-panel"><button onClick={onOpenSettings}>Einstellungen…</button><button onClick={onMultiExec}>MultiExec</button></div> : <p className="empty-state">{panels[active].placeholder}</p>}
+        {active === 0 ? <SessionsPanel sessions={savedSessions} onConnect={onSavedConnect} onEdit={onEditSession} onReload={onReloadSessions} onStatus={onStatus} /> : active === 3 ? (tab?.kind === "telnet" || tab?.kind === "serial") ? <p className="empty-state">Für Telnet/Seriell nicht verfügbar</p> : <FileBrowser onOpenFile={onOpenFile} key={tab?.id ?? "none"} tab={tab} settings={settings} onSettings={onSettings} onPath={onPath} onAccess={onAccess} onStatus={onStatus} transferQueue={transferQueue} /> : active === 1 ? <div className="tools-panel" role="menu" aria-label="Tools">{toolItems.length ? toolItems.map(item => item.separator ? <hr key={item.action} /> : item.heading ? <div key={item.action} className="tools-heading">{item.label}</div> : <button key={item.action} role="menuitem" disabled={item.disabled} title={item.tooltip ?? item.shortcut} onClick={() => onToolAction?.(item.action)}>{toolIcons[item.action] ? <Icon name={toolIcons[item.action]!} /> : <span className="tools-icon-space" />}<span className="tools-label">{item.label}</span>{item.checked && <span className="tools-check" aria-label="aktiv">✓</span>}</button>) : <><button onClick={onOpenSettings}>Einstellungen…</button><button onClick={onMultiExec}>MultiExec</button></>}</div> : <p className="empty-state">{panels[active].placeholder}</p>}
       </section>
     </div>
     <ResizeGrip className="sidebar-resize" label="Seitenpanel-Breite" value={width} min={260} max={Math.max(260, windowWidth * .6)} onResize={resize} onAuto={() => resize(DEFAULT_PANEL_WIDTH)} />
