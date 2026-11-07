@@ -1,5 +1,6 @@
 import { connectionTitle, connectionStatus } from "./lib/connection";
 import { defaultSerial } from "./lib/sessions";
+import { tuxTestEvent } from "./components/TuxOverlay";
 import { TunnelDialog, TunnelConfirmDialog } from "./components/TunnelDialog";
 import { isLoopback, type Tunnel, type TunnelStatus } from "./lib/tunnels";
 import { listen } from "@tauri-apps/api/event";
@@ -548,6 +549,7 @@ export default function App() {
       case "tabClose": changeSettings({ ...settings, tabClose: !settings.tabClose }); break;
       case "single": if (!multiExec) changeSettings({ ...settings, splitMode: "single" }); break;
       case "ascii": case "ports": case "keygen": setTool(name); break;
+      case "tux": setTimeout(() => window.dispatchEvent(new Event(tuxTestEvent)), 100); break;
       case "local": openTab("local"); break;
       case "wsl": if (hasWsl) openTab("wsl"); break;
       case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Quick connect"]')?.focus()); break;
