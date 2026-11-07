@@ -5,9 +5,8 @@
 .monitor-tooltip pre { font: 12px monospace; margin: 4px 0; white-space: pre; }
 .monitor-tooltip table { font: 12px monospace; border-spacing: 12px 3px; }
 .monitor-tooltip td:last-child { text-align: right; }
-.monitor-distro { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; color: white; font-weight: bold; }
-.monitor-distro.debian { background: #c52344; }.monitor-distro.ubuntu { background: #e95420; }.monitor-distro.alpine { background: #087bab; }
-.monitor-tux { width: 16px; height: 16px; }
+.monitor-distro { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; color: white; font-weight: bold; font-size: 10px; flex: none; }
+.monitor-tux { width: 16px; height: 16px; object-fit: contain; flex: none; }
 .monitor-history { width: 56px; height: 16px; fill: #50b95b; background: #000; border: 1px solid var(--border, #555); box-sizing: border-box; }
 .monitor-disks { display: flex; flex: none; align-items: center; gap: 12px; white-space: nowrap; }
 .monitor-disk { display: inline-flex; }

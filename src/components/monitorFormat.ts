@@ -26,7 +26,22 @@ export function fittingCount(widths: number[], available: number, more = 44): nu
   }
   return widths.length;
 }
-export const distro = (id: string | null) => ["debian", "ubuntu", "alpine"].includes(id ?? "") ? id! : "tux";
+/** Letter badges (no logos) for distributions; only Debian has an allowed open-use logo. */
+export const distroBadges: Record<string, [letter: string, color: string]> = {
+  debian: ["D", "#a80030"], ubuntu: ["U", "#e95420"], alpine: ["A", "#0d597f"], fedora: ["F", "#51a2da"], arch: ["A", "#1793d1"],
+  centos: ["C", "#932279"], rocky: ["R", "#10b981"], almalinux: ["A", "#0f4266"], opensuse: ["S", "#73ba25"], linuxmint: ["M", "#87cf3e"],
+  raspbian: ["R", "#c51a4a"], gentoo: ["G", "#54487a"], kali: ["K", "#367bf0"], manjaro: ["M", "#35bf5c"], nixos: ["N", "#5277c3"],
+  rhel: ["R", "#cc0000"], amzn: ["A", "#ff9900"], pop: ["P", "#48b9c7"], void: ["V", "#478061"], slackware: ["S", "#4d4d8f"],
+};
+const aliases: Record<string, string> = { "opensuse-leap": "opensuse", "opensuse-tumbleweed": "opensuse", sles: "opensuse", suse: "opensuse", archarm: "arch", endeavouros: "arch", ol: "rhel" };
+/** Distribution key from os-release ID, falling back to ID_LIKE (e.g. Pop!_OS -> pop, unknown Ubuntu flavour -> ubuntu); "tux" when unknown. */
+export function distro(id: string | null, idLike: string | null = null): string {
+  for (const candidate of [id ?? "", ...(idLike ?? "").split(/\s+/)]) {
+    const key = aliases[candidate.toLowerCase()] ?? candidate.toLowerCase();
+    if (key in distroBadges) return key;
+  }
+  return "tux";
+}
 export const history = (values: number[], n: number) => [...values, Math.max(0, Math.min(100, n))].slice(-60);
 export interface Disk { device: string; mount: string; usedPercent: number; sizeBytes: number; usedBytes: number; freeBytes: number }
 export function dfTable(disks: Disk[]) { const rows = [["Dateisystem", "Größe", "Belegt", "Frei", "Belegt%", "Eingehängt auf"], ...disks.map(d => [d.device, size(d.sizeBytes), size(d.usedBytes), size(d.freeBytes), `${d.usedPercent}%`, d.mount])]; const widths = rows[0].map((_, i) => Math.max(...rows.map(r => r[i].length))); return rows.map(r => r.map((v, i) => i > 0 && i < 5 ? v.padStart(widths[i]) : v.padEnd(widths[i])).join("  ").trimEnd()).join("\n"); }

@@ -36,6 +36,7 @@ pub struct MonitorSample {
     version: Option<String>,
     os_name: Option<String>,
     os_id: Option<String>,
+    os_id_like: Option<String>,
     cpu_cores: Option<u32>,
     load: Vec<f64>,
     cpu_parts: Vec<f32>,
@@ -213,6 +214,7 @@ fn parse(text: &str) -> Option<Snapshot> {
                 .then(|| section(text, "VERSION").into()),
             os_name: os("PRETTY_NAME"),
             os_id: os("ID"),
+            os_id_like: os("ID_LIKE"),
             cpu_cores: section(text, "CPUS").trim().parse().ok(),
             load: section(text, "LOAD")
                 .split_whitespace()
@@ -461,6 +463,7 @@ mod tests {
         assert_eq!(next.sample.interfaces[0].tx_rate, Some(100));
         assert_eq!(next.sample.cpu_cores, Some(4));
         assert_eq!(next.sample.os_id.as_deref(), Some("debian"));
+        assert!(next.sample.os_id_like.is_none());
         assert_eq!(next.sample.os_name.as_deref(), Some("Debian GNU/Linux"));
         assert_eq!(
             next.sample.version.as_deref(),
