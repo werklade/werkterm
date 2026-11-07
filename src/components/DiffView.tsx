@@ -9,11 +9,12 @@ import { selectedTheme, type Settings } from "../lib/settings";
 import { luminance, parseColor } from "../lib/colorCodes";
 import { emojiFallback } from "../lib/terminalThemes";
 import { languageFromShebang } from "../lib/editorLanguage";
-import { diffConfig, diffError, loadDiffPair, sourceLabel, type DiffPair, type DiffSource } from "../lib/diff";
+import { diffConfig, diffError, loadDiffPair, sourceLabel, whitespaceAvailable, type DiffPair, type DiffSource } from "../lib/diff";
 import "./DiffView.css";
 export default function DiffView({ pair: initial, settings, onOpen }: { pair: DiffPair; settings: Settings; onOpen(source: DiffSource): void }) {
   const [pair, setPair] = useState(initial), [ignore, setIgnore] = useState(false), [collapse, setCollapse] = useState(false);
   const [count, setCount] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const canIgnore = whitespaceAvailable(pair.documents.map(document => document.size));
   const host = useRef<HTMLDivElement>(null), merge = useRef<MergeView | null>(null), alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
@@ -33,7 +34,7 @@ export default function DiffView({ pair: initial, settings, onOpen }: { pair: Di
     const view = new MergeView({ parent: host.current,
       a: { doc: pair.documents[0].text, extensions: [...extensions, compartments[0].of([])] },
       b: { doc: pair.documents[1].text, extensions: [...extensions, compartments[1].of([])] },
-      diffConfig: diffConfig(ignore), collapseUnchanged: collapse ? { margin: 3, minSize: 4 } : undefined });
+      diffConfig: diffConfig(ignore && canIgnore), collapseUnchanged: collapse ? { margin: 3, minSize: 4 } : undefined });
     merge.current = view; setCount(view.chunks.length);
     let disposed = false;
     pair.documents.forEach((document, index) => {
@@ -43,7 +44,7 @@ export default function DiffView({ pair: initial, settings, onOpen }: { pair: Di
       }).catch(() => { /* Plain text remains usable if optional highlighting cannot load. */ });
     });
     return () => { disposed = true; merge.current = null; view.destroy(); };
-  }, [pair, settings, ignore, collapse]);
+  }, [pair, settings, ignore, collapse, canIgnore]);
   const navigate = (next: boolean) => { const m = merge.current; if (!m) return; const view = m.b.hasFocus ? m.b : m.a; (next ? goToNextChunk : goToPreviousChunk)(view); view.focus(); };
   const reload = async () => {
     if (busy) return; setBusy(true); setError("");
@@ -54,7 +55,7 @@ export default function DiffView({ pair: initial, settings, onOpen }: { pair: Di
   return <section className="diff-view" aria-label="Dateivergleich">
     <div className="diff-toolbar" role="toolbar" aria-label="Vergleichswerkzeuge">
       <button onClick={() => navigate(false)} disabled={!count}>Vorherige Änderung</button><button onClick={() => navigate(true)} disabled={!count}>Nächste Änderung</button>
-      <label><input type="checkbox" checked={ignore} onChange={e => setIgnore(e.target.checked)} />Leerzeichen ignorieren</label>
+      <label title={canIgnore ? undefined : "Bei Dateien über 1 MB nicht verfügbar"}><input type="checkbox" disabled={!canIgnore} checked={ignore && canIgnore} onChange={e => setIgnore(e.target.checked)} />Leerzeichen ignorieren</label>
       <label><input type="checkbox" checked={collapse} onChange={e => setCollapse(e.target.checked)} />Unveränderte einklappen</label>
       <button disabled={busy} onClick={() => setPair(p => ({ sources: [p.sources[1], p.sources[0]], documents: [p.documents[1], p.documents[0]] }))}>Seiten tauschen</button>
       <button disabled={busy} onClick={() => void reload()}>Neu laden</button><span role="status">{count} Unterschiede{count === 0 ? " · Dateien sind identisch" : ""}</span>

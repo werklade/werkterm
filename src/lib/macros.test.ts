@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { escapeText, unescapeText, recordInput, parseShortcut, shortcutFromEvent, shortcutConflict, macroTargets, playbackPlan, runPlayback, pause, type Macro, type Recording } from "./macros";
+import { escapeText, unescapeText, recordInput, parseShortcut, shortcutFromEvent, shortcutConflict, macroTargets, playbackPlan, runPlayback, pause, type Macro, type Recording, type PlayStep } from "./macros";
 
 const base: Recording = { tabId: 1, steps: [], last: null, pauses: false, count: 0 };
 describe("macro recording", () => {
@@ -46,6 +46,65 @@ describe("macro shortcuts", () => {
   });
 });
 describe("macro playback", () => {
+  it("drops sent values before waiting and discards unsent values immediately on abort", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const first = { type: "text" as const, text: "sent secret" };
+      const last = { type: "text" as const, text: "unsent secret" };
+      const plan: PlayStep[] = [first, { type: "wait", ms: 60000 }, last];
+      const send = vi.fn();
+      const running = runPlayback(plan, controller.signal, () => true, send);
+      expect(first.text).toBe("");
+      await vi.advanceTimersByTimeAsync(1);
+      controller.abort();
+      expect(last.text).toBe("");
+      expect(plan).toEqual([]);
+      expect(await running).toBe(false);
+      expect(send).toHaveBeenCalledExactlyOnceWith("sent secret");
+    } finally { vi.useRealTimers(); }
+  });
+  it("clears the entire plan if a sender throws or the target closes", async () => {
+    for (const valid of [true, false]) {
+      const first = { type: "text" as const, text: "secret" };
+      const last = { type: "text" as const, text: "later secret" };
+      const plan = [first, last];
+      const running = runPlayback(plan, new AbortController().signal, () => valid, () => { throw new Error("send failed"); });
+      if (valid) await expect(running).rejects.toThrow("send failed");
+      else expect(await running).toBe(false);
+      expect(first.text).toBe(""); expect(last.text).toBe(""); expect(plan).toEqual([]);
+    }
+  });
+  it("discards previously collected answers on prompt cancellation, rejection and abort", async () => {
+    const prompt = { type: "prompt" as const, label: "Secret", secret: true };
+    for (const outcome of ["cancel", "reject", "abort"]) {
+      const controller = new AbortController();
+      const captured: { type: "text"; text: string }[] = [];
+      const original = Array.prototype.push;
+      Array.prototype.push = function (this: unknown[], ...items: unknown[]) {
+        for (const item of items) if (item && typeof item === "object" && "text" in item && item.text === "collected secret") {
+          original.call(captured, item);
+        }
+        return original.apply(this, items);
+      };
+      try {
+        let calls = 0;
+        const running = playbackPlan([prompt, prompt], async () => {
+          if (++calls === 1) return "collected secret";
+          if (outcome === "reject") throw new Error("prompt failed");
+          if (outcome === "abort") {
+            controller.abort();
+            expect(captured[0].text).toBe("");
+          }
+          return null;
+        }, controller.signal);
+        if (outcome === "reject") await expect(running).rejects.toThrow("prompt failed");
+        else expect(await running).toBeNull();
+      } finally { Array.prototype.push = original; }
+      expect(captured).toHaveLength(1);
+      expect(captured[0].text).toBe("");
+    }
+  });
   it("resolves all prompts before any plan is returned", async () => {
     const ask = vi.fn().mockResolvedValueOnce("user").mockResolvedValueOnce("secret");
     const steps = [{ type: "text" as const, text: "login " }, { type: "prompt" as const, label: "Name", secret: false }, { type: "wait" as const, ms: 123 }, { type: "prompt" as const, label: "Password", secret: true }];

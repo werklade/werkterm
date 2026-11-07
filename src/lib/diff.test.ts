@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { diffTitle, normalizedWhitespace, differenceCount, rememberedSource, comparisonSources, whitespaceDiff, loadDiffDocument, diffError } from "./diff";
+import { diffTitle, normalizedWhitespace, differenceCount, rememberedSource, comparisonSources, whitespaceDiff, loadDiffDocument, diffError, whitespaceAvailable } from "./diff";
 import type { DiffSource } from "./diff";
 const source: DiffSource = { tab: { id: 7, kind: "ssh", sessionId: 9, title: "Server", browserPath: "", exited: false }, path: "/etc/a" };
 describe("file comparison", () => {
@@ -17,10 +17,16 @@ describe("file comparison", () => {
   });
   it("builds titles for Windows and POSIX paths", () => expect(diffTitle("C:\\dir\\a.ts", "/etc/b")).toBe("Vergleich: a.ts ↔ b"));
   it("normalizes horizontal whitespace while retaining lines and offsets", () => {
-    expect(normalizedWhitespace(" a\t b\n")).toEqual({ value: "ab\n", positions: [1, 4, 5, 6] });
+    expect(normalizedWhitespace(" a\t b\n")).toEqual({ value: "ab\n", positions: new Uint32Array([1, 4, 5, 6]) });
     expect(whitespaceDiff(" a b ", "ab")).toEqual([]);
     const changes = whitespaceDiff(" a x", "a y");
     expect(changes[0].fromA).toBe(3); expect(changes[0].fromB).toBe(2);
+  });
+  it("allows whitespace filtering only up to one MiB on both sides", () => {
+    expect(whitespaceAvailable([1024 * 1024, 12])).toBe(true);
+    expect(whitespaceAvailable([1024 * 1024 + 1, 12])).toBe(false);
+    expect(whitespaceAvailable([12, 1024 * 1024 + 1])).toBe(false);
+    expect(normalizedWhitespace("😀 \tx\n").positions).toEqual(new Uint32Array([0, 1, 4, 5, 6]));
   });
   it("counts changed chunks consistently and ignores EOL differences", () => {
     expect(differenceCount("a\r\nb\r", "a\nb\n")).toBe(0);
@@ -35,6 +41,12 @@ describe("file comparison", () => {
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 describe("comparison loading", () => {
+  it("preserves a load error when closing also fails", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ docId: 44, size: 5 * 1024 * 1024 + 1, text: "" }).mockRejectedValueOnce("close failed");
+    await expect(loadDiffDocument(source)).rejects.toBe("TOO_LARGE:");
+    vi.mocked(invoke).mockResolvedValueOnce({ docId: 45, size: 1, text: "x" }).mockRejectedValueOnce("close failed");
+    await expect(loadDiffDocument(source)).rejects.toBe("close failed");
+  });
   it("releases the editor handle immediately, including oversized files", async () => {
     const call = vi.mocked(invoke);
     call.mockResolvedValueOnce({ docId: 42, size: 12, text: "a\r\nb" }).mockResolvedValueOnce(undefined);

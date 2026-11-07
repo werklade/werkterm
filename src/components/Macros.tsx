@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useModal } from "./useModal";
 import { SecretDialog } from "./SecretDialog";
-import { escapeText, unescapeText, newMacro, recordInput, shortcutConflict, shortcutFromEvent, parseShortcut, macroTargets, playbackPlan, runPlayback, type Macro, type MacroStep, type Recording } from "../lib/macros";
+import { escapeText, unescapeText, newMacro, recordInput, shortcutConflict, shortcutFromEvent, parseShortcut, macroTargets, playbackPlan, runPlayback, clearPlayback, type Macro, type MacroStep, type Recording } from "../lib/macros";
 import { terminalWriters, type Recipient } from "../lib/multiExec";
 import "./Macros.css";
 
@@ -100,7 +100,7 @@ export function useMacros(options: Options) {
         text => { for (const id of targets) terminalWriters.get(id)?.(text, false); });
       latest.current.report(completed ? "Makro abgespielt" : "Makro abgebrochen");
     } catch { latest.current.report("Makro konnte nicht abgespielt werden"); }
-    finally { if (plan) { for (const step of plan) if (step.type === "text") step.text = ""; plan.length = 0; } playback.current = null; setPlaying(false); setQuestion(null); }
+    finally { if (plan) clearPlayback(plan); playback.current = null; setPlaying(false); setQuestion(null); }
   };
   useEffect(() => {
     if (recordingRef.current && !options.recipients.some(t => t.id === recordingRef.current!.tabId && !t.exited)) stop();

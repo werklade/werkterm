@@ -69,18 +69,32 @@ export function shortcutConflict(value: string, items: Macro[], id: string): str
 
 export const macroTargets = (focused: number | null, recipients: Recipient[], multiExec: boolean): number[] => focused === null ? [] : multiExec ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
 export type PlayStep = Exclude<MacroStep, { type: "prompt" }>;
+export function clearPlayback(plan: PlayStep[]) {
+  for (const step of plan) if (step.type === "text") step.text = "";
+  plan.length = 0;
+}
 /** Resolve every prompt before returning a plan; cancellation yields no sendable steps. */
 export async function playbackPlan(steps: MacroStep[], ask: (step: Extract<MacroStep, { type: "prompt" }>) => Promise<string | null>, signal: AbortSignal): Promise<PlayStep[] | null> {
   const plan: PlayStep[] = [];
-  for (const step of steps) {
-    if (signal.aborted) return null;
-    if (step.type === "prompt") {
-      const value = await ask(step);
-      if (value === null || signal.aborted) return null;
-      plan.push({ type: "text", text: value });
-    } else plan.push({ ...step });
+  let completed = false;
+  const discard = () => clearPlayback(plan);
+  signal.addEventListener("abort", discard, { once: true });
+  try {
+    for (const step of steps) {
+      if (signal.aborted) return null;
+      if (step.type === "prompt") {
+        let value = await ask(step);
+        if (value === null || signal.aborted) { value = null; return null; }
+        plan.push({ type: "text", text: value });
+        value = null;
+      } else plan.push({ ...step });
+    }
+    completed = !signal.aborted;
+    return completed ? plan : null;
+  } finally {
+    signal.removeEventListener("abort", discard);
+    if (!completed) discard();
   }
-  return signal.aborted ? null : plan;
 }
 export function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise(resolve => {
@@ -93,10 +107,20 @@ export function pause(ms: number, signal: AbortSignal): Promise<void> {
 /** The caller owns a fixed target snapshot. Revalidate before every send after a wait. */
 export async function runPlayback(plan: PlayStep[] | null, signal: AbortSignal, valid: () => boolean, send: (text: string) => void): Promise<boolean> {
   if (!plan) return false;
-  for (const step of plan) {
-    if (signal.aborted || !valid()) return false;
-    if (step.type === "wait") await pause(step.ms, signal);
-    else { send(step.text); await pause(0, signal); }
+  const discard = () => clearPlayback(plan);
+  signal.addEventListener("abort", discard, { once: true });
+  try {
+    for (const step of plan) {
+      if (signal.aborted || !valid()) return false;
+      if (step.type === "wait") await pause(step.ms, signal);
+      else {
+        try { send(step.text); } finally { step.text = ""; }
+        await pause(0, signal);
+      }
+    }
+    return !signal.aborted && valid();
+  } finally {
+    signal.removeEventListener("abort", discard);
+    discard();
   }
-  return !signal.aborted && valid();
 }

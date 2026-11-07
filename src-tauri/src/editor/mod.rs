@@ -137,10 +137,42 @@ pub struct DocumentEntry {
 struct Documents {
     next_id: u32,
     entries: HashMap<u32, DocumentEntry>,
+    pending_deletions: Vec<PathBuf>,
+}
+impl Documents {
+    fn retry_deletions(&mut self) {
+        self.pending_deletions.retain(|path| {
+            fs::remove_file(path).is_err_and(|error| error.kind() != std::io::ErrorKind::NotFound)
+        });
+    }
+
+    fn close(&mut self, doc_id: u32) -> Result<(), String> {
+        self.retry_deletions();
+        let entry = self
+            .entries
+            .remove(&doc_id)
+            .ok_or("Dokument wurde nicht gefunden")?;
+        if let Some(path) = entry.cache_path {
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    self.pending_deletions.push(path);
+                    return Err(io_error(error));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 #[derive(Default)]
 pub struct EditorDocs {
     documents: Mutex<Documents>,
+}
+impl EditorDocs {
+    pub async fn retry_deletions(&self) {
+        self.documents.lock().await.retry_deletions();
+    }
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -526,20 +558,7 @@ pub async fn editor_reload(
 }
 #[tauri::command]
 pub async fn editor_close(docs: State<'_, Arc<EditorDocs>>, doc_id: u32) -> Result<(), String> {
-    let mut docs = docs.documents.lock().await;
-    let entry = docs
-        .entries
-        .get(&doc_id)
-        .ok_or("Dokument wurde nicht gefunden")?;
-    if let Some(path) = &entry.cache_path {
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(io_error(error)),
-        }
-    }
-    docs.entries.remove(&doc_id);
-    Ok(())
+    docs.documents.lock().await.close(doc_id)
 }
 #[tauri::command]
 pub async fn editor_save(
@@ -853,6 +872,45 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.dir);
         }
+    }
+    #[test]
+    fn close_releases_entry_and_retries_failed_cache_deletion() {
+        let file = TestFile::new();
+        let mut entry = file.entry();
+        entry.baseline = b"baseline to release".to_vec();
+        let cache = entry.cache_path.clone().unwrap();
+        // A directory reliably makes remove_file fail on Windows and Unix.
+        fs::create_dir(&cache).unwrap();
+        let mut docs = Documents::default();
+        docs.entries.insert(1, entry);
+        assert!(docs.close(1).is_err());
+        assert!(!docs.entries.contains_key(&1));
+        assert_eq!(docs.pending_deletions, vec![cache.clone()]);
+        docs.retry_deletions();
+        assert_eq!(docs.pending_deletions, vec![cache.clone()]);
+        fs::remove_dir(&cache).unwrap();
+        fs::write(&cache, b"retry").unwrap();
+        docs.entries.insert(2, file.entry());
+        docs.close(2).unwrap();
+        assert!(!cache.exists());
+        assert!(docs.pending_deletions.is_empty());
+        assert!(docs.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_retries_pending_cache_deletions() {
+        let file = TestFile::new();
+        let cache = file.dir.join("pending");
+        fs::write(&cache, b"retry").unwrap();
+        let docs = EditorDocs::default();
+        docs.documents
+            .lock()
+            .await
+            .pending_deletions
+            .push(cache.clone());
+        docs.retry_deletions().await;
+        assert!(!cache.exists());
+        assert!(docs.documents.lock().await.pending_deletions.is_empty());
     }
     #[tokio::test]
     async fn local_load_save_conflict_force_and_reload() {

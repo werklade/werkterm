@@ -8,11 +8,12 @@ export interface DiffPair { sources: [DiffSource, DiffSource]; documents: [Edito
 export const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
 export const diffTitle = (a: string, b: string) => `Vergleich: ${fileName(a)} ↔ ${fileName(b)}`;
 export const normalizeEol = (text: string) => text.replace(/\r\n?|\n/g, "\n");
+export const whitespaceAvailable = (sizes: readonly number[]) => sizes.every(size => size <= 1024 * 1024);
 export function normalizedWhitespace(text: string) {
-  const positions: number[] = []; let value = "";
-  for (let i = 0; i < text.length; i++) if (!/[^\S\n]/.test(text[i])) { positions.push(i); value += text[i]; }
-  positions.push(text.length);
-  return { value, positions };
+  const positions = new Uint32Array(text.length + 1); let value = "", count = 0;
+  for (let i = 0; i < text.length; i++) if (!/[^\S\n]/.test(text[i])) { positions[count++] = i; value += text[i]; }
+  positions[count++] = text.length;
+  return { value, positions: positions.subarray(0, count) };
 }
 /** Ignore horizontal whitespace via diffConfig.override, mapping normalized offsets
  * back to original documents. Newlines remain significant; display is never rewritten. */
@@ -42,10 +43,16 @@ export async function loadDiffDocument({ tab, path }: DiffSource): Promise<Edito
   if (tab.exited || (tab.kind === "ssh" && tab.sessionId === undefined)) throw new Error("SESSION_CLOSED:");
   const document = await (tab.kind === "ssh" ? invoke<EditorDocument>("editor_open_remote", { id: tab.sessionId, path }) :
     invoke<EditorDocument>("editor_open_local", { path, wslDistro: tab.kind === "wsl" ? tab.cwd?.host ?? null : null }));
+  let loaded = false;
   try {
     if (document.size > 5 * 1024 * 1024) throw "TOO_LARGE:";
-    return { ...document, text: normalizeEol(document.text) };
-  } finally { await invoke("editor_close", { docId: document.docId }); }
+    const result = { ...document, text: normalizeEol(document.text) };
+    loaded = true;
+    return result;
+  } finally {
+    try { await invoke("editor_close", { docId: document.docId }); }
+    catch (reason) { if (loaded) throw reason; }
+  }
 }
 export async function loadDiffPair(sources: [DiffSource, DiffSource]): Promise<DiffPair> {
   const documents: [EditorDocument, EditorDocument] = [await loadDiffDocument(sources[0]), await loadDiffDocument(sources[1])];

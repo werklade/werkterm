@@ -119,6 +119,8 @@ pub fn run() {
                 tauri::async_runtime::block_on(manager.stop_all());
                 telnet::stop_all();
                 session_log::stop_all();
+                let docs = app.state::<Arc<editor::EditorDocs>>();
+                tauri::async_runtime::block_on(docs.retry_deletions());
                 editor::clear_cache();
             }
         });
