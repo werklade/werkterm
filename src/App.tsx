@@ -1,3 +1,6 @@
+import { SplitLayout, paneStyle, useSplitRatios } from "./components/SplitLayout";
+import { assignPane, cleanPanes, paneCount, seedPanes, type SplitMode } from "./lib/split";
+import { ToolDialog } from "./components/ToolDialog";
 import { Home } from "./components/Home";
 import { createMenus } from "./lib/actions";
 import { recentList, lastTabsList, terminalDescriptors, type Recent, type LastTab } from "./lib/history";
@@ -62,6 +65,10 @@ function declinePrompt(prompt: SshPrompt) {
 }
 
 export default function App() {
+  const [tool, setTool] = useState<"ascii" | "ports" | "keygen" | null>(null);
+  const [panes, setPanes] = useState<(number | null)[]>([]);
+  const [focusedPane, setFocusedPane] = useState(0);
+  const [ratios, setRatios] = useSplitRatios();
   const [multiExec, setMultiExec] = useState(false);
   const beforeMultiExec = useRef<number | null>(null);
   const [unchecked, setUnchecked] = useState<Set<number>>(() => new Set());
@@ -430,6 +437,16 @@ export default function App() {
   };
   const action = (name: string) => {
     setTemporaryMenu(false);
+    if (name.startsWith("split:")) {
+      if (multiExec) return;
+      const mode = name.slice(6) as SplitMode;
+      if (!["columns", "rows", "quad"].includes(mode)) return;
+      changeSettings({ ...settings, splitMode: mode });
+      const initialPanes = seedPanes(tabs.filter(tab => tab.kind !== "editor").map(tab => tab.id), activeId, paneCount(mode));
+      setPanes(initialPanes);
+      if (activeId === null) setActiveId(initialPanes[0]);
+      setFocusedPane(0); setRatios({ x: 50, y: 50 }); return;
+    }
     if (name.startsWith("saved:")) { const session = savedSessions.find(s => s.id === name.slice(6)); if (session) connectSaved(session); return; }
     if (name.startsWith("bars:")) { changeSettings({ ...settings, compact: false, bars: name.slice(5) as Settings["bars"] }); return; }
     if (name.startsWith("size:")) { changeSettings({ ...settings, toolbarSize: name.slice(5) as Settings["toolbarSize"] }); return; }
@@ -440,7 +457,8 @@ export default function App() {
       case "left": case "right": changeSettings({ ...settings, sidebarRight: name === "right" }); break;
       case "tabNumbers": changeSettings({ ...settings, tabNumbers: !settings.tabNumbers }); break;
       case "tabClose": changeSettings({ ...settings, tabClose: !settings.tabClose }); break;
-      case "single": setMultiExec(false); break;
+      case "single": if (!multiExec) changeSettings({ ...settings, splitMode: "single" }); break;
+      case "ascii": case "ports": case "keygen": setTool(name); break;
       case "local": openTab("local"); break;
       case "wsl": if (hasWsl) openTab("wsl"); break;
       case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Quick connect"]')?.focus()); break;
@@ -469,6 +487,23 @@ export default function App() {
     }
   };
   const terminals = tabs.filter(tab => tab.kind !== "editor");
+  const splitVisible = !multiExec && settings.splitMode !== "single" && activeId !== 0 && activeTab?.kind !== "editor";
+  const terminalIds = terminals.map(tab => tab.id).join(",");
+  useEffect(() => {
+    if (settings.splitMode === "single") return;
+    const ids = terminalIds ? terminalIds.split(",").map(Number) : [];
+    setPanes(current => {
+      const count = paneCount(settings.splitMode);
+      let next = current.length ? cleanPanes(Array.from({ length: count }, (_, index) => current[index] ?? null), ids) : seedPanes(ids, activeId, count);
+      if (splitVisible && activeId !== null && !next.includes(activeId)) next = assignPane(next, Math.min(focusedPane, count - 1), activeId);
+      return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
+    });
+  }, [terminalIds, activeId, settings.splitMode, splitVisible, focusedPane]);
+  const assignSplit = (index: number, id: number | null) => {
+    setFocusedPane(index);
+    setPanes(current => assignPane(current, index, id));
+    setActiveId(id);
+  };
   const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor";
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
@@ -486,16 +521,19 @@ export default function App() {
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
       {sidebarVisible && <Sidebar onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
-        <TabBar showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={setActiveId} />
+        <TabBar showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} />
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={gridVisible || tab.id === activeId} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onExit={markExited} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
+          {splitVisible && <SplitLayout mode={settings.splitMode} panes={panes} terminals={terminals} focusedIndex={activeId !== null && panes.includes(activeId) ? panes.indexOf(activeId) : focusedPane} ratios={ratios} onRatios={setRatios} onAssign={assignSplit}
+            onFocus={index => { setFocusedPane(index); setActiveId(panes[index] ?? null); }}
+            onNew={index => { setFocusedPane(index); const id = nextId.current; openTab("local"); setPanes(current => assignPane(current, index, id)); }} />}
           <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
             return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView settings={settings} ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
@@ -511,6 +549,7 @@ export default function App() {
       if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data, true); });
       setPasteRequest(null);
     }} />}
+    {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
     {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}

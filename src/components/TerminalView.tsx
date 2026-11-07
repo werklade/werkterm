@@ -16,6 +16,8 @@ import { MonitorBar } from "./MonitorBar";
 
 interface Props {
   visible?: boolean;
+  paneStyle?: React.CSSProperties;
+  onFocusPane?: () => void;
   monitoringSession?: number;
   onInput?: (id: number, data: string, pasted: boolean) => void;
   gridFooter?: React.ReactNode;
@@ -39,7 +41,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
@@ -188,5 +190,5 @@ export function TerminalView({ visible, monitoringSession, onInput, gridFooter, 
 
   useEffect(() => { if (visible ?? active) { const frame = requestAnimationFrame(() => runtime.current?.fit.fit()); return () => cancelAnimationFrame(frame); } }, [visible, active, monitoringSession, gridFooter]);
 
-  return <section id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}><div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}</section>;
+  return <section style={paneStyle} onPointerDown={onFocusPane} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}><div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}</section>;
 }

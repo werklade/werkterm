@@ -20,6 +20,13 @@ describe("settings validation and migration", () => {
     expect(loadSettings()).toEqual(defaultSettings);
     expect(() => saveSettings(defaultSettings)).not.toThrow();
   });
+  it("persists and validates the selected split layout", () => {
+    let stored = "";
+    vi.stubGlobal("localStorage", { getItem: () => stored, setItem: (_key: string, value: string) => { stored = value; } });
+    saveSettings({ ...defaultSettings, splitMode: "quad" });
+    expect(loadSettings().splitMode).toBe("quad");
+    for (const value of [null, 4, "invalid"]) expect(normalizeSettings({ splitMode: value }).splitMode).toBe("single");
+  });
   it("validates and preserves imported themes", () => {
     const settings = normalizeSettings({ theme: "MobaXterm (importiert)", importedTheme: { red: "#123abc", blue: "invalid", background: "#eeeeee" } });
     expect(selectedTheme(settings).red).toBe("#123abc");

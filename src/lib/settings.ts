@@ -1,5 +1,6 @@
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 export interface Settings {
+  splitMode: "single" | "columns" | "rows" | "quad";
   bars: "menu" | "toolbar" | "both"; toolbarSize: "small" | "standard" | "labels";
   compact: boolean; sidebarVisible: boolean; sidebarRight: boolean; tabNumbers: boolean; tabClose: boolean;
   followTerminalFolder: boolean; shellIntegration: boolean; sshPromptCommand: boolean; monitoring: boolean;
@@ -8,6 +9,7 @@ export interface Settings {
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
 }
 export const defaultSettings: Settings = {
+  splitMode: "single",
   bars: "both", toolbarSize: "labels", compact: false, sidebarVisible: true, sidebarRight: false, tabNumbers: false, tabClose: true,
   followTerminalFolder: true, shellIntegration: true, sshPromptCommand: true, monitoring: true,
   fontFamily: '"Cascadia Mono", "DejaVu Sans Mono", monospace', fontSize: 14, lineHeight: 1,
@@ -22,6 +24,7 @@ export function normalizeSettings(input: unknown): Settings {
   for (const [key, min, max] of [["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
     const value = v[key]; if (typeof value === "number" && Number.isFinite(value)) result[key] = Math.max(min, Math.min(max, key === "lineHeight" ? value : Math.round(value)));
   }
+  if (v.splitMode === "single" || v.splitMode === "columns" || v.splitMode === "rows" || v.splitMode === "quad") result.splitMode = v.splitMode;
   if (v.bars === "menu" || v.bars === "toolbar" || v.bars === "both") result.bars = v.bars;
   if (v.toolbarSize === "small" || v.toolbarSize === "standard" || v.toolbarSize === "labels") result.toolbarSize = v.toolbarSize;
   if (typeof v.fontFamily === "string" && v.fontFamily.trim()) result.fontFamily = v.fontFamily.slice(0, 500);

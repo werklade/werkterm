@@ -50,7 +50,13 @@ describe("View preferences and shared action definitions", () => {
     expect(definitions().find(m => m.label === "Sessions")?.items[0]).toMatchObject({ label: "Work/Servers", heading: true });
     expect(definitions().flatMap(m => m.items).some(i => i.action === "root")).toBe(false);
     expect(definitions(true).flatMap(m => m.items).some(i => i.action === "root")).toBe(true);
-    expect(definitions().find(m => m.label === "Split")?.items.filter(i => !i.disabled).map(i => i.action)).toEqual(["single"]);
+    expect(definitions().find(m => m.label === "Split")?.items.filter(i => !i.disabled).map(i => i.action)).toEqual([]);
+  });
+  it("activates all split layouts and local tools outside MultiExec", () => {
+    const menus = createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 1, multiExec: false, isLinux: true });
+    expect(menus.find(menu => menu.label === "Split")?.items.filter(item => !item.disabled).map(item => item.action)).toEqual(["single", "split:columns", "split:rows", "split:quad"]);
+    for (const action of ["ascii", "ports", "keygen"]) expect(menus.flatMap(menu => menu.items).find(item => item.action === action)?.disabled).not.toBe(true);
+    expect(menus.flatMap(menu => menu.items).filter(item => ["ascii", "ports", "keygen"].includes(item.action))).toHaveLength(3);
   });
   it("renders toolbar order, pressed state, placeholders and shell tooltip", () => {
     const html = renderToStaticMarkup(<Toolbar hasWsl={false} menus={definitions()} shellName="zsh" multiExec={true} onAction={noop}/>);

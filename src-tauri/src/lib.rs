@@ -1,6 +1,8 @@
 mod commands;
 pub mod editor;
+mod keygen;
 pub mod local_fs;
+mod local_ports;
 pub mod pty;
 pub mod secrets;
 pub mod sessions;
@@ -12,6 +14,7 @@ use std::sync::Arc;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Arc::new(keygen::KeygenState::default()))
         .manage(Arc::new(editor::EditorDocs::default()))
         .setup(|app| {
             sessions::migrate_config(app.handle());
@@ -24,6 +27,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            keygen::keygen_begin,
+            keygen::keygen_generate,
+            keygen::keygen_save,
+            keygen::keygen_close,
+            local_ports::local_ports,
             sessions::recent::recent_list,
             sessions::recent::recent_add,
             sessions::recent::recent_clear,
