@@ -145,7 +145,8 @@ impl SshManager {
         self.session(id)
             .await?
             .sftp
-            .clone()
+            .get()
+            .cloned()
             .ok_or_else(|| "Nur mit SFTP verfügbar".into())
     }
     async fn begin_transfer(&self, transfer_id: u32) -> Result<watch::Receiver<bool>, String> {

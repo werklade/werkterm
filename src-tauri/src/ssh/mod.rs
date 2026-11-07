@@ -234,7 +234,7 @@ struct Session {
     socket: SetupSocket,
     handle: Arc<Handle>,
     writer: Arc<ChannelWriteHalf<client::Msg>>,
-    sftp: Option<Arc<SftpSession>>,
+    sftp: std::sync::OnceLock<Arc<SftpSession>>,
     stop: Mutex<Option<oneshot::Sender<()>>>,
     done: tokio::sync::Notify,
     finished: std::sync::atomic::AtomicBool,
@@ -605,6 +605,32 @@ fn terminal_message(
     true
 }
 
+trait TerminalReader {
+    async fn receive(&mut self) -> Option<ChannelMsg>;
+}
+impl TerminalReader for russh::ChannelReadHalf {
+    async fn receive(&mut self) -> Option<ChannelMsg> {
+        self.wait().await
+    }
+}
+async fn pump_terminal(
+    reader: &mut impl TerminalReader,
+    stopped: &mut oneshot::Receiver<()>,
+    on_data: &mut (dyn FnMut(Vec<u8>) + Send),
+    replies: &mpsc::UnboundedSender<bool>,
+) -> Option<u32> {
+    let mut code = None;
+    loop {
+        tokio::select! {
+            _ = &mut *stopped => break,
+            message = reader.receive() => {
+                if !terminal_message(message, on_data, replies, &mut code) { break; }
+            }
+        }
+    }
+    code
+}
+
 impl SshManager {
     #[allow(clippy::too_many_arguments)]
     pub async fn connect(
@@ -823,11 +849,123 @@ impl SshManager {
             .await;
             return Err(error);
         }
-        let setup = async {
-            // Resolve the file-transfer mode before starting a shell that may emit
-            // enough login output to fill its bounded channel.
+        let setup = phase(
+            async { handle.channel_open_session().await.map_err(ssh_error) },
+            canceled,
+            prompts,
+        )
+        .await;
+        let terminal = match setup {
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(socket) = &setup_socket.0 {
+                    let _ = socket.shutdown(std::net::Shutdown::Both);
+                }
+                let _ = tokio::time::timeout(
+                    PHASE_TIMEOUT,
+                    handle.disconnect(Disconnect::ByApplication, "", ""),
+                )
+                .await;
+                return Err(error);
+            }
+        };
+        let id = self
+            .next_id
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| "SSH-Sitzungsnummern ausgeschöpft")?;
+        let (mut reader, writer) = terminal.split();
+        let (stop, mut stopped) = oneshot::channel();
+        let (replies, mut responses) = mpsc::unbounded_channel();
+        let session = Arc::new(Session {
+            socket: SetupSocket(setup_socket.0.take()),
+            handle: Arc::new(handle),
+            writer: Arc::new(writer),
+            sftp: std::sync::OnceLock::new(),
+            stop: Mutex::new(Some(stop)),
+            done: tokio::sync::Notify::new(),
+            finished: std::sync::atomic::AtomicBool::new(false),
+        });
+        let (registered, registration) = oneshot::channel();
+        let reader_session = session.clone();
+        let manager = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let session = reader_session;
+            let code = pump_terminal(&mut reader, &mut stopped, on_data.as_mut(), &replies).await;
+            // Wake setup immediately if the shell ends while SFTP is negotiated.
+            drop(replies);
+            let _ = tokio::time::timeout(PHASE_TIMEOUT, session.writer.close()).await;
+            let _ = tokio::time::timeout(
+                PHASE_TIMEOUT,
+                session.handle.disconnect(Disconnect::ByApplication, "", ""),
+            )
+            .await;
+            if let Some(socket) = &session.socket.0 {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+            // Read immediately, but do not remove a session before publication.
+            if registration.await == Ok(true)
+                && let Some(manager) = manager.upgrade()
+            {
+                manager.sessions.lock().await.remove(&id);
+            }
+            on_exit(code);
+            session.finished.store(true, Ordering::Release);
+            session.done.notify_waiters();
+        });
+        // The reader is already consuming data before any PTY/shell request.
+        let requests = async {
+            phase(
+                async {
+                    session
+                        .writer
+                        .request_pty(
+                            true,
+                            "xterm-256color",
+                            u32::from(cols),
+                            u32::from(rows),
+                            0,
+                            0,
+                            &[],
+                        )
+                        .await
+                        .map_err(ssh_error)?;
+                    if responses.recv().await == Some(true) {
+                        Ok(())
+                    } else {
+                        Err("SSH-Kanalanforderung abgelehnt".into())
+                    }
+                },
+                canceled,
+                prompts,
+            )
+            .await?;
+            phase(
+                async {
+                    session
+                        .writer
+                        .request_shell(true)
+                        .await
+                        .map_err(ssh_error)?;
+                    if responses.recv().await == Some(true) {
+                        Ok(())
+                    } else {
+                        Err("SSH-Kanalanforderung abgelehnt".into())
+                    }
+                },
+                canceled,
+                prompts,
+            )
+            .await?;
+            // The shell is active and its independent pump is already draining login
+            // output. SFTP must be the second session channel for PAM login messages.
             let sftp = match phase(
-                async { handle.channel_open_session().await.map_err(ssh_error) },
+                async {
+                    session
+                        .handle
+                        .channel_open_session()
+                        .await
+                        .map_err(ssh_error)
+                },
                 canceled,
                 prompts,
             )
@@ -881,123 +1019,13 @@ impl SshManager {
                     None
                 }
             };
-            let terminal = phase(
-                async { handle.channel_open_session().await.map_err(ssh_error) },
-                canceled,
-                prompts,
-            )
-            .await?;
-            Ok::<_, String>((terminal, sftp))
-        }
-        .await;
-        let (terminal, sftp) = match setup {
-            Ok(value) => value,
-            Err(error) => {
-                if let Some(socket) = &setup_socket.0 {
-                    let _ = socket.shutdown(std::net::Shutdown::Both);
-                }
-                let _ = tokio::time::timeout(
-                    PHASE_TIMEOUT,
-                    handle.disconnect(Disconnect::ByApplication, "", ""),
-                )
-                .await;
-                return Err(error);
+            if let Some(sftp) = sftp {
+                let _ = session.sftp.set(sftp);
             }
-        };
-        let id = self
-            .next_id
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map_err(|_| "SSH-Sitzungsnummern ausgeschöpft")?;
-        let (mut reader, writer) = terminal.split();
-        let (stop, mut stopped) = oneshot::channel();
-        let (replies, mut responses) = mpsc::unbounded_channel();
-        let mode = if sftp.is_some() { "SFTP" } else { "exec" }.to_owned();
-        let session = Arc::new(Session {
-            socket: SetupSocket(setup_socket.0.take()),
-            handle: Arc::new(handle),
-            writer: Arc::new(writer),
-            sftp,
-            stop: Mutex::new(Some(stop)),
-            done: tokio::sync::Notify::new(),
-            finished: std::sync::atomic::AtomicBool::new(false),
-        });
-        let (registered, registration) = oneshot::channel();
-        let reader_session = session.clone();
-        let manager = Arc::downgrade(self);
-        tokio::spawn(async move {
-            let session = reader_session;
-            let mut code = None;
-            loop {
-                tokio::select! {
-                    _ = &mut stopped => {let _=tokio::time::timeout(PHASE_TIMEOUT, session.writer.close()).await;break;},
-                    message = reader.wait() => {
-                        if !terminal_message(message, on_data.as_mut(), &replies, &mut code) { break; }
-                    }
-                }
+            if responses.is_closed() {
+                return Err("SSH-Terminal während des Verbindungsaufbaus geschlossen".into());
             }
-            let _ = tokio::time::timeout(
-                PHASE_TIMEOUT,
-                session.handle.disconnect(Disconnect::ByApplication, "", ""),
-            )
-            .await;
-            if let Some(socket) = &session.socket.0 {
-                let _ = socket.shutdown(std::net::Shutdown::Both);
-            }
-            // Read immediately, but do not remove a session before publication.
-            drop(replies);
-            if registration.await == Ok(true)
-                && let Some(manager) = manager.upgrade()
-            {
-                manager.sessions.lock().await.remove(&id);
-            }
-            on_exit(code);
-            session.finished.store(true, Ordering::Release);
-            session.done.notify_waiters();
-        });
-        // The reader is already consuming data before any PTY/shell request.
-        let requests = async {
-            phase(
-                async {
-                    session
-                        .writer
-                        .request_pty(
-                            true,
-                            "xterm-256color",
-                            u32::from(cols),
-                            u32::from(rows),
-                            0,
-                            0,
-                            &[],
-                        )
-                        .await
-                        .map_err(ssh_error)?;
-                    if responses.recv().await == Some(true) {
-                        Ok(())
-                    } else {
-                        Err("SSH-Kanalanforderung abgelehnt".into())
-                    }
-                },
-                canceled,
-                prompts,
-            )
-            .await?;
-            phase(
-                async {
-                    session
-                        .writer
-                        .request_shell(true)
-                        .await
-                        .map_err(ssh_error)?;
-                    if responses.recv().await == Some(true) {
-                        Ok(())
-                    } else {
-                        Err("SSH-Kanalanforderung abgelehnt".into())
-                    }
-                },
-                canceled,
-                prompts,
-            )
-            .await
+            Ok::<_, String>(())
         }
         .await;
         if let Err(error) = requests {
@@ -1016,6 +1044,12 @@ impl SshManager {
             }
             return Err(error);
         }
+        let mode = if session.sftp.get().is_some() {
+            "SFTP"
+        } else {
+            "exec"
+        }
+        .to_owned();
         self.sessions.lock().await.insert(id, session);
         let _ = registered.send(true);
         Ok(SshConnection { id, mode })
@@ -1066,7 +1100,7 @@ impl SshManager {
             return Err("Ungültiger Verzeichnispfad".into());
         }
         let home = path.is_empty() || path == "~";
-        let (path, mode, mut entries) = if let Some(sftp) = &session.sftp {
+        let (path, mode, mut entries) = if let Some(sftp) = session.sftp.get() {
             let path = sftp
                 .canonicalize(if home { "." } else { &path })
                 .await
@@ -1195,6 +1229,53 @@ async fn run_exec(
 #[cfg(test)]
 mod tests {
     use super::*;
+    impl TerminalReader for mpsc::Receiver<ChannelMsg> {
+        async fn receive(&mut self) -> Option<ChannelMsg> {
+            self.recv().await
+        }
+    }
+    #[tokio::test]
+    async fn terminal_pump_drains_large_login_output_while_sftp_setup_waits() {
+        let (messages, mut reader) = mpsc::channel(2);
+        let (sftp_ready, setup) = oneshot::channel();
+        let (stop, mut stopped) = oneshot::channel();
+        let (replies, _) = mpsc::unbounded_channel();
+        let output = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = output.clone();
+        let pump = tokio::spawn(async move {
+            pump_terminal(
+                &mut reader,
+                &mut stopped,
+                &mut |data| {
+                    captured.lock().unwrap().extend(data);
+                },
+                &replies,
+            )
+            .await
+        });
+        // Model one SSH event loop: it cannot finish opening SFTP until all login
+        // messages fit through the bounded terminal channel.
+        let server = tokio::spawn(async move {
+            for _ in 0..512 {
+                messages
+                    .send(ChannelMsg::Data {
+                        data: vec![b'x'; 8192].into(),
+                    })
+                    .await
+                    .unwrap();
+            }
+            messages.send(ChannelMsg::Eof).await.unwrap();
+            sftp_ready.send(()).unwrap();
+        });
+        tokio::time::timeout(Duration::from_secs(5), setup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pump.await.unwrap(), None);
+        server.await.unwrap();
+        drop(stop);
+        assert_eq!(output.lock().unwrap().as_slice(), vec![b'x'; 512 * 8192]);
+    }
     #[tokio::test]
     async fn phase_times_out_and_can_be_canceled_during_prompt() {
         let (cancel, mut canceled) = watch::channel(false);

@@ -56,6 +56,15 @@ export const saveSession = (session: SavedSession, password: string | null) =>
   invoke<SavedSession>("sessions_save", { session, password });
 export const deleteSession = (id: string) => invoke<void>("sessions_delete", { id });
 export const keyringAvailable = () => invoke<boolean>("sessions_keyring_available");
+
+/** Existing sessions retain their authentication; quick-connect drafts prefer the keyring. */
+export function initialSessionAuthType(
+  session: SavedSession | undefined, preferPassword: boolean, keyring: boolean,
+): SessionAuth["type"] {
+  if (session?.id) return session.auth.type;
+  if (preferPassword) return keyring ? "password" : "ask";
+  return session?.auth.type ?? "default";
+}
 export const importDefaultPath = (source: ImportSource) =>
   invoke<string | null>("sessions_import_default_path", { source });
 export const previewImport = (source: ImportSource, path: string) =>

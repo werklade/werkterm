@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyOneKeyMappings, buildSessionTree, commitImport, defaultImportSelection, deselectNewImportDuplicates,
-  deleteSession, importDefaultPath, keyringAvailable, listSessions, markImportDuplicates, previewImport,
+  deleteSession, importDefaultPath, initialSessionAuthType, keyringAvailable, listSessions, markImportDuplicates, previewImport,
   saveSession, searchSessions, sessionLabel, sessionTarget, validateSession,
   type ImportCandidate, type SavedSession,
 } from "./sessions";
@@ -19,6 +19,22 @@ const candidate = (overrides: Partial<ImportCandidate> = {}): ImportCandidate =>
 });
 
 describe("session helpers", () => {
+  it("prefers keyring passwords for quick-connect drafts and asks when unavailable", () => {
+    const draft = sample({ id: "" });
+    expect(initialSessionAuthType(draft, true, true)).toBe("password");
+    expect(initialSessionAuthType(draft, true, false)).toBe("ask");
+    expect(initialSessionAuthType(undefined, false, true)).toBe("default");
+    expect(initialSessionAuthType(draft, false, false)).toBe("default");
+  });
+
+  it("retains existing session authentication regardless of keyring availability", () => {
+    for (const auth of [{ type: "default" }, { type: "ask" }, { type: "password" },
+      { type: "keyFile", path: "id_ed25519" }] as const) {
+      expect(initialSessionAuthType(sample({ auth }), true, true)).toBe(auth.type);
+      expect(initialSessionAuthType(sample({ auth }), true, false)).toBe(auth.type);
+    }
+  });
+
   it("builds and sorts nested folders while retaining root sessions", () => {
     const input = [sample(), sample({ id: "two", name: "Root", folder: "" }),
       sample({ id: "three", folder: "Lab/BSD" }), sample({ id: "four", folder: "Other/Linux" })];
