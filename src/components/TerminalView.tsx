@@ -1,5 +1,8 @@
-import { startLog, stopLog, terminalPasteRequests } from "../lib/sessionLog";
-import { useEffect, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { readTerminal, exportText, exportHtml, exportRtf } from "../lib/terminalExport";
+import { localTimestamp, startLog, stopLog, terminalPasteRequests } from "../lib/sessionLog";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -16,6 +19,9 @@ import { inputProvenance, terminalWriters } from "../lib/multiExec";
 import { MonitorBar } from "./MonitorBar";
 
 interface Props {
+  logPath?: string;
+  connected?: boolean;
+  onLogToggle(id: number): void;
   title: string;
   logAlways?: boolean;
   onLog(id: number, path: string | null): void;
@@ -45,17 +51,28 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
+  const [exportMenu, setExportMenu] = useState(false);
   const pasteMenuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const menu = pasteMenuRef.current;
+    if (!pasteMenu || !menu) return;
+    const place = () => {
+      menu.style.left = `${Math.max(0, Math.min(pasteMenu.x, window.innerWidth - menu.offsetWidth))}px`;
+      menu.style.top = `${Math.max(0, Math.min(pasteMenu.y, window.innerHeight - menu.offsetHeight))}px`;
+    };
+    place(); window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [pasteMenu, exportMenu]);
   useEffect(() => {
     if (!pasteMenu) return;
-    pasteMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    pasteMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     const dismiss = (event: PointerEvent) => { if (!pasteMenuRef.current?.contains(event.target as Node)) setPasteMenu(null); };
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
-  }, [pasteMenu]);
+  }, [pasteMenu, exportMenu]);
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
@@ -101,8 +118,24 @@ export function TerminalView({ title, logAlways, onLog, paneStyle, onFocusPane, 
       const provenance = inputProvenance(terminal);
       let keyboardInput = false;
       let deliveringPaste = false;
+      const copySelection = () => {
+        const text = terminal.getSelection();
+        if (text) void navigator.clipboard.writeText(text).catch(report);
+      };
+      let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+      const selection = terminal.onSelectionChange(() => {
+        clearTimeout(selectionTimer);
+        if (preferencesRef.current.copyOnSelect && terminal.getSelection()) selectionTimer = setTimeout(() => {
+          if (preferencesRef.current.copyOnSelect && !cancelled) copySelection();
+        }, 150);
+      });
       terminal.attachCustomKeyEventHandler(event => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && !event.altKey) {
+        if (!event.altKey && ((event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c") || (event.ctrlKey && event.key === "Insert"))) {
+          event.preventDefault();
+          if (event.type === "keydown") copySelection();
+          return false;
+        }
+        if (!event.altKey && (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") || (event.shiftKey && event.key === "Insert"))) {
           event.preventDefault();
           if (event.type === "keydown") terminalPasteRequests.get(id)?.();
           return false;
@@ -204,6 +237,7 @@ export function TerminalView({ title, logAlways, onLog, paneStyle, onFocusPane, 
         textEvents.forEach(type => element.removeEventListener(type, markTextInput, true));
         otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
         terminalWriters.delete(id);
+        clearTimeout(selectionTimer); selection.dispose();
         provenance.dispose(); observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); promptCommand.dispose();
         onData.onmessage = () => undefined;
         onExitChannel.onmessage = () => undefined;
@@ -231,5 +265,53 @@ export function TerminalView({ title, logAlways, onLog, paneStyle, onFocusPane, 
 
   useEffect(() => { if (visible ?? active) { const frame = requestAnimationFrame(() => runtime.current?.fit.fit()); return () => cancelAnimationFrame(frame); } }, [visible, active, monitoringSession, gridFooter]);
 
-  return <section style={paneStyle} onPointerDown={onFocusPane} onContextMenu={event => { event.preventDefault(); setPasteMenu({ x: event.clientX, y: event.clientY }); }} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}><div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}{pasteMenu && <div ref={pasteMenuRef} role="menu" aria-label="Terminalaktionen" className="session-context" style={{ left: Math.min(pasteMenu.x, window.innerWidth - 170), top: Math.min(pasteMenu.y, window.innerHeight - 70) }} onKeyDown={event => { if (event.key === "Escape") { setPasteMenu(null); runtime.current?.terminal.focus(); } }}><button role="menuitem" disabled={processExited} onClick={() => { setPasteMenu(null); runtime.current?.terminal.focus(); terminalPasteRequests.get(id)?.(); }}>Einfügen</button></div>}</section>;
+  const closeMenu = () => { setPasteMenu(null); setExportMenu(false); runtime.current?.terminal.focus(); };
+  const copy = (all: boolean) => {
+    const terminal = runtime.current?.terminal;
+    if (!terminal) return;
+    const text = all ? exportText(readTerminal(terminal.buffer.active, terminal.options.theme), /Windows/i.test(navigator.userAgent)) : terminal.getSelection();
+    if (all || text) void navigator.clipboard.writeText(text).catch(error => onStatus(`Kopieren: ${String(error)}`));
+    closeMenu();
+  };
+  const saveContent = async (format: "txt" | "html" | "rtf") => {
+    const terminal = runtime.current?.terminal;
+    if (!terminal) return;
+    closeMenu();
+    try {
+      const doc = readTerminal(terminal.buffer.active, terminal.options.theme, terminal.options.fontFamily);
+      const name = title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/[. ]+$/g, "").slice(0, 100) || "Terminal";
+      const path = await save({ defaultPath: `${name}_${localTimestamp()}.${format}`, filters: [{ name: format.toUpperCase(), extensions: [format] }] });
+      if (path) {
+        const contents = format === "txt" ? exportText(doc, /Windows/i.test(navigator.userAgent)) : format === "html" ? exportHtml(doc, title) : exportRtf(doc);
+        await invoke("save_text_file", { path, contents });
+        onStatus(`Terminalinhalt gespeichert: ${path}`);
+      }
+    } catch (error) { onStatus(`Terminalexport: ${String(error)}`); }
+  };
+  return <section style={paneStyle} onPointerDown={onFocusPane} onContextMenu={event => {
+    event.preventDefault();
+    if (preferencesRef.current.rightClick === "paste" && !event.shiftKey) { terminalPasteRequests.get(id)?.(); return; }
+    setExportMenu(false); setPasteMenu({ x: event.clientX, y: event.clientY });
+  }} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}>
+    <div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}
+    {pasteMenu && <div ref={pasteMenuRef} role="menu" aria-label="Terminalaktionen" className="session-context" style={{ left: pasteMenu.x, top: pasteMenu.y, maxHeight: "100vh", maxWidth: "100vw", overflowY: "auto" }} onKeyDown={event => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeMenu(); }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault(); event.stopPropagation();
+        const buttons = Array.from(pasteMenuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus();
+      }
+    }}>
+      {exportMenu ? <>{(["txt", "html", "rtf"] as const).map(format => <button key={format} role="menuitem" onClick={() => { void saveContent(format); }}>{format.toUpperCase()} speichern…</button>)}<button role="menuitem" onClick={() => setExportMenu(false)}>Zurück</button></> : <>
+        <button role="menuitem" disabled={!runtime.current?.terminal.getSelection()} onClick={() => copy(false)}>Kopieren</button>
+        <button role="menuitem" disabled={processExited} onClick={() => { closeMenu(); terminalPasteRequests.get(id)?.(); }}>Einfügen</button>
+        <button role="menuitem" onClick={() => { runtime.current?.terminal.selectAll(); closeMenu(); }}>Alles auswählen</button>
+        <button role="menuitem" onClick={() => copy(true)}>Alles kopieren</button>
+        <button role="menuitem" aria-haspopup="menu" onClick={() => setExportMenu(true)}>Terminalinhalt speichern…</button>
+        <button role="menuitem" onClick={() => { runtime.current?.terminal.clear(); closeMenu(); }}>Terminal leeren</button>
+        <button role="menuitem" disabled={processExited || !connected} onClick={() => { onLogToggle(id); closeMenu(); }}>{logPath ? "Protokoll stoppen" : "Protokoll starten"}</button>
+      </>}
+    </div>}
+  </section>;
 }

@@ -17,3 +17,6 @@
 .session-context button { display: block; width: 100%; padding: 8px; text-align: left; }
 .connection-save { flex: none; display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--bg-panel-alt); border-bottom: 1px solid var(--border-strong); }
 .connection-save button { padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); }
+
+.jump-inline { display: inline-flex; vertical-align: middle; color: inherit; }
+.jump-inline .icon, .jump-inline svg { width: 12px; height: 12px; color: inherit; }

@@ -30,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            local_fs::save_text_file,
             session_log::session_log_start,
             session_log::session_log_stop,
             session_log::session_log_open_folder,

@@ -201,3 +201,21 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+/// Save-dialog callers have already confirmed replacement of existing files.
+#[tauri::command]
+pub fn save_text_file(path: String, contents: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_absolute() {
+        return Err("Export path must be absolute".into());
+    }
+    std::fs::write(path, contents.as_bytes()).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod export_tests {
+    #[test]
+    fn rejects_relative_export_path() {
+        assert!(super::save_text_file("relative.txt".into(), "text".into()).is_err());
+    }
+}

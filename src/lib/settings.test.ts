@@ -39,3 +39,9 @@ describe("settings validation and migration", () => {
     expect(normalizeSettings({ theme: "MobaXterm (importiert)" }).theme).toBe(defaultSettings.theme);
   });
 });
+
+it("normalizes terminal selection and right-click settings", () => {
+  expect(normalizeSettings({})).toMatchObject({ copyOnSelect: true, rightClick: "menu" });
+  expect(normalizeSettings({ copyOnSelect: false, rightClick: "paste" })).toMatchObject({ copyOnSelect: false, rightClick: "paste" });
+  expect(normalizeSettings({ copyOnSelect: "false", rightClick: "invalid" })).toMatchObject({ copyOnSelect: true, rightClick: "menu" });
+});
