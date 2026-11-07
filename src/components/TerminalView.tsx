@@ -53,7 +53,7 @@ export function TerminalView({ id, kind, target, savedSessionId, active, shellIn
       const element = container.current;
       if (cancelled || !element) return;
       const styles = getComputedStyle(element);
-      const terminal = new Terminal({ cursorBlink: true, fontFamily: styles.getPropertyValue("--font-mono").trim(), fontSize: parseFloat(styles.getPropertyValue("--font-size-term")), theme: terminalTheme(styles) });
+      const terminal = new Terminal({ cursorBlink: true, fontFamily: `${styles.getPropertyValue("--font-mono").trim()}, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Twemoji Mozilla"`, fontSize: parseFloat(styles.getPropertyValue("--font-size-term")), theme: terminalTheme(styles) });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(element);

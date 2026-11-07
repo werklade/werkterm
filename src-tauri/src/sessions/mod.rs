@@ -253,6 +253,10 @@ pub async fn sessions_save(
     }
     let previous = sessions.iter().position(|s| s.id == session.id);
     let account = format!("session:{}", session.id);
+    let password = password.filter(|value| !value.is_empty());
+    if session.auth == SessionAuth::Password && password.is_none() {
+        require_existing_password(crate::secrets::get_password(account.clone()).await?)?;
+    }
     let change = if session.auth == SessionAuth::Password {
         password.map(SecretChange::Set)
     } else if previous.is_some_and(|index| sessions[index].auth == SessionAuth::Password) {
@@ -292,6 +296,13 @@ enum SecretChange {
     Delete,
 }
 
+fn require_existing_password(password: Option<String>) -> Result<(), String> {
+    match password {
+        Some(value) if !value.is_empty() => Ok(()),
+        _ => Err("Bitte ein Passwort für die Sitzung eingeben".into()),
+    }
+}
+
 async fn restore_secret(account: String, previous: Option<String>) -> Result<(), String> {
     match previous {
         Some(password) => crate::secrets::set_password(account, password).await,
@@ -320,7 +331,9 @@ async fn persist_with_secret(
     if let Err(error) = changed {
         // A provider may report failure after having partially changed state.
         if restore_secret(account, previous).await.is_err() {
-            return Err("Schlüsselbund-Änderung fehlgeschlagen; vorheriger Eintrag konnte nicht wiederhergestellt werden".into());
+            return Err(format!(
+                "{error}; vorheriger Schlüsselbund-Eintrag konnte nicht wiederhergestellt werden"
+            ));
         }
         return Err(error);
     }
@@ -346,7 +359,7 @@ where
 }
 
 #[tauri::command]
-pub async fn sessions_keyring_available() -> bool {
+pub async fn sessions_keyring_available() -> Result<bool, String> {
     crate::secrets::available().await
 }
 
@@ -578,6 +591,12 @@ pub async fn sessions_import_commit(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn password_auth_requires_a_real_existing_secret_when_no_replacement_is_given() {
+        assert!(super::require_existing_password(None).is_err());
+        assert!(super::require_existing_password(Some(String::new())).is_err());
+        assert!(super::require_existing_password(Some("existing".into())).is_ok());
+    }
     use super::*;
     #[test]
     fn legacy_session_files_default_to_ssh() {

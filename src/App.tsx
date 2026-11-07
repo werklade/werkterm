@@ -87,6 +87,7 @@ export default function App() {
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [sessionDialog, setSessionDialog] = useState<{ session?: SavedSession; tabId?: number; preferPassword?: boolean } | null>(null);
   const [userSession, setUserSession] = useState<SavedSession | null>(null);
+  const [quickUserTarget, setQuickUserTarget] = useState<string | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
   useEffect(reloadSessions, [reloadSessions]);
@@ -168,6 +169,7 @@ export default function App() {
     if (windowClosing.current) return;
     const parsed = parseQuickConnect(target);
     if (!parsed) return;
+    if (!parsed.user) { setQuickUserTarget(target.trim()); return; }
     const id = nextId.current++;
     liveTabs.current.add(id);
     sshTabs.current.add(id);
@@ -373,6 +375,7 @@ export default function App() {
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
     {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={() => { if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); }} />}
     {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}
+    {quickUserTarget && <SessionUserDialog name={quickUserTarget} onAnswer={user => { const target = quickUserTarget; setQuickUserTarget(null); if (user !== null) connect(`${user}@${target}`); }} />}
     {conflict && <FileActionDialog key={conflictSequence} prompt={conflict} />}
     {currentPrompt?.prompt.type === "hostKey" && <HostKeyDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
     {currentPrompt?.prompt.type === "secret" && <SecretDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}

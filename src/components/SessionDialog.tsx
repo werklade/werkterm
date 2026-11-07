@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { initialSessionAuthType, keyringAvailable, saveSession, type SavedSession, type SessionAuth } from "../lib/sessions";
 import { useModal } from "./useModal";
+import { PasswordField } from "./PasswordField";
+import { usePasswordInput } from "../lib/passwordInput";
 import "./SessionDialog.css";
 
 interface Props {
@@ -23,7 +25,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const [authType, setAuthType] = useState<SessionAuth["type"]>(() => initialSessionAuthType(session, preferPassword, false));
   const authChanged = useRef(false);
   const [keyPath, setKeyPath] = useState(session?.auth.type === "keyFile" ? session.auth.path : "");
-  const [password, setPassword] = useState("");
+  const password = usePasswordInput();
   const [keyring, setKeyring] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -34,7 +36,11 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
       setKeyring(value);
       if (!authChanged.current) setAuthType(initialSessionAuthType(session, preferPassword, value));
     };
-    void keyringAvailable().then(resolve, () => resolve(false));
+    void keyringAvailable().then(resolve, reason => {
+      if (!active) return;
+      resolve(false);
+      setError(sessionSaveError(reason));
+    });
     return () => { active = false; };
   }, [session, preferPassword]);
   const folders = new Set<string>();
@@ -46,8 +52,8 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const valid = name.trim().length > 0 && host.length > 0 && !/[\s\p{Cc}]/u.test(host)
     && validPort && (authType !== "keyFile" || keyPath.trim().length > 0);
   const clearPassword = () => {
-    setPassword("");
-    const input = dialog.current?.querySelector<HTMLInputElement>('input[type="password"]');
+    password.reset();
+    const input = dialog.current?.querySelector<HTMLInputElement>('.password-field input');
     if (input) input.value = "";
   };
   const cancel = () => { if (!busy) { clearPassword(); onClose(); } };
@@ -61,14 +67,14 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();
       if (!valid || busy) return;
-      const secret = authType === "password" && password !== "" ? password : null;
+      const secret = authType === "password" && password.value !== "" ? password.value : null;
       clearPassword();
       setBusy(true); setError("");
       void saveSession({ kind: session?.kind ?? "ssh", id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host,
         port: Number(port), user: user.trim() || null,
         auth: authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType },
-        source: session?.source ?? null }, secret).then(onSaved, () => {
-        setError("Sitzung konnte nicht gespeichert werden. Bitte Eingaben und Schlüsselbund prüfen.");
+        source: session?.source ?? null }, secret).then(onSaved, reason => {
+        setError(sessionSaveError(reason));
         setBusy(false);
       });
     }}>
@@ -86,11 +92,18 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         </select></label>
         {keyring === false && <p className="session-hint">Schlüsselbund nicht verfügbar: Passwortspeicherung ist deaktiviert.</p>}
         {authType === "keyFile" && <label>Schlüsseldatei<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></label>}
-        {authType === "password" && <label>Passwort<input type="password" autoComplete="off" disabled={keyring !== true} value={password} onChange={event => setPassword(event.target.value)} />
+        {authType === "password" && <label>Passwort<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
       </fieldset>
       {error && <p role="alert" className="session-error">{error}</p>}
       <div className="dialog-actions"><button type="submit" disabled={!valid || busy}>{busy ? "Speichern…" : "Speichern"}</button><button type="button" disabled={busy} onClick={cancel}>Abbrechen</button></div>
     </form>
   </dialog>;
+}
+
+export function sessionSaveError(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return /\bKEYRING_[A-Z_]+:/.test(message)
+    ? `${message}. Tipp: Anmeldung 'Beim Verbinden fragen' wählen`
+    : message;
 }

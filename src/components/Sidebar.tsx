@@ -44,10 +44,10 @@ export function Sidebar({ onOpenFile, onStatus, onConnect, tab, settings, onSett
   const [active, setActive] = useState(3);
   const [input, setInput] = useState("");
   const [invalid, setInvalid] = useState(false);
-  const error = "Ungültige Adresse. Erwartet: user@host[:port], Port 1–65535.";
+  const error = "Ungültige Adresse. Erwartet: [user@]host[:port], IPv6 in […], Port 1–65535.";
   return <aside className="sidebar" style={{ "--sidebar-width": width + "px" } as CSSProperties} aria-label="Sitzungen und SSH-Browser">
     <form className="quick-connect" onSubmit={event => { event.preventDefault(); const valid = parseQuickConnect(input) !== null; setInvalid(!valid); if (valid) { onConnect(input.trim()); setInput(""); } else onStatus(error); }}>
-      <input aria-label="Quick connect" placeholder="Quick connect..." value={input} aria-invalid={invalid} title={invalid ? error : "user@host[:port]"} onChange={event => { setInput(event.target.value); setInvalid(false); }} />
+      <input aria-label="Quick connect" placeholder="Quick connect..." value={input} aria-invalid={invalid} title={invalid ? error : "[user@]host[:port]"} onChange={event => { setInput(event.target.value); setInvalid(false); }} />
     </form>
     <div className="sidebar-content"><nav className="sidebar-icons" aria-label="Seitenbereiche">{panels.map((panel, index) => <button type="button" key={panel.name} aria-label={panel.name} aria-pressed={active === index} title={panel.name} onClick={() => setActive(index)}><Icon name={panel.icon} /></button>)}</nav>
       <section className="sidebar-panel" aria-label={panels[active].name}><h2>{panels[active].name}</h2>

@@ -47,7 +47,8 @@
       "deb": {
         "section": "net",
         "recommends": [
-          "gnome-keyring"
+          "gnome-keyring",
+          "fonts-noto-color-emoji"
         ],
         "desktopTemplate": "linux/linmoba.desktop.hbs"
       }
