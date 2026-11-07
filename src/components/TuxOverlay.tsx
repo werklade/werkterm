@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { createTux, MARGIN, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
+import { createTux, TUX_COLORS, MARGIN, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { helmet, palette, sprites } from "../lib/tux/sprites";
 
 export const tuxTestEvent = "werkterm:tux-test";
@@ -19,6 +19,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
     let running = false;
     let last = 0;
     let tuxes = [createTux(0)];
+    const randomColor = () => TUX_COLORS[Math.floor(Math.random() * TUX_COLORS.length)];
     let platforms = platformsFromLines([]);
     let holes: Hole[] = [];
     let lines: string[] = [];
@@ -78,7 +79,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         if (!hidden) {
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
-        const paint = (rows: string[]) => rows.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
+        const paint = (rows: string[]) => rows.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = color === "k" || color === "-" ? tux.color : palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
         paint(sprite);
         if (tux.state === "dig") {
           paint(helmet);
@@ -139,7 +140,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
         }
         if (!waving) corner();
         if (tux.state === "gone") {
-          tuxes[i] = createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4);
+          tuxes[i] = createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4, randomColor());
         }
       }
       // Reduced motion needs only occasional blink updates, no continuous RAF loop.
@@ -160,7 +161,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active 
       lines = Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? "");
       platforms = platformsFromLines(lines);
       holes = [];
-      tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2)));
+      tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2), index === 0 ? TUX_COLORS[0] : randomColor()));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);
     };
     const schedule = () => { clearTimeout(timer); if (enabled && available()) timer = setTimeout(start, clock.remaining(performance.now(), minutes * 60000)); };
