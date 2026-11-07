@@ -73,7 +73,7 @@ it("slides on the belly across long stretches and stands up before the edge", ()
 it("stays inside the terminal and turns around at its edge", () => {
   const platforms = platformsFromLines(["x".repeat(20)]);
   const tux = createTux(17, 1); Object.assign(tux, { state: "walk", y: 0, floor: 0 });
-  for (let i = 0; i < 40; i++) { stepTux(tux, .05, platforms, 20, () => 1); expect(tux.x).toBeLessThanOrEqual(17); expect(tux.x).toBeGreaterThanOrEqual(3); }
+  for (let i = 0; i < 40; i++) { stepTux(tux, .05, platforms, 10, () => 1, [], 20); expect(tux.x).toBeLessThanOrEqual(17); expect(tux.x).toBeGreaterThanOrEqual(3); }
   expect(tux.direction).toBe(-1);
   const faller = createTux(0); stepTux(faller, .1, [], 10, Math.random, [], 20);
   expect(faller.x).toBe(3);
