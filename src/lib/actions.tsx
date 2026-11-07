@@ -2,8 +2,8 @@ import type { AppMenu } from "../components/MenuBar";
 import { Icon } from "../components/Icon";
 import type { Settings } from "./settings";
 import type { SavedSession } from "./sessions";
-export function createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, isLinux }: {
-  savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; isLinux: boolean;
+export function createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux }: {
+  savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
 }): AppMenu[] {
   const sidebarVisible = settings.sidebarVisible;
   const heading = (label: string) => ({ label, action: `heading:${label}`, heading: true });
@@ -11,9 +11,12 @@ export function createMenus({ savedSessions, settings, hasWsl, activeId, multiEx
   const radio = (label: string, action: string, checked: boolean) => ({ label, action, checked, radio: true });
   const folders = [...new Set(savedSessions.map(s => s.folder || "Ohne Ordner"))].sort();
   return [
+    { label: "Bearbeiten", mnemonic: 0, items: [{ label: "Einfügen", action: "paste", disabled: !canPaste }] },
     { label: "Terminal", mnemonic: 0, items: [
       { label: "Lokales Terminal", action: "local", shortcut: "Strg+Umschalt+T" },
       ...(hasWsl ? [{ label: "WSL", action: "wsl" }] : []),
+      { label: logging ? "Protokoll stoppen" : "Protokoll starten", action: "logToggle", disabled: !canLog },
+      { label: "Protokollordner öffnen", action: "logFolder" },
       { label: "Quick connect…", action: "quick" }, { label: "Tab schließen", action: "close", shortcut: "Strg+Umschalt+W", disabled: activeId === 0 }, { label: "Beenden", action: "quit" },
     ] },
     { label: "Sessions", mnemonic: 0, items: [

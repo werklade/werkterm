@@ -1,6 +1,6 @@
 import { useState } from "react";
 import appIcon from "../assets/app-icon.svg";
-import { Icon } from "./Icon";
+import { KindIcon } from "./KindIcon";
 import { searchSessions, type Recent } from "../lib/history";
 import { parseQuickConnect } from "../lib/quickConnect";
 import type { SavedSession } from "../lib/sessions";
@@ -22,8 +22,8 @@ export function Home({ sessions, recents, canRestore, onLocal, onRestore, onSave
       if (e.key === "Enter" && count) { e.preventDefault(); choose(Math.min(selected, count - 1)); }
       if (e.key === "Escape") setQuery("");
     }}/>
-    {count > 0 && <div id="home-results" role="listbox" className="home-results">{results.map((s, i) => <button role="option" aria-selected={i === selected} id={`home-result-${i}`} key={s.id} onClick={() => onSaved(s)}><Icon name={s.kind === "ssh" ? "ssh" : "terminal"}/>{s.name} · {s.user}@{s.host}</button>)}{quick && <button role="option" aria-selected={selected === results.length} id={`home-result-${results.length}`} onClick={() => onQuick(query.trim())}>Quick connect: {query.trim()}</button>}</div>}
-    <h2>Zuletzt verwendet</h2>{visible.length ? <div className="recent-grid">{visible.map((r, i) => <button key={i} onClick={() => { if (r.kind === "quick") onQuick(r.target); else { const s = sessions.find(s => s.id === r.sessionId); if (s) onSaved(s); } }}><Icon name={r.kind === "saved" && sessions.find(s => s.id === r.sessionId)?.kind !== "ssh" ? "terminal" : "ssh"}/>{r.kind === "quick" ? r.target : sessions.find(s => s.id === r.sessionId)?.name}</button>)}</div> : <p>Noch keine Verbindungen verwendet.</p>}
+    {count > 0 && <div id="home-results" role="listbox" className="home-results">{results.map((s, i) => <button role="option" aria-selected={i === selected} id={`home-result-${i}`} key={s.id} onClick={() => onSaved(s)}><KindIcon kind={s.kind} jump={!!s.jumpSessionId}/>{s.name} · {s.user}@{s.host}</button>)}{quick && <button role="option" aria-selected={selected === results.length} id={`home-result-${results.length}`} onClick={() => onQuick(query.trim())}>Quick connect: {query.trim()}</button>}</div>}
+    <h2>Zuletzt verwendet</h2>{visible.length ? <div className="recent-grid">{visible.map((r, i) => <button key={i} onClick={() => { if (r.kind === "quick") onQuick(r.target); else { const s = sessions.find(s => s.id === r.sessionId); if (s) onSaved(s); } }}><KindIcon kind={r.kind === "saved" ? sessions.find(s => s.id === r.sessionId)?.kind ?? "ssh" : "ssh"} jump={r.kind === "saved" && !!sessions.find(s => s.id === r.sessionId)?.jumpSessionId}/>{r.kind === "quick" ? r.target : sessions.find(s => s.id === r.sessionId)?.name}</button>)}</div> : <p>Noch keine Verbindungen verwendet.</p>}
     <p className="home-hint">Help → Tastenkürzel zeigt die verfügbaren Tastenkombinationen.</p></div>
   </section>;
 }

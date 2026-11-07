@@ -1,5 +1,6 @@
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 export interface Settings {
+  logFolder: string; logAllSessions: boolean; logStripAnsi: boolean; pasteConfirm: import("./paste").PasteConfirm;
   confirmCloseSsh: boolean;
   splitMode: "single" | "columns" | "rows" | "quad";
   bars: "menu" | "toolbar" | "both"; toolbarSize: "small" | "standard" | "labels";
@@ -10,6 +11,7 @@ export interface Settings {
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
 }
 export const defaultSettings: Settings = {
+  logFolder: "", logAllSessions: false, logStripAnsi: true, pasteConfirm: "multiline",
   confirmCloseSsh: true,
   splitMode: "single",
   bars: "both", toolbarSize: "labels", compact: false, sidebarVisible: true, sidebarRight: false, tabNumbers: false, tabClose: true,
@@ -22,10 +24,12 @@ const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
   const v = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const result = { ...defaultSettings };
-  for (const key of ["confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
+  for (const key of ["logAllSessions", "logStripAnsi", "confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
   for (const [key, min, max] of [["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
     const value = v[key]; if (typeof value === "number" && Number.isFinite(value)) result[key] = Math.max(min, Math.min(max, key === "lineHeight" ? value : Math.round(value)));
   }
+  if (typeof v.logFolder === "string") result.logFolder = v.logFolder;
+  if (v.pasteConfirm === "always" || v.pasteConfirm === "never" || v.pasteConfirm === "multiline") result.pasteConfirm = v.pasteConfirm;
   if (v.splitMode === "single" || v.splitMode === "columns" || v.splitMode === "rows" || v.splitMode === "quad") result.splitMode = v.splitMode;
   if (v.bars === "menu" || v.bars === "toolbar" || v.bars === "both") result.bars = v.bars;
   if (v.toolbarSize === "small" || v.toolbarSize === "standard" || v.toolbarSize === "labels") result.toolbarSize = v.toolbarSize;

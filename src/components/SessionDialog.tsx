@@ -17,6 +17,7 @@ interface Props {
 export function SessionDialog({ session, preferPassword = false, sessions, onClose, onSaved }: Props) {
   const dialog = useModal();
   const id = useId();
+  const [logAlways, setLogAlways] = useState(session?.log_always ?? false);
   const [name, setName] = useState(session?.name ?? "");
   const [folder, setFolder] = useState(session?.folder ?? "");
   const [host, setHost] = useState(session?.host ?? "");
@@ -78,7 +79,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
       clearPassword();
       setBusy(true); setError("");
       void saveSession({ kind: session?.kind ?? "ssh", id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host,
-        port: Number(port), keepaliveInterval, keepaliveMax, jumpSessionId: jumpSessionId || null, user: user.trim() || null,
+        port: Number(port), log_always: logAlways, keepaliveInterval, keepaliveMax, jumpSessionId: jumpSessionId || null, user: user.trim() || null,
         auth: authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType },
         source: session?.source ?? null }, secret).then(onSaved, reason => {
         setError(sessionSaveError(reason));
@@ -101,7 +102,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {authType === "keyFile" && <label>Schlüsseldatei<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></label>}
         {authType === "password" && <label>Passwort<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
-        <details><summary>Erweitert</summary>
+        <details><summary>Erweitert</summary><label><input type="checkbox" checked={logAlways} onChange={e => setLogAlways(e.target.checked)} />Diese Sitzung immer protokollieren</label>
           <label>Jump host<select value={jumpSessionId} onChange={event => setJumpSessionId(event.target.value)}>
             <option value="">(keiner)</option>
             {jumpOptions.map(hop => <option key={hop.id} value={hop.id}>{hop.name} ({sessionLabel(hop)})</option>)}

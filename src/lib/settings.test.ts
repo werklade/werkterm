@@ -27,6 +27,10 @@ describe("settings validation and migration", () => {
     expect(loadSettings().splitMode).toBe("quad");
     for (const value of [null, 4, "invalid"]) expect(normalizeSettings({ splitMode: value }).splitMode).toBe("single");
   });
+  it("validates logging and paste preferences", () => {
+    expect(normalizeSettings({ logAllSessions: true, logStripAnsi: false, logFolder: "D:/Logs", pasteConfirm: "never" })).toMatchObject({ logAllSessions: true, logStripAnsi: false, logFolder: "D:/Logs", pasteConfirm: "never" });
+    expect(normalizeSettings({ logAllSessions: "true", logStripAnsi: null, logFolder: 123, pasteConfirm: "unknown" })).toMatchObject({ logAllSessions: false, logStripAnsi: true, logFolder: "", pasteConfirm: "multiline" });
+  });
   it("validates and preserves imported themes", () => {
     const settings = normalizeSettings({ theme: "MobaXterm (importiert)", importedTheme: { red: "#123abc", blue: "invalid", background: "#eeeeee" } });
     expect(selectedTheme(settings).red).toBe("#123abc");

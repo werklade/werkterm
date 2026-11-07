@@ -5,6 +5,7 @@ export type StartCommand = "root" | "processes" | "hardware";
 export interface SpawnOptions {
   startCommand?: StartCommand;
   kind: ShellKind;
+  tabId: number;
   cols: number;
   rows: number;
   shellIntegration: boolean;

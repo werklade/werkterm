@@ -42,7 +42,10 @@ import { browserForEditor, editorFileKey, sourceForEditorOpen } from "./lib/tabS
 import { useModal } from "./components/useModal";
 import "./styles/theme.css";
 import "./App.css";
-import { gridColumns, inputTargets, pasteLines, requiresPasteConfirmation, terminalWriters } from "./lib/multiExec";
+import { PasteDialog } from "./components/PasteDialog";
+import { shouldConfirmPaste } from "./lib/paste";
+import { defaultLogFolder, openLogFolder, startLog, stopLog, terminalPasteRequests } from "./lib/sessionLog";
+import { gridColumns, inputTargets, terminalWriters } from "./lib/multiExec";
 
 const TerminalView = lazy(() => import("./components/TerminalView").then(module => ({ default: module.TerminalView })));
 
@@ -78,7 +81,16 @@ export default function App() {
   const [multiExec, setMultiExec] = useState(false);
   const beforeMultiExec = useRef<number | null>(null);
   const [unchecked, setUnchecked] = useState<Set<number>>(() => new Set());
-  const [pasteRequest, setPasteRequest] = useState<{ lines: number; targets: number[]; data: string } | null>(null);
+  const [pasteRequest, setPasteRequest] = useState<{ targets: number[]; data: string; multiExec: boolean } | null>(null);
+  const [logPaths, setLogPaths] = useState<Record<number, string>>({});
+  const logBusy = useRef(new Set<number>());
+  const onLog = useCallback((id: number, path: string | null) => setLogPaths(current => { const next = { ...current }; if (path) next[id] = path; else delete next[id]; return next; }), []);
+  useEffect(() => {
+    const subscription = listen<{ id: number; message: string }>("session-log-error", event => {
+      setStatus(event.payload.message); onLog(event.payload.id, null);
+    });
+    return () => { void subscription.then(stop => stop()); };
+  }, [onLog]);
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [editors, setEditors] = useState<Record<number, EditorTabState>>({});
   const editorsRef = useRef(editors);
@@ -143,6 +155,11 @@ export default function App() {
   const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
   useEffect(reloadSessions, [reloadSessions]);
   const [settings, setSettings] = useState(loadSettings);
+  useEffect(() => {
+    void defaultLogFolder().then(logFolder => {
+      if (!settingsRef.current.logFolder) changeSettings({ ...settingsRef.current, logFolder });
+    }).catch(reason => setStatus(`Protokollordner: ${String(reason)}`));
+  }, []);
   const sidebarVisible = settings.sidebarVisible;
   const setSidebarVisible = (value: boolean | ((current: boolean) => boolean)) => changeSettings({ ...settingsRef.current, sidebarVisible: typeof value === "function" ? value(settingsRef.current.sidebarVisible) : value });
   const [temporaryMenu, setTemporaryMenu] = useState(false);
@@ -376,6 +393,7 @@ export default function App() {
       if (approved) {
         const restore = terminalDescriptors(tabsRef.current);
         await invoke("last_tabs_save", { tabs: restore });
+        await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor").map(tab => stopLog(tab.id)));
         await getCurrentWindow().destroy();
       }
     } catch (reason) { reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason)); }
@@ -492,6 +510,16 @@ export default function App() {
       setMultiExec(true);
     }
   };
+  const toggleSessionLog = (id: number) => {
+    const tab = tabs.find(t => t.id === id);
+    if (!tab || tab.exited || tab.kind === "editor" || tab.sessionId === undefined || logBusy.current.has(id)) return;
+    logBusy.current.add(id);
+    const operation = logPaths[id] ? stopLog(id).then(() => onLog(id, null)) : startLog(id, tab.title, settings).then(path => {
+      if (tabsRef.current.some(t => t.id === id && !t.exited)) onLog(id, path);
+      else return stopLog(id);
+    });
+    void operation.catch(reason => setStatus(`Protokoll: ${String(reason)}`)).finally(() => logBusy.current.delete(id));
+  };
   const action = (name: string) => {
     setTemporaryMenu(false);
     if (name.startsWith("split:")) {
@@ -508,6 +536,9 @@ export default function App() {
     if (name.startsWith("bars:")) { changeSettings({ ...settings, compact: false, bars: name.slice(5) as Settings["bars"] }); return; }
     if (name.startsWith("size:")) { changeSettings({ ...settings, toolbarSize: name.slice(5) as Settings["toolbarSize"] }); return; }
     switch (name) {
+      case "paste": if (activeId !== null) terminalPasteRequests.get(activeId)?.(); break;
+      case "logFolder": void openLogFolder(settings.logFolder).catch(reason => setStatus(String(reason))); break;
+      case "logToggle": if (activeId !== null) toggleSessionLog(activeId); break;
       case "root": case "processes": case "hardware": openTab("local", name); break;
       case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: "Lokal", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(String(reason))); break;
       case "compact": changeSettings({ ...settings, compact: !settings.compact }); break;
@@ -567,11 +598,10 @@ export default function App() {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
     const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
     if (!targets.length) return;
-    const lines = pasteLines(data);
-    if (requiresPasteConfirmation(gridVisible, pasted, data)) { setPasteRequest(current => current ?? { lines, targets, data }); return; }
+    if (pasted && shouldConfirmPaste(data, settings.pasteConfirm)) { setPasteRequest(current => current ?? { targets, data, multiExec: gridVisible }); return; }
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus = createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const menus = createMenus({ savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
@@ -579,12 +609,12 @@ export default function App() {
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
       {sidebarVisible && <Sidebar onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
-        <TabBar showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} />
+        <TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, connected: tab.sessionId !== undefined, shell: shellName, jump: !!savedSessions.find(s => s.id === tab.savedSessionId)?.jumpSessionId, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} />
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor").map(tab => <TerminalView title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={tab.id} id={tab.id} kind={tab.kind as ShellKind | "ssh"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
@@ -603,9 +633,10 @@ export default function App() {
       </main>
     </div>
     <footer className="statusbar" role="status" aria-live="polite">{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
-    {pasteRequest && <MultiPasteDialog lines={pasteRequest.lines} count={pasteRequest.targets.length} onAnswer={send => {
-      if (send) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(pasteRequest.data, true); });
+    {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} onAnswer={text => {
+      if (text !== null) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(text, true); });
       setPasteRequest(null);
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`#terminal-${activeId} .xterm-helper-textarea`)?.focus());
     }} />}
     {tunnelsOpen && <TunnelDialog sessions={savedSessions} tunnels={tunnels} statuses={tunnelStatuses} reload={reloadTunnels} start={startTunnel} onClose={() => setTunnelsOpen(false)} />}
     {tunnelConfirmation && <TunnelConfirmDialog onAnswer={accepted => { setTunnelConfirmation(null); tunnelConfirmation(accepted); }} />}
@@ -622,13 +653,4 @@ export default function App() {
     {currentPrompt?.prompt.type === "hostKey" && <HostKeyDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
     {currentPrompt?.prompt.type === "secret" && <SecretDialog key={currentPrompt.prompt.requestId} prompt={currentPrompt.prompt} onAnswer={value => answer(currentPrompt, value)} />}
   </div>;
-}
-
-function MultiPasteDialog({ lines, count, onAnswer }: { lines: number; count: number; onAnswer: (send: boolean) => void }) {
-  const dialog = useModal();
-  useEffect(() => { dialog.current?.querySelector<HTMLButtonElement>("[autofocus]")?.focus(); }, [dialog]);
-  return <dialog ref={dialog} className="ssh-dialog" aria-modal="true" aria-labelledby="multi-paste-title" onCancel={e => { e.preventDefault(); onAnswer(false); }}>
-    <h2 id="multi-paste-title">{lines} Zeilen an {count} Terminals senden?</h2>
-    <div className="dialog-actions"><button autoFocus onClick={() => onAnswer(false)}>Abbrechen</button><button onClick={() => onAnswer(true)}>Senden</button></div>
-  </dialog>;
 }

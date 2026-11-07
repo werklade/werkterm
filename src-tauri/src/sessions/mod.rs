@@ -50,6 +50,8 @@ pub struct SavedSession {
     pub keepalive_max: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jump_session_id: Option<String>,
+    #[serde(default, rename = "log_always", alias = "logAlways")]
+    pub log_always: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -683,6 +685,7 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                 keepalive_interval: 30,
                 keepalive_max: 3,
                 jump_session_id: None,
+                log_always: false,
             };
             validate(&session)?;
             Ok(session)
@@ -940,6 +943,20 @@ mod tests {
         assert!(sessions[0].jump_session_id.is_none());
     }
 
+    #[test]
+    fn logging_defaults_and_roundtrips() {
+        let mut value = serde_json::to_value(sample()).unwrap();
+        value.as_object_mut().unwrap().remove("log_always");
+        assert!(
+            !serde_json::from_value::<SavedSession>(value.clone())
+                .unwrap()
+                .log_always
+        );
+        value["log_always"] = serde_json::Value::Bool(true);
+        let session: SavedSession = serde_json::from_value(value).unwrap();
+        assert!(session.log_always);
+        assert_eq!(serde_json::to_value(session).unwrap()["log_always"], true);
+    }
     fn sample() -> SavedSession {
         SavedSession {
             kind: default_kind(),
@@ -954,6 +971,7 @@ mod tests {
             keepalive_interval: 30,
             keepalive_max: 3,
             jump_session_id: None,
+            log_always: false,
         }
     }
 

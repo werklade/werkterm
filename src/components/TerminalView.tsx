@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { startLog, stopLog, terminalPasteRequests } from "../lib/sessionLog";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -11,10 +12,13 @@ import { createPromptCommandSender } from "../lib/promptCommand";
 import { selectedTheme, type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
 
-import { encodePaste, inputProvenance, terminalWriters } from "../lib/multiExec";
+import { inputProvenance, terminalWriters } from "../lib/multiExec";
 import { MonitorBar } from "./MonitorBar";
 
 interface Props {
+  title: string;
+  logAlways?: boolean;
+  onLog(id: number, path: string | null): void;
   visible?: boolean;
   paneStyle?: React.CSSProperties;
   onFocusPane?: () => void;
@@ -41,7 +45,17 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+  const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
+  const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
+  const pasteMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pasteMenu) return;
+    pasteMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const dismiss = (event: PointerEvent) => { if (!pasteMenuRef.current?.contains(event.target as Node)) setPasteMenu(null); };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [pasteMenu]);
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
@@ -86,7 +100,15 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
       const send = (data: string) => { if (sessionId !== undefined && !exited && !cancelled) void write(sessionId, data).catch(report); };
       const provenance = inputProvenance(terminal);
       let keyboardInput = false;
-      terminal.attachCustomKeyEventHandler(() => { keyboardInput = true; return true; });
+      let deliveringPaste = false;
+      terminal.attachCustomKeyEventHandler(event => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && !event.altKey) {
+          event.preventDefault();
+          if (event.type === "keydown") terminalPasteRequests.get(id)?.();
+          return false;
+        }
+        keyboardInput = true; return true;
+      });
       const markTextInput = () => { keyboardInput = true; };
       const markOtherInput = () => { keyboardInput = false; };
       const textEvents = ["compositionstart", "compositionupdate", "compositionend", "beforeinput", "input"];
@@ -94,17 +116,18 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
       textEvents.forEach(type => element.addEventListener(type, markTextInput, true));
       otherEvents.forEach(type => element.addEventListener(type, markOtherInput, true));
       const canDistribute = () => shownRef.current && element.contains(document.activeElement);
+      const requestPaste = (text: string) => { if (!cancelled && !exited && inputRef.current) inputRef.current(id, text, true); };
+      terminalPasteRequests.set(id, () => { void navigator.clipboard.readText().then(requestPaste).catch(report); });
       const paste = (event: ClipboardEvent) => {
         const text = event.clipboardData?.getData("text/plain");
         if (text === undefined) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (canDistribute() && inputRef.current) inputRef.current(id, text, true);
-        else send(encodePaste(text, terminal.modes.bracketedPasteMode));
+        requestPaste(text);
       };
       element.addEventListener("paste", paste, true);
       const input = terminal.onData(data => {
-        if (provenance.isUserInput() && keyboardInput && canDistribute() && inputRef.current) inputRef.current(id, data, false);
+        if (!deliveringPaste && provenance.isUserInput() && keyboardInput && canDistribute() && inputRef.current) inputRef.current(id, data, false);
         else send(data);
       });
       const resize = terminal.onResize(({ cols, rows }) => { if (sessionId !== undefined && !exited) void resizeSession(sessionId, cols, rows).catch(report); });
@@ -117,7 +140,7 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
         promptCommand.receiveData();
       };
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; terminalWriters.delete(id); if (kind === "ssh") callbacks.current.onStatus("SSH-Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh") callbacks.current.onStatus("SSH-Verbindung beendet"); terminal.write("\r\n[Prozess beendet]"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);
@@ -128,12 +151,20 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
       };
       fitVisible();
       if (activeRef.current) terminal.focus();
-      const dimensions = { cols: terminal.cols, rows: terminal.rows, onData, onExit: onExitChannel };
-      const spawned = kind === "ssh"
+      const dimensions = { tabId: id, cols: terminal.cols, rows: terminal.rows, onData, onExit: onExitChannel };
+      const spawned = (async () => {
+        if (preferencesRef.current.logAllSessions || logRef.current.logAlways) {
+          try { const path = await startLog(id, logRef.current.title, preferencesRef.current); if (!cancelled) logRef.current.onLog(id, path); }
+          catch (error) { report(error); }
+        }
+        if (cancelled) { await stopLog(id).catch(report); return undefined; }
+        return kind === "ssh"
         ? connectSsh({ ...dimensions, target: target ?? "", sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
         : spawnPty({ ...dimensions, kind, startCommand, shellIntegration: settings.current.shellIntegration });
+      })();
       void spawned.then(result => {
         connecting = false;
+        if (result === undefined) return;
         const spawnedId = typeof result === "number" ? result : result.id;
         if (cancelled) { void close(spawnedId).catch(() => undefined); return; }
         sessionId = spawnedId;
@@ -141,7 +172,13 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
         if (!exited) {
-          terminalWriters.set(id, (data, pasted) => send(pasted ? encodePaste(data, terminal.modes.bracketedPasteMode) : data));
+          terminalWriters.set(id, (data, pasted) => {
+            if (!pasted) { send(data); return; }
+            // xterm.paste emits onData synchronously. Do not redistribute that
+            // approved paste through the keyboard/MultiExec path a second time.
+            deliveringPaste = true;
+            try { terminal.paste(data); } finally { deliveringPaste = false; }
+          });
           callbacks.current.onSession(id, spawnedId);
           void resizeSession(spawnedId, terminal.cols, terminal.rows).catch(report);
           promptCommand.connect(spawnedId);
@@ -151,6 +188,7 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
         callbacks.current.onClearPrompts(id);
         if (cancelled) return;
         exited = true;
+        void stopLog(id).catch(report); logRef.current.onLog(id, null);
         terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${String(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
         callbacks.current.onSession(id, null);
         callbacks.current.onExit(id);
@@ -159,6 +197,9 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
       cleanup = () => {
         callbacks.current.onClearPrompts(id);
         if (connecting) void cancelSshConnect(connectToken).catch(() => undefined);
+        terminalPasteRequests.delete(id);
+        if (sessionId === undefined) void stopLog(id).catch(report);
+        logRef.current.onLog(id, null);
         element.removeEventListener("paste", paste, true);
         textEvents.forEach(type => element.removeEventListener(type, markTextInput, true));
         otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
@@ -190,5 +231,5 @@ export function TerminalView({ paneStyle, onFocusPane, visible, monitoringSessio
 
   useEffect(() => { if (visible ?? active) { const frame = requestAnimationFrame(() => runtime.current?.fit.fit()); return () => cancelAnimationFrame(frame); } }, [visible, active, monitoringSession, gridFooter]);
 
-  return <section style={paneStyle} onPointerDown={onFocusPane} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}><div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}</section>;
+  return <section style={paneStyle} onPointerDown={onFocusPane} onContextMenu={event => { event.preventDefault(); setPasteMenu({ x: event.clientX, y: event.clientY }); }} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}><div className="terminal-container" ref={container} />{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}{pasteMenu && <div ref={pasteMenuRef} role="menu" aria-label="Terminalaktionen" className="session-context" style={{ left: Math.min(pasteMenu.x, window.innerWidth - 170), top: Math.min(pasteMenu.y, window.innerHeight - 70) }} onKeyDown={event => { if (event.key === "Escape") { setPasteMenu(null); runtime.current?.terminal.focus(); } }}><button role="menuitem" disabled={processExited} onClick={() => { setPasteMenu(null); runtime.current?.terminal.focus(); terminalPasteRequests.get(id)?.(); }}>Einfügen</button></div>}</section>;
 }

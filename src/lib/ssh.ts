@@ -8,6 +8,7 @@ export interface ConnectOptions {
   target: string;
   sessionId?: string | null;
   connectToken: number;
+  tabId: number;
   cols: number;
   rows: number;
   onData: Channel<ArrayBuffer>;

@@ -1,3 +1,7 @@
+import telnetIcon from "../assets/icons/telnet.svg?raw";
+import serialIcon from "../assets/icons/serial.svg?raw";
+import powershellIcon from "../assets/icons/powershell.svg?raw";
+import jumpIcon from "../assets/icons/jump.svg?raw";
 import icon0 from "../assets/icons/terminal.svg?raw";
 import icon1 from "../assets/icons/tux.svg?raw";
 import icon2 from "../assets/icons/star.svg?raw";
@@ -29,6 +33,11 @@ import settingsIcon from "../assets/icons/settings.svg?raw";
 
 const inline = (paths: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 const icons = {
+  telnet: telnetIcon,
+  serial: serialIcon,
+  powershell: powershellIcon,
+  jump: jumpIcon,
+
   home: inline('<path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>'),
   settings: settingsIcon,
   "session-new": sessionNewIcon,

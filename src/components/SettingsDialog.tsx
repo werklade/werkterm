@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { defaultLogFolder } from "../lib/sessionLog";
 import { useModal } from "./useModal";
 import { defaultSettings, normalizeSettings, selectedTheme, type Settings } from "../lib/settings";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "../lib/terminalThemes";
@@ -25,7 +26,7 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: 
   const current = useRef(settings); current.current = settings;
   const change = (patch: Partial<Settings>) => onChange(normalizeSettings({ ...current.current, ...patch }));
   const number = (label: string, key: "fontSize" | "lineHeight" | "scrollback" | "editorFontSize", min: number, max: number, step = 1) => <NumberSetting key={key} label={label} value={settings[key]} min={min} max={max} step={step} onValue={value => change({ [key]: value })} />;
-  const check = (label: string, key: "cursorBlink" | "editorWrap" | "confirmCloseSsh") => <label className="settings-check"><input type="checkbox" checked={settings[key]} onChange={e => change({ [key]: e.target.checked })} />{label}</label>;
+  const check = (label: string, key: "cursorBlink" | "editorWrap" | "confirmCloseSsh" | "logAllSessions" | "logStripAnsi") => <label className="settings-check"><input type="checkbox" checked={settings[key]} onChange={e => change({ [key]: e.target.checked })} />{label}</label>;
   const importColors = async () => {
     setBusy(true); setError("");
     try {
@@ -39,10 +40,12 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: 
       change({ importedTheme: imported, theme: "MobaXterm (importiert)" });
     } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
   };
+  useEffect(() => { if (!current.current.logFolder) void defaultLogFolder().then(logFolder => { if (!current.current.logFolder) change({ logFolder }); }).catch(reason => setError(String(reason))); }, []);
   const theme = selectedTheme(settings);
   return <dialog ref={dialog} className="ssh-dialog settings-dialog" aria-label="Einstellungen" onCancel={e => { e.preventDefault(); onClose(); }}>
-    <h2>Einstellungen</h2><div role="tablist" aria-label="Einstellungsbereiche">{["Terminal", "Editor"].map(name => <button id={`settings-tab-${name}`} role="tab" aria-selected={tab === name} aria-controls="settings-panel" tabIndex={tab === name ? 0 : -1} key={name} onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); const next = name === "Terminal" ? "Editor" : "Terminal"; setTab(next); document.getElementById(`settings-tab-${next}`)?.focus(); } }} onClick={() => setTab(name)}>{name}</button>)}</div>
+    <h2>Einstellungen</h2><div role="tablist" aria-label="Einstellungsbereiche">{["Terminal", "Editor", "Protokoll"].map(name => <button id={`settings-tab-${name}`} role="tab" aria-selected={tab === name} aria-controls="settings-panel" tabIndex={tab === name ? 0 : -1} key={name} onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); const names = ["Terminal", "Editor", "Protokoll"]; const next = names[(names.indexOf(name) + (e.key === "ArrowRight" ? 1 : 2)) % 3]; setTab(next); document.getElementById(`settings-tab-${next}`)?.focus(); } }} onClick={() => setTab(name)}>{name}</button>)}</div>
     <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="settings-fields">{tab === "Terminal" ? <>
+      <label>Einfügen bestätigen<select value={settings.pasteConfirm} onChange={e => change({ pasteConfirm: e.target.value as Settings["pasteConfirm"] })}><option value="multiline">Bei mehreren Zeilen</option><option value="always">Immer</option><option value="never">Nie</option></select></label>
       <label>Schriftart<input list="mono-fonts" value={settings.fontFamily} onChange={e => change({ fontFamily: e.target.value })} /></label><datalist id="mono-fonts">{["Cascadia Mono", "DejaVu Sans Mono", "Consolas", "Liberation Mono", "Ubuntu Mono", "monospace"].map(font => <option key={font} value={font} />)}</datalist>
       {number("Schriftgröße", "fontSize", 8, 32)}{number("Zeilenhöhe", "lineHeight", 1, 2, .1)}
       <label>Cursorform<select value={settings.cursorStyle} onChange={e => change({ cursorStyle: e.target.value as Settings["cursorStyle"] })}><option value="block">Block</option><option value="bar">Strich</option><option value="underline">Unterstrich</option></select></label>
@@ -51,8 +54,8 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: 
       <label>Farbschema<select value={settings.theme} onChange={e => change({ theme: e.target.value })}>{[...Object.keys(terminalThemes), ...(settings.importedTheme ? ["MobaXterm (importiert)"] : [])].map(name => <option key={name}>{name}</option>)}</select></label>
       <div className="theme-preview" style={{ background: theme.background, color: theme.foreground }}><p>Werkterm · Textvorschau 0123456789</p><div>{ansiKeys.map(key => <span key={key} title={`${key}: ${theme[key]}`} style={{ background: theme[key] }} />)}</div></div>
       <button disabled={busy} onClick={() => void importColors()}>Farben aus MobaXterm importieren…</button>
-    </> : <>{number("Schriftgröße", "editorFontSize", 8, 32)}{check("Zeilenumbruch standardmäßig an", "editorWrap")}<label>Tabbreite<select value={settings.editorTabSize} onChange={e => change({ editorTabSize: Number(e.target.value) as 2 | 4 | 8 })}>{[2, 4, 8].map(n => <option key={n}>{n}</option>)}</select></label></>}</div>
+    </> : tab === "Protokoll" ? <><label>Protokollordner<input value={settings.logFolder} onChange={e => change({ logFolder: e.target.value })} /></label><button onClick={() => { void open({ directory: true, multiple: false, title: "Protokollordner wählen" }).then(path => { if (typeof path === "string") change({ logFolder: path }); }).catch(reason => setError(String(reason))); }}>Ordner wählen…</button>{check("Alle Sitzungen protokollieren", "logAllSessions")}{check("Farb- und Steuercodes entfernen", "logStripAnsi")}</> : <>{number("Schriftgröße", "editorFontSize", 8, 32)}{check("Zeilenumbruch standardmäßig an", "editorWrap")}<label>Tabbreite<select value={settings.editorTabSize} onChange={e => change({ editorTabSize: Number(e.target.value) as 2 | 4 | 8 })}>{[2, 4, 8].map(n => <option key={n}>{n}</option>)}</select></label></>}</div>
     <button type="button" onClick={onClearRecents}>Zuletzt verwendet leeren</button>
-    {error && <p role="alert">{error}</p>}<p>Änderungen gelten sofort.</p><div className="dialog-actions"><button onClick={() => change(tab === "Terminal" ? { fontFamily: defaultSettings.fontFamily, fontSize: 14, lineHeight: 1, cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: defaultSettings.theme } : { editorFontSize: 14, editorWrap: false, editorTabSize: 4 })}>Zurücksetzen</button><button autoFocus onClick={onClose}>Schließen</button></div>
+    {error && <p role="alert">{error}</p>}<p>Änderungen gelten sofort.</p><div className="dialog-actions"><button onClick={() => change(tab === "Terminal" ? { pasteConfirm: defaultSettings.pasteConfirm, fontFamily: defaultSettings.fontFamily, fontSize: 14, lineHeight: 1, cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: defaultSettings.theme } : tab === "Protokoll" ? { logFolder: "", logAllSessions: false, logStripAnsi: true } : { editorFontSize: 14, editorWrap: false, editorTabSize: 4 })}>Zurücksetzen</button><button autoFocus onClick={onClose}>Schließen</button></div>
   </dialog>;
 }

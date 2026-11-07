@@ -20,6 +20,7 @@ export interface SavedSession {
   keepaliveInterval?: number;
   keepaliveMax?: number;
   jumpSessionId?: string | null;
+  log_always?: boolean;
 }
 
 export interface ImportCandidate {

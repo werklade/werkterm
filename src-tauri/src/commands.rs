@@ -189,6 +189,8 @@ impl Prompter for TauriPrompter {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn pty_spawn(
+    app: tauri::AppHandle,
+    tab_id: u32,
     state: State<'_, Arc<PtyManager>>,
     kind: ShellKind,
     cols: u16,
@@ -209,15 +211,18 @@ pub async fn pty_spawn(
         )
         .map_err(|error| error.to_string())?;
         crate::pty::apply_start_command(&mut spec, start_command)?;
+        let exit_app = app.clone();
         manager
             .spawn(
                 &spec,
                 cols,
                 rows,
                 Box::new(move |bytes| {
+                    crate::session_log::output(&app, tab_id, &bytes);
                     let _ = on_data.send(InvokeResponseBody::Raw(bytes));
                 }),
                 Box::new(move |code| {
+                    crate::session_log::finish(&exit_app, tab_id);
                     let _ = on_exit.send(code);
                 }),
             )
@@ -300,6 +305,7 @@ pub async fn ssh_connect(
     app: tauri::AppHandle,
     state: State<'_, Arc<SshManager>>,
     pending: State<'_, Arc<PendingPrompts>>,
+    tab_id: u32,
     target: String,
     session_id: Option<String>,
     connect_token: u32,
@@ -327,6 +333,7 @@ pub async fn ssh_connect(
         pending: Arc::clone(pending.inner()),
         channel: on_prompt,
     });
+    let exit_app = app.clone();
     state
         .inner()
         .connect_with_session(
@@ -339,9 +346,11 @@ pub async fn ssh_connect(
             ssh_dir()?.join("known_hosts"),
             prompter,
             Box::new(move |bytes| {
+                crate::session_log::output(&app, tab_id, &bytes);
                 let _ = on_data.send(InvokeResponseBody::Raw(bytes));
             }),
             Box::new(move |code| {
+                crate::session_log::finish(&exit_app, tab_id);
                 let _ = on_exit.send(code);
             }),
         )

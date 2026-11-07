@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { buildSessionTree, deleteSession, jumpHostHint, searchSessions, sessionLabel, type SavedSession, type SessionFolder } from "../lib/sessions";
+import { KindIcon } from "./KindIcon";
 import { Icon } from "./Icon";
 import { FileActionDialog } from "./FileActionDialog";
 import { ImportDialog } from "./ImportDialog";
@@ -73,7 +74,7 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus 
     <input className="sessions-search" aria-label="Sitzungen suchen" placeholder="Sitzungen suchen…" value={query} onChange={event => setQuery(event.target.value)} />
     <div className="sessions-list" role="tree" aria-label="Gespeicherte Sitzungen">
       {rows.map((row, index) => <div key={row.key} ref={element => { if (element) rowRefs.current.set(row.key, element); else rowRefs.current.delete(row.key); }} role="treeitem" aria-level={row.depth + 1} aria-expanded={row.folder ? Boolean(query || expanded[row.folder.path]) : undefined} aria-selected={selected === row.key} tabIndex={selected === row.key || (!rows.some(item => item.key === selected) && index === 0) ? 0 : -1} className="session-row" style={{ paddingLeft: 8 + row.depth * 14 }} onFocus={() => setSelected(row.key)} onClick={() => { setSelected(row.key); if (row.folder) toggle(row.folder.path); }} onDoubleClick={() => row.session && onConnect(row.session)} onKeyDown={event => keyDown(event, row, index)} onContextMenu={event => { if (!row.session) return; event.preventDefault(); setSelected(row.key); setContext({ x: event.clientX, y: event.clientY, session: row.session }); }}>
-        <span aria-hidden="true">{row.folder ? query || expanded[row.folder.path] ? "▾" : "▸" : ""}</span><Icon name={row.folder ? "folder" : row.session?.kind === "ssh" ? "ssh" : "terminal"} /><span className="session-row-label">{row.folder?.name ?? row.session?.name}{row.session && <small title={[sessionLabel(row.session), jumpHostHint(row.session, sessions)].filter(Boolean).join(" – ")}>{sessionLabel(row.session)}{row.session.jumpSessionId && <> · {jumpHostHint(row.session, sessions)}</>}</small>}</span>
+        <span aria-hidden="true">{row.folder ? query || expanded[row.folder.path] ? "▾" : "▸" : ""}</span>{row.folder ? <Icon name="folder" /> : <KindIcon kind={row.session?.kind ?? "ssh"} jump={!!row.session?.jumpSessionId} />}<span className="session-row-label">{row.folder?.name ?? row.session?.name}{row.session && <small title={[sessionLabel(row.session), jumpHostHint(row.session, sessions)].filter(Boolean).join(" – ")}>{sessionLabel(row.session)}{row.session.jumpSessionId && <> · {jumpHostHint(row.session, sessions)}</>}</small>}</span>
       </div>)}
       {rows.length === 0 && <p className="empty-state">{query ? "Keine passenden Sitzungen." : "Noch keine gespeicherten Sitzungen."}</p>}
     </div>
