@@ -28,6 +28,8 @@ input::placeholder { color: var(--fg-muted); }
 .quick-connect input { width: 100%; }
 .quick-connect input[aria-invalid="true"] { border-color: var(--danger); outline-color: var(--danger); }
 .sidebar-content { display: flex; flex: 1; min-height: 0; }
+.sidebar.collapsed { width: var(--sidebar-icon-width); }
+.sidebar.collapsed .quick-connect { display: none; }
 .sidebar-icons { width: var(--sidebar-icon-width); flex: none; display: flex; flex-direction: column; background: var(--bg-panel-alt); border-right: 1px solid var(--border-strong); }
 .sidebar-icons button { width: 100%; min-height: 42px; display: grid; place-items: center; border-left: 3px solid var(--bg-panel-alt); }
 .sidebar-icons button[aria-pressed="true"] { background: var(--bg-active); color: var(--accent-hover); border-left-color: var(--accent); }
