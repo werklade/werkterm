@@ -3,6 +3,13 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Werklade Hell: text on orange buttons is now slate instead of white, so it meets WCAG AA contrast (4.5:1 instead of 3.3:1).
+- The primary dialog button uses the new design token `accent-hover-fill` under the pointer (Werklade Hell: a lighter orange, so slate text stays readable). Custom designs saved without this token keep their own hover colour.
+
 ## [0.1.5] – 2026-11-08
 
 ### Changed

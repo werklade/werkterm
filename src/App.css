@@ -89,7 +89,7 @@ input::placeholder { color: var(--fg-muted); }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .dialog-actions button { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 12px; background: var(--bg-toolbar); }
 .dialog-actions button[type="submit"] { background: var(--accent); color: var(--on-accent); }
-.dialog-actions button[type="submit"]:hover { background: var(--accent-hover); }
+.dialog-actions button[type="submit"]:hover { background: var(--accent-hover-fill); }
 
 .statusbar { display: flex; align-items: center; gap: 10px; }
 .statusbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

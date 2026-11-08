@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 const MAX_SIZE: u64 = 256 * 1024;
-const UI_KEYS: &str = "bg-content bg-app bg-panel bg-panel-alt bg-toolbar bg-menubar bg-input bg-hover bg-active bg-tab bg-tab-active fg-primary fg-secondary fg-muted fg-inverse accent accent-hover border border-strong focus-ring danger warning success on-accent monitor-ok monitor-warn monitor-critical selection backdrop shadow warning-bg error-bg indent-guide diff-added diff-deleted diff-added-text diff-deleted-text";
+const UI_KEYS: &str = "bg-content bg-app bg-panel bg-panel-alt bg-toolbar bg-menubar bg-input bg-hover bg-active bg-tab bg-tab-active fg-primary fg-secondary fg-muted fg-inverse accent accent-hover accent-hover-fill border border-strong focus-ring danger warning success on-accent monitor-ok monitor-warn monitor-critical selection backdrop shadow warning-bg error-bg indent-guide diff-added diff-deleted diff-added-text diff-deleted-text";
 const TERMINAL_KEYS: &str = "background foreground cursor selectionBackground black red green yellow blue magenta cyan white brightBlack brightRed brightGreen brightYellow brightBlue brightMagenta brightCyan brightWhite";
 const EDITOR_KEYS: &str = "keyword string comment number function type variable property operator tag attribute meta invalid gutter-fg active-line selection cursor";
 
@@ -281,6 +281,12 @@ mod tests {
         assert_eq!(result["terminal"]["brightBlack"], "#AbCdEf");
         assert_eq!(result["editor"], json!({}));
         assert!(validate_design(&Value::Null).is_err());
+    }
+
+    #[test]
+    fn validation_keeps_accent_hover_fill() {
+        let result = validate_design(&json!({"name":"a", "ui":{"accent-hover-fill":"#e07d22"}})).unwrap();
+        assert_eq!(result["ui"], json!({"accent-hover-fill":"#e07d22"}));
     }
 
     #[test]

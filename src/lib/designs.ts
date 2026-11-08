@@ -1,7 +1,7 @@
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 import { luminance, mixColor, parseColor } from "./colorCodes";
 import werkladeTokens from "../brand/werklade.tokens.json";
-export const uiTokens = ["bg-content", "bg-app", "bg-panel", "bg-panel-alt", "bg-toolbar", "bg-menubar", "bg-input", "bg-hover", "bg-active", "bg-tab", "bg-tab-active", "fg-primary", "fg-secondary", "fg-muted", "fg-inverse", "accent", "accent-hover", "border", "border-strong", "focus-ring", "danger", "warning", "success", "on-accent", "monitor-ok", "monitor-warn", "monitor-critical", "selection", "backdrop", "shadow", "warning-bg", "error-bg", "indent-guide", "diff-added", "diff-deleted", "diff-added-text", "diff-deleted-text"] as const;
+export const uiTokens = ["bg-content", "bg-app", "bg-panel", "bg-panel-alt", "bg-toolbar", "bg-menubar", "bg-input", "bg-hover", "bg-active", "bg-tab", "bg-tab-active", "fg-primary", "fg-secondary", "fg-muted", "fg-inverse", "accent", "accent-hover", "accent-hover-fill", "border", "border-strong", "focus-ring", "danger", "warning", "success", "on-accent", "monitor-ok", "monitor-warn", "monitor-critical", "selection", "backdrop", "shadow", "warning-bg", "error-bg", "indent-guide", "diff-added", "diff-deleted", "diff-added-text", "diff-deleted-text"] as const;
 export const editorTokens = ["keyword", "string", "comment", "number", "function", "type", "variable", "property", "operator", "tag", "attribute", "meta", "invalid", "gutter-fg", "active-line", "selection", "cursor"] as const;
 export type UiToken = typeof uiTokens[number];
 export type EditorToken = typeof editorTokens[number];
@@ -33,6 +33,7 @@ const baseUi: Record<UiToken, string> = {
     "fg-inverse": "#1e1e1e",
     "accent": "#1769ff",
     "accent-hover": "#3d84ff",
+    "accent-hover-fill": "#3d84ff",
     "border": "#2a2a2a",
     "border-strong": "#3c3c3c",
     "focus-ring": "#1769ff",
@@ -77,9 +78,14 @@ export function normalizeDesign(input: unknown, fallback: Design = builtInDesign
   }
   const terminalFallback = Object.fromEntries([...ansiKeys, "background", "foreground", "cursor", "selectionBackground"]
     .map(key => [key, fallback.terminal[key as keyof TerminalTheme] as string]));
+  const ui = group(value.ui, fallback.ui);
+  // Designs saved before accent-hover-fill existed keep their own hover colour for the button fill.
+  const storedUi = value.ui && typeof value.ui === "object" ? value.ui as Record<string, unknown> : {};
+  const valid = (key: string) => typeof storedUi[key] === "string" && colorPattern.test(storedUi[key] as string);
+  if (valid("accent-hover") && !valid("accent-hover-fill")) ui["accent-hover-fill"] = ui["accent-hover"];
   return {
     name: typeof value.name === "string" && value.name.trim() ? value.name.trim().slice(0, 60) : fallback.name,
-    ui: group(value.ui, fallback.ui), terminal: group(value.terminal, terminalFallback) as TerminalTheme,
+    ui, terminal: group(value.terminal, terminalFallback) as TerminalTheme,
     editor: group(value.editor, fallback.editor),
   };
 }

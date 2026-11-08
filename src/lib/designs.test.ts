@@ -25,7 +25,12 @@ describe("design validation", () => {
       for (const token of [...ansiKeys, "background", "foreground", "cursor", "selectionBackground"] as const) expect(design.terminal[token]).toMatch(/^#[\da-f]{6}([\da-f]{2})?$/i);
     }
     expect(builtInDesigns["Werklade Dunkel"].ui.accent).toBe("#f08a24");
-    expect(builtInDesigns["Werklade Hell"].ui["on-accent"]).toBe("#ffffff");
+    expect(builtInDesigns["Werklade Hell"].ui["on-accent"]).toBe("#1f2933");
+  });
+  it("keeps the stored hover colour as button fill for designs saved without accent-hover-fill", () => {
+    expect(normalizeDesign({ name: "Alt", ui: { "accent-hover": "#123456" } }).ui["accent-hover-fill"]).toBe("#123456");
+    expect(normalizeDesign({ name: "Neu", ui: { "accent-hover": "#123456", "accent-hover-fill": "#abcdef" } }).ui["accent-hover-fill"]).toBe("#abcdef");
+    expect(builtInDesigns["Werklade Hell"].ui["accent-hover-fill"]).toBe("#e07d22");
   });
   it("resolves registered user designs and safely falls back for unknown names", () => {
     const design = normalizeDesign({ name: "Custom", ui: { accent: "#123456" } });
