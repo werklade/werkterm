@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.1.0] – unreleased
+## [0.1.0] – 2026-11-08
 
 ### Added
 
@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Macro recording/playback, text/wait/prompt steps, shortcuts and MultiExec integration.
 - Terminal copy/export (TXT/HTML/RTF), editable paste confirmation, session logging, close confirmation and Return/R/S session-end menu.
 - SSH key generation, open local ports, ASCII table, Linux serial-permission assistance and Tux idle animation.
-- English/German READMEs, architecture documentation and screenshot placeholders.
+- English/German READMEs with Linux screenshots and architecture documentation.
 
 ### Changed
 

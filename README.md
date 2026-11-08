@@ -35,7 +35,7 @@ Linux x86_64 with WebKitGTK 4.1 and GTK 3: Debian-family runtime packages includ
 
 ## Installing
 
-There are no published releases yet; build the packages as described below. The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names.
+Prebuilt packages (`.deb`, AppImage, `SHA256SUMS`) are attached to the GitHub release, visible to invited testers; alternatively build them as described below. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names.
 
 Debian-family systems, Bash (installs a system package):
 

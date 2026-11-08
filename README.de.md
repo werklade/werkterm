@@ -35,7 +35,7 @@ Linux x86_64 mit WebKitGTK 4.1 und GTK 3: Laufzeitpakete auf Debian-basierten Sy
 
 ## Installation
 
-Es gibt noch keine veröffentlichten Releases; Pakete lassen sich wie unten beschrieben selbst bauen. Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung.
+Fertige Pakete (`.deb`, AppImage, `SHA256SUMS`) hängen am GitHub-Release, sichtbar für eingeladene Tester; alternativ lassen sie sich wie unten beschrieben selbst bauen. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung.
 
 Debian-basierte Systeme, Bash (installiert ein Systempaket):
 
