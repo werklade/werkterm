@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] – 2026-11-08
+
+### Added
+
+- Export all, selected or folder sessions to a Werkterm session file (no passwords) and import it on another device with preview, duplicate detection and jump-host remapping.
+
+### Changed
+
+- The Sessions menu lists new session, panel and import/export actions above the saved sessions.
+
 ## [0.1.1] – 2026-11-08
 
 ### Fixed

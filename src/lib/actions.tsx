@@ -20,9 +20,12 @@ export function createMenus({ macros = [], recording = false, savedSessions, set
       { label: "Quick connect…", action: "quick" }, { label: "Tab schließen", action: "close", shortcut: "Strg+Umschalt+W", disabled: activeId === 0 }, { label: "Beenden", action: "quit" },
     ] },
     { label: "Sessions", mnemonic: 0, items: [
+      { label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungs-Panel anzeigen", action: "sessions" },
+      { label: "", action: "sessions-transfer-separator", separator: true },
+      { label: "Sitzungen exportieren…", action: "exportSessions" }, { label: "Import aus Werkterm-Datei…", action: "werkterm" },
+      { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" },
+      ...(savedSessions.length ? [{ label: "", action: "sessions-saved-separator", separator: true }] : []),
       ...folders.flatMap(folder => [heading(folder), ...savedSessions.filter(s => (s.folder || "Ohne Ordner") === folder).map(s => ({ label: `  ${s.name}`, action: `saved:${s.id}`, icon: <Icon name={s.kind === "ssh" ? "ssh" : "terminal"}/> }))]),
-      { label: "", action: "sessions-separator", separator: true },
-      { label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungs-Panel anzeigen", action: "sessions" }, { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" },
     ] },
     { label: "Makros", mnemonic: 0, items: [
       { label: recording ? "Aufnahme stoppen" : "Aufnahme starten", action: "macro:record" },

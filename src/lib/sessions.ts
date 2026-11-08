@@ -227,3 +227,15 @@ export function selectSessions(previous: SessionSelection, visible: readonly str
 export function collectFolderSessions(folder: SessionFolder): SavedSession[] {
   return [...folder.sessions, ...folder.folders.flatMap(collectFolderSessions)];
 }
+
+export interface WerktermImportPreview {
+  sessions: SavedSession[];
+  duplicateOf: (string | null)[];
+  warnings: string[];
+}
+export const exportSessions = (ids: string[], path: string) =>
+  invoke<number>("sessions_export", { ids, path });
+export const previewWerktermImport = (path: string) =>
+  invoke<WerktermImportPreview>("sessions_export_preview", { path });
+export const importWerktermSessions = (path: string, ids: string[]) =>
+  invoke<ImportResult>("sessions_import_werkterm", { path, ids });

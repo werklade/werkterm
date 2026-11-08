@@ -842,6 +842,253 @@ pub struct ImportResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WerktermImportPreview {
+    pub sessions: Vec<SavedSession>,
+    pub duplicate_of: Vec<Option<String>>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct WerktermExport {
+    format: &'static str,
+    version: u32,
+    exported: String,
+    sessions: Vec<SavedSession>,
+}
+
+fn export_bytes(sessions: &[SavedSession], ids: &[String]) -> Result<(Vec<u8>, usize), String> {
+    let sessions: Vec<_> = sessions
+        .iter()
+        .filter(|session| ids.is_empty() || ids.contains(&session.id))
+        .cloned()
+        .collect();
+    let count = sessions.len();
+    if count == 0 {
+        return Err("Keine Sitzungen für den Export gefunden".into());
+    }
+    let bytes = serde_json::to_vec_pretty(&WerktermExport {
+        format: "werkterm-sessions",
+        version: 1,
+        exported: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string(),
+        sessions,
+    })
+    .map_err(|_| "Sitzungen konnten nicht serialisiert werden".to_owned())?;
+    Ok((bytes, count))
+}
+
+fn export_to_path(path: &Path, sessions: &[SavedSession], ids: &[String]) -> Result<usize, String> {
+    let (bytes, count) = export_bytes(sessions, ids)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let temp = parent.join(format!(".werkterm-export-{}.tmp", new_id()));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result.map_err(|_| "Sitzungsdatei konnte nicht atomar exportiert werden".to_owned())?;
+    Ok(count)
+}
+
+fn same_werkterm_target(left: &SavedSession, right: &SavedSession) -> bool {
+    left.kind == right.kind
+        && if left.kind == "serial" {
+            left.serial
+                .as_ref()
+                .zip(right.serial.as_ref())
+                .is_some_and(|(left, right)| left.device == right.device)
+        } else {
+            left.host.to_lowercase() == right.host.to_lowercase()
+                && left.port == right.port
+                && left.user == right.user
+        }
+}
+
+fn werkterm_preview(bytes: &[u8], local: &[SavedSession]) -> Result<WerktermImportPreview, String> {
+    let file: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| "Sitzungsdatei ist beschädigt".to_owned())?;
+    if file.get("format").and_then(serde_json::Value::as_str) != Some("werkterm-sessions") {
+        return Err("Keine Werkterm-Sitzungsdatei".into());
+    }
+    let version = file
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("Sitzungsdatei hat eine ungültige Formatversion")?;
+    if version > 1 {
+        return Err(format!(
+            "Sitzungsdatei aus neuerer Werkterm-Version (Format {version})"
+        ));
+    }
+    if version != 1 {
+        return Err("Sitzungsdatei hat eine ungültige Formatversion".into());
+    }
+    let entries = file
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Sitzungsdatei enthält keine Sitzungsliste")?;
+    let mut preview = WerktermImportPreview::default();
+    let mut seen = std::collections::HashSet::new();
+    for entry in entries {
+        let name = entry
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Unbenannte Sitzung");
+        let session = serde_json::from_value::<SavedSession>(entry.clone())
+            .map_err(|_| "Ungültige Sitzungsdaten".to_owned())
+            .and_then(|session| {
+                validate(&session)?;
+                if session.id.is_empty() || !seen.insert(session.id.clone()) {
+                    return Err("Ungültige oder doppelte Sitzungs-ID".into());
+                }
+                Ok(session)
+            });
+        match session {
+            Ok(session) => {
+                preview.duplicate_of.push(
+                    local
+                        .iter()
+                        .find(|saved| same_werkterm_target(saved, &session))
+                        .map(|saved| saved.id.clone()),
+                );
+                preview.sessions.push(session);
+            }
+            Err(error) => preview
+                .warnings
+                .push(format!("{name}: {error} (übersprungen)")),
+        }
+    }
+    Ok(preview)
+}
+
+fn prepare_werkterm_import(
+    bytes: &[u8],
+    local: &[SavedSession],
+    ids: &[String],
+    home: &Path,
+) -> Result<(Vec<SavedSession>, ImportResult), String> {
+    let preview = werkterm_preview(bytes, local)?;
+    let selected: std::collections::HashSet<_> = ids.iter().collect();
+    let mut imported: Vec<_> = preview
+        .sessions
+        .into_iter()
+        .filter(|session| selected.contains(&session.id))
+        .collect();
+    let mut result = ImportResult {
+        imported: imported.len() as u32,
+        skipped_duplicates: selected.len().saturating_sub(imported.len()) as u32,
+        warnings: preview.warnings,
+    };
+    let mapping: std::collections::HashMap<_, _> = imported
+        .iter()
+        .map(|session| (session.id.clone(), new_id()))
+        .collect();
+    let mut passwords = 0;
+    for session in &mut imported {
+        session.id = mapping[&session.id].clone();
+        if let Some(jump) = &session.jump_session_id {
+            if let Some(mapped) = mapping.get(jump) {
+                session.jump_session_id = Some(mapped.clone());
+            } else if !local.iter().any(|saved| saved.id == *jump) {
+                session.jump_session_id = None;
+                result.warnings.push(format!(
+                    "{}: Jump-Host nicht gefunden, Verweis entfernt",
+                    session.name
+                ));
+            }
+        }
+        match &session.auth {
+            SessionAuth::Password => {
+                session.auth = SessionAuth::Ask;
+                passwords += 1;
+            }
+            SessionAuth::KeyFile { path } if !expand_home(path, home).exists() => {
+                result.warnings.push(format!(
+                    "{}: Schlüsseldatei {path} nicht gefunden",
+                    session.name
+                ))
+            }
+            _ => {}
+        }
+    }
+    if passwords > 0 {
+        result.warnings.push(format!("{passwords} Sitzungen fragen beim Verbinden nach dem Passwort (Passwörter werden nicht exportiert)"));
+    }
+    let mut combined = local.to_vec();
+    combined.extend(imported);
+    validate_jump_hosts(&combined)?;
+    Ok((combined, result))
+}
+
+#[tauri::command]
+pub async fn sessions_export(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+    path: String,
+) -> Result<usize, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    let sessions = read_file(config_path(&app)?).await?;
+    tauri::async_runtime::spawn_blocking(move || export_to_path(Path::new(&path), &sessions, &ids))
+        .await
+        .map_err(|_| "Sitzungsexport fehlgeschlagen".to_owned())?
+}
+
+#[tauri::command]
+pub async fn sessions_export_preview(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<WerktermImportPreview, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    let local = read_file(config_path(&app)?).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes =
+            fs::read(path).map_err(|_| "Importdatei konnte nicht gelesen werden".to_owned())?;
+        werkterm_preview(&bytes, &local)
+    })
+    .await
+    .map_err(|_| "Importvorschau fehlgeschlagen".to_owned())?
+}
+
+#[tauri::command]
+pub async fn sessions_import_werkterm(
+    app: tauri::AppHandle,
+    path: String,
+    ids: Vec<String>,
+) -> Result<ImportResult, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    let storage = config_path(&app)?;
+    let local = read_file(storage.clone()).await?;
+    let home = home_dir()?;
+    let (sessions, result) = tauri::async_runtime::spawn_blocking(move || {
+        let bytes =
+            fs::read(path).map_err(|_| "Importdatei konnte nicht gelesen werden".to_owned())?;
+        prepare_werkterm_import(&bytes, &local, &ids, &home)
+    })
+    .await
+    .map_err(|_| "Sitzungsimport fehlgeschlagen".to_owned())??;
+    persist(storage, sessions).await?;
+    Ok(result)
+}
+
 fn append_unique_imports(
     sessions: &mut Vec<SavedSession>,
     imported: Vec<SavedSession>,
@@ -1397,6 +1644,155 @@ mod tests {
         assert!(session.log_always);
         assert_eq!(serde_json::to_value(session).unwrap()["log_always"], true);
     }
+    #[test]
+    fn werkterm_export_roundtrip_and_format_validation() {
+        let sessions = vec![sample(), jump_sample("other", None)];
+        let directory = std::env::temp_dir().join(format!("werkterm-export-{}", new_id()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("export.json");
+        assert_eq!(export_to_path(&path, &sessions, &[]).unwrap(), 2);
+        let bytes = fs::read(&path).unwrap();
+        assert!(!bytes.contains(&b'\r'));
+        let preview = werkterm_preview(&bytes, &[]).unwrap();
+        assert_eq!(preview.sessions, sessions);
+        assert_eq!(preview.duplicate_of, [None, None]);
+        assert!(preview.warnings.is_empty());
+        assert_eq!(
+            export_to_path(&path, &sessions, &["other".into()]).unwrap(),
+            1
+        );
+        assert_eq!(
+            werkterm_preview(&fs::read(&path).unwrap(), &[])
+                .unwrap()
+                .sessions,
+            [sessions[1].clone()]
+        );
+        assert!(export_bytes(&sessions, &["missing".into()]).is_err());
+        let mut file: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        file["format"] = serde_json::json!("other");
+        assert_eq!(
+            werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap_err(),
+            "Keine Werkterm-Sitzungsdatei"
+        );
+        file["format"] = serde_json::json!("werkterm-sessions");
+        file["version"] = serde_json::json!(2);
+        assert!(
+            werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[])
+                .unwrap_err()
+                .contains("Format 2")
+        );
+        file["version"] = serde_json::json!(1);
+        file["sessions"][0]["port"] = serde_json::json!(0);
+        let preview = werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap();
+        assert_eq!(preview.sessions.len(), 1);
+        assert!(preview.warnings[0].contains("Test"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn werkterm_import_remaps_jumps_and_reports_missing_credentials() {
+        let local = jump_sample("local", None);
+        let imported = vec![
+            jump_sample("gateway", None),
+            jump_sample("internal", Some("gateway")),
+            jump_sample("external", Some("local")),
+            jump_sample("missing", Some("unknown")),
+            sample(),
+            SavedSession {
+                id: "key".into(),
+                auth: SessionAuth::KeyFile {
+                    path: "~/missing-key".into(),
+                },
+                ..sample()
+            },
+        ];
+        let (bytes, _) = export_bytes(&imported, &[]).unwrap();
+        let mut ids: Vec<_> = imported.iter().map(|session| session.id.clone()).collect();
+        ids.push("not-in-file".into());
+        let home = std::env::temp_dir().join(format!("werkterm-missing-{}", new_id()));
+        let (combined, result) = prepare_werkterm_import(&bytes, &[local], &ids, &home).unwrap();
+        assert_eq!(result.imported, 6);
+        assert_eq!(result.skipped_duplicates, 1);
+        assert_eq!(combined[2].jump_session_id.as_ref(), Some(&combined[1].id));
+        assert_eq!(combined[3].jump_session_id.as_deref(), Some("local"));
+        assert_eq!(combined[4].jump_session_id, None);
+        assert_eq!(combined[5].auth, SessionAuth::Ask);
+        assert!(
+            combined[1..]
+                .iter()
+                .all(|session| !ids.contains(&session.id))
+        );
+        assert_eq!(result.warnings.len(), 3);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("Jump-Host nicht gefunden"))
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.starts_with("5 Sitzungen fragen"))
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("Schlüsseldatei ~/missing-key nicht gefunden"))
+        );
+        let (combined, result) =
+            prepare_werkterm_import(&bytes, &[], &["internal".into()], &home).unwrap();
+        assert_eq!(combined[0].jump_session_id, None);
+        assert_eq!(result.warnings.len(), 2);
+    }
+
+    #[test]
+    fn werkterm_duplicates_cover_all_connection_kinds() {
+        let ssh = sample();
+        let telnet = SavedSession {
+            kind: "telnet".into(),
+            id: "telnet".into(),
+            auth: SessionAuth::Default,
+            ..sample()
+        };
+        let serial: SavedSession = serde_json::from_value(serde_json::json!({ "kind": "serial", "id": "serial", "name": "Console", "folder": "", "serial": { "device": "/dev/ttyUSB0" } })).unwrap();
+        let local = vec![ssh, telnet, serial];
+        let mut imported = local.clone();
+        for session in &mut imported {
+            session.id = format!("import-{}", session.id);
+            session.host = session.host.to_uppercase();
+        }
+        let (bytes, _) = export_bytes(&imported, &[]).unwrap();
+        let preview = werkterm_preview(&bytes, &local).unwrap();
+        assert_eq!(
+            preview.duplicate_of,
+            [
+                Some("sample".into()),
+                Some("telnet".into()),
+                Some("serial".into())
+            ]
+        );
+        imported[0].user = Some("other".into());
+        imported[1].port += 1;
+        imported[2].serial.as_mut().unwrap().device = "/dev/ttyUSB1".into();
+        let (bytes, _) = export_bytes(&imported, &[]).unwrap();
+        assert_eq!(
+            werkterm_preview(&bytes, &local).unwrap().duplicate_of,
+            [None, None, None]
+        );
+        let (combined, result) = prepare_werkterm_import(
+            &export_bytes(&local, &[]).unwrap().0,
+            &local,
+            &["sample".into()],
+            Path::new("."),
+        )
+        .unwrap();
+        assert_eq!(combined.len(), 4);
+        assert_eq!(result.imported, 1);
+        assert_eq!(result.skipped_duplicates, 0);
+    }
+
     fn sample() -> SavedSession {
         SavedSession {
             kind: default_kind(),

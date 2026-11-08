@@ -47,7 +47,7 @@ describe("View preferences and shared action definitions", () => {
     expect(all.map(i => i.action).sort()).toEqual(shortcuts.map(i => i.action).sort());
   });
   it("groups sessions and restricts system tools to Linux", () => {
-    expect(definitions().find(m => m.label === "Sessions")?.items[0]).toMatchObject({ label: "Work/Servers", heading: true });
+    expect(definitions().find(m => m.label === "Sessions")?.items.find(item => item.heading)).toMatchObject({ label: "Work/Servers", heading: true });
     expect(definitions().flatMap(m => m.items).some(i => i.action === "root")).toBe(false);
     expect(definitions(true).flatMap(m => m.items).some(i => i.action === "root")).toBe(true);
     expect(definitions().find(m => m.label === "Split")?.items.filter(i => !i.disabled).map(i => i.action)).toEqual([]);
@@ -77,4 +77,14 @@ it("serializes terminal order without editor or runtime data", () => {
     { ...base, kind: "ssh", target: "other@host:2222" },
   ]);
   expect(JSON.stringify(descriptors)).toBe('[{"type":"local"},{"type":"wsl"},{"type":"saved","sessionId":"id"},{"type":"quick","target":"other@host:2222"}]');
+});
+
+it("orders session management before imports and saved folders without a trailing separator", () => {
+  const sessions = definitions().find(menu => menu.label === "Sessions")!.items;
+  expect(sessions.slice(0, 8).map(item => item.action)).toEqual([
+    "newSession", "sessions", "sessions-transfer-separator", "exportSessions", "werkterm", "mobaxterm", "windterm", "sessions-saved-separator",
+  ]);
+  expect(new Set(sessions.map(item => item.action)).size).toBe(sessions.length);
+  const empty = createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 0, multiExec: false, isLinux: true }).find(menu => menu.label === "Sessions")!.items;
+  expect(empty[empty.length - 1]?.action).toBe("windterm");
 });

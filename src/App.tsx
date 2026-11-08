@@ -25,6 +25,8 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { HelpDialog } from "./components/HelpDialog";
+import { chooseSessionExport } from "./lib/sessionExport";
+import { WerktermImportDialog } from "./components/WerktermImportDialog";
 import { ImportDialog } from "./components/ImportDialog";
 import { normalizeSettings, selectedTheme } from "./lib/settings";
 import { MenuBar } from "./components/MenuBar";
@@ -217,7 +219,7 @@ export default function App() {
   }, [activeId]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
-  const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | null>(null);
+  const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | "werkterm" | null>(null);
   const fullscreenPending = useRef(false);
   useEffect(() => { document.documentElement.style.setProperty("--bg-content", selectedTheme(settings).background); }, [settings]);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
@@ -623,7 +625,8 @@ export default function App() {
       case "quit": void closeRequest.current(); break;
       case "newSession": setSessionDialog({}); break;
       case "sessions": showPanel(0); break;
-      case "mobaxterm": case "windterm": setImportSource(name); break;
+      case "exportSessions": void chooseSessionExport([], reportStatus); break;
+      case "werkterm": case "mobaxterm": case "windterm": setImportSource(name); break;
       case "sidebar": setSidebarVisible(value => !value); break;
       case "browser": showPanel(3); break;
       case "multiexec": toggleMultiExec(); break;
@@ -733,7 +736,8 @@ export default function App() {
         openTab("local");
       })} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
-    {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
+    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus([`${result.imported} Sitzungen importiert, ${result.skippedDuplicates} übersprungen`, ...(result.warnings ?? [])].join("; ")); }} />}
+    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
     {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
     {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={saved => { const isNew = !sessionDialog.session?.id && sessionDialog.tabId === undefined; if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); if (isNew) connectSaved(saved); }} />}
