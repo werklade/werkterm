@@ -1,3 +1,4 @@
+import { writeClipboardText } from "../lib/clipboard";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { join } from "@tauri-apps/api/path";
@@ -14,7 +15,7 @@ export function ToolDialog({ kind, onClose }: { kind: "ascii" | "ports" | "keyge
   const dialog = useModal();
   const [error, setError] = useState("");
   const title = kind === "ascii" ? "ASCII-Tabelle" : kind === "ports" ? "Offene lokale Ports" : "SSH-Schlüssel erzeugen";
-  const copy = (value: string) => { void navigator.clipboard.writeText(value).then(() => setError("Kopiert.")).catch(() => setError("Kopieren fehlgeschlagen.")); };
+  const copy = (value: string) => { void writeClipboardText(value).then(() => setError("Kopiert.")).catch(() => setError("Zwischenablage nicht verfügbar")); };
   return <dialog ref={dialog} className="ssh-dialog tool-dialog" aria-modal="true" aria-labelledby="tool-title" onCancel={event => { event.preventDefault(); onClose(); }}>
     <h2 id="tool-title">{title}</h2>
     {kind === "ascii" ? <AsciiTool onCopy={copy} /> : kind === "ports" ? <PortsTool /> : <KeygenTool onCopy={copy} />}

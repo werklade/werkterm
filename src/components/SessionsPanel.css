@@ -1,5 +1,5 @@
 .sidebar-panel > .sessions-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.sessions-toolbar { display: flex; align-items: center; flex-wrap: wrap; padding: 4px; flex: none; }
+.sessions-toolbar { display: flex; align-items: center; flex-wrap: nowrap; white-space: nowrap; padding: 4px; flex: none; }
 .sessions-toolbar button { min-height: 28px; padding: 3px; }
 .sessions-toolbar .icon { width: 20px; height: 20px; }
 .sessions-search { margin: 4px 6px; flex: none; }

@@ -60,7 +60,7 @@ fn operation_error(error: &keyring::Error, writing_default: bool) -> String {
     if matches!(error, keyring::Error::NoDefaultStore)
         && let Err(cause) = keyring::Entry::store_status()
     {
-        return error_message(cause);
+        return categorized_error(cause, writing_default);
     }
     categorized_error(error, writing_default)
 }
@@ -169,10 +169,22 @@ fn read_migrating(store: &impl SecretStore, account: &str) -> Result<Option<Stri
     Ok(password)
 }
 
+fn cleanup_result(result: Result<(), String>) -> Result<(), String> {
+    match result {
+        Err(error)
+            if error.starts_with("KEYRING_UNAVAILABLE:")
+                || error.starts_with("KEYRING_NO_COLLECTION:") =>
+        {
+            Ok(())
+        }
+        other => other,
+    }
+}
+
 fn delete_both(store: &impl SecretStore, account: &str) -> Result<(), String> {
     let current = store.delete(SERVICE, account);
     let legacy = store.delete(LEGACY_SERVICE, account);
-    current.and(legacy)
+    cleanup_result(current).and(cleanup_result(legacy))
 }
 
 pub async fn get_password(account: String) -> Result<Option<String>, String> {
@@ -222,6 +234,19 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_ignores_only_unavailable_store_and_no_collection() {
+        for error in [
+            UNAVAILABLE,
+            "KEYRING_NO_COLLECTION: Kein Standard-Schlüsselbund vorhanden",
+        ] {
+            assert!(cleanup_result(Err(error.into())).is_ok());
+        }
+        for error in [FAILED, "KEYRING_LOCKED: Schlüsselbund ist gesperrt"] {
+            assert_eq!(cleanup_result(Err(error.into())), Err(error.into()));
+        }
+    }
+
+    #[test]
     fn errors_never_expose_provider_data() {
         assert_eq!(error_message(&keyring::Error::NoDefaultStore), UNAVAILABLE);
         for error in [
@@ -264,6 +289,27 @@ mod migration_tests {
             Ok(())
         }
     }
+    struct UnavailableStore;
+    impl SecretStore for UnavailableStore {
+        fn read(&self, _: &str, _: &str) -> Result<Option<String>, String> {
+            panic!("cleanup must not read secrets");
+        }
+        fn write(&self, _: &str, _: &str, _: &str) -> Result<(), String> {
+            panic!("cleanup must not write secrets");
+        }
+        fn delete(&self, service: &str, _: &str) -> Result<(), String> {
+            Err(if service == SERVICE {
+                "KEYRING_NO_COLLECTION: Kein Standard-Schlüsselbund vorhanden".into()
+            } else {
+                UNAVAILABLE.into()
+            })
+        }
+    }
+    #[test]
+    fn deletion_succeeds_without_collection_or_service() {
+        assert!(delete_both(&UnavailableStore, "session").is_ok());
+    }
+
     #[test]
     fn migrates_only_after_successful_write() {
         for fail_write in [false, true] {

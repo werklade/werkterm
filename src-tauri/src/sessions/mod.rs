@@ -430,9 +430,6 @@ pub async fn sessions_save(
     validate_jump_hosts(&proposed)?;
     let account = format!("session:{}", session.id);
     let password = password.filter(|value| !value.is_empty());
-    if session.auth == SessionAuth::Password && password.is_none() {
-        require_existing_password(crate::secrets::get_password(account.clone()).await?)?;
-    }
     let change = if session.auth == SessionAuth::Password {
         password.map(SecretChange::Set)
     } else if previous.is_some_and(|index| sessions[index].auth == SessionAuth::Password) {
@@ -595,13 +592,6 @@ enum SecretChange {
     Delete,
 }
 
-fn require_existing_password(password: Option<String>) -> Result<(), String> {
-    match password {
-        Some(value) if !value.is_empty() => Ok(()),
-        _ => Err("Bitte ein Passwort für die Sitzung eingeben".into()),
-    }
-}
-
 async fn restore_secret(account: String, previous: Option<String>) -> Result<(), String> {
     match previous {
         Some(password) => crate::secrets::set_password(account, password).await,
@@ -620,6 +610,11 @@ async fn persist_with_secret(
     let Some(change) = change else {
         return persist(path, sessions).await;
     };
+    if matches!(change, SecretChange::Delete) {
+        // Persist first: a disk failure must not discard a saved credential.
+        persist(path, sessions).await?;
+        return crate::secrets::delete_password(account).await;
+    }
     let previous = crate::secrets::get_password(account.clone()).await?;
     let changed = match change {
         SecretChange::Set(password) => {
@@ -1003,11 +998,22 @@ mod tests {
             assert_eq!(result.skipped_duplicates, if kind == "ssh" { 2 } else { 1 });
         }
     }
-    #[test]
-    fn password_auth_requires_a_real_existing_secret_when_no_replacement_is_given() {
-        assert!(super::require_existing_password(None).is_err());
-        assert!(super::require_existing_password(Some(String::new())).is_err());
-        assert!(super::require_existing_password(Some("existing".into())).is_ok());
+    #[tokio::test]
+    async fn saves_without_new_password_without_accessing_keyring() {
+        let directory = std::env::temp_dir().join(format!("werkterm-no-keyring-{}", new_id()));
+        let path = directory.join("sessions.json");
+        for auth in [
+            SessionAuth::Default,
+            SessionAuth::Ask,
+            SessionAuth::Password,
+        ] {
+            let session = SavedSession { auth, ..sample() };
+            persist_with_secret(path.clone(), vec![session.clone()], "unused".into(), None)
+                .await
+                .unwrap();
+            assert_eq!(load(&path).unwrap(), vec![session]);
+        }
+        fs::remove_dir_all(directory).unwrap();
     }
     use super::*;
     #[test]

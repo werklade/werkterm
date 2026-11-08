@@ -890,9 +890,8 @@ pub fn apply_start_command(
                 StartCommand::Processes => {
                     "if command -v htop >/dev/null 2>&1; then htop; else top; fi"
                 }
-                _ => {
-                    r#"for tool in lsblk lsusb lspci; do if command -v "$tool" >/dev/null 2>&1; then "$tool"; fi; done"#
-                }
+                // Read-only "Key=Value" overview like MobaXterm's hardware list.
+                _ => include_str!("hardware.sh"),
             };
             spec.program = "/bin/sh".into();
             spec.args = vec![

@@ -1,3 +1,5 @@
+import { keyringErrorText } from "../lib/keyringErrors";
+import { readClipboardText, writeClipboardText } from "../lib/clipboard";
 import { parseSerialPermission, serialFixCommands, type SerialPermission } from "../lib/serialPermission";
 import { TuxOverlay } from "./TuxOverlay";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -118,7 +120,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
       const write = wire ? (id: number, data: string) => invoke<void>("terminal_write", { id, data }) : kind === "ssh" ? writeSsh : writePty;
       const resizeSession = wire ? (id: number, cols: number, rows: number) => invoke<void>("terminal_resize", { id, cols, rows }) : kind === "ssh" ? resizeSsh : resizePty;
       const close = wire ? (id: number) => invoke<void>("terminal_close", { id }) : kind === "ssh" ? closeSsh : killPty;
-      const report = (error: unknown) => callbacks.current.onStatus(`Terminal: ${String(error)}`);
+      const report = (error: unknown) => callbacks.current.onStatus(`Terminal: ${keyringErrorText(error)}`);
       const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report, () => ({ cols: terminal.cols, cursorX: terminal.buffer.active.cursorX }));
       const sendPermissionCommand = () => {
         if (!permissionShell || !shellReady || sessionId === undefined || cancelled || exited) return;
@@ -155,15 +157,15 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
       const provenance = inputProvenance(terminal);
       let keyboardInput = false;
       let deliveringPaste = false;
-      const copySelection = () => {
+      const copySelection = (automatic = false) => {
         const text = terminal.getSelection();
-        if (text) void navigator.clipboard.writeText(text).catch(report);
+        if (text) void writeClipboardText(text).catch(error => { if (!automatic) report(error); });
       };
       let selectionTimer: ReturnType<typeof setTimeout> | undefined;
       const selection = terminal.onSelectionChange(() => {
         clearTimeout(selectionTimer);
         if (preferencesRef.current.copyOnSelect && terminal.getSelection()) selectionTimer = setTimeout(() => {
-          if (preferencesRef.current.copyOnSelect && !cancelled) copySelection();
+          if (preferencesRef.current.copyOnSelect && !cancelled) copySelection(true);
         }, 150);
       });
       terminal.attachCustomKeyEventHandler(event => {
@@ -200,7 +202,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
       otherEvents.forEach(type => element.addEventListener(type, markOtherInput, true));
       const canDistribute = () => !permissionShell && shownRef.current && element.contains(document.activeElement);
       const requestPaste = (text: string) => { if (permissionShell) { terminal.paste(text); return; } if (!cancelled && !exited && inputRef.current) inputRef.current(id, text, true); };
-      terminalPasteRequests.set(id, () => { void navigator.clipboard.readText().then(requestPaste).catch(report); });
+      terminalPasteRequests.set(id, () => { void readClipboardText().then(requestPaste).catch(report); });
       const paste = (event: ClipboardEvent) => {
         const text = event.clipboardData?.getData("text/plain");
         if (text === undefined) return;
@@ -290,7 +292,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
         if (pending) { serialFixCommands.delete(id); pending.reject(error); }
         exited = true;
         void stopLog(id).catch(report); logRef.current.onLog(id, null);
-        terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : wire ? "Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${String(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
+        terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : wire ? "Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${keyringErrorText(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
         callbacks.current.onSession(id, null);
         callbacks.current.onExit(id);
         report(error);
@@ -341,7 +343,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
     const terminal = runtime.current?.terminal;
     if (!terminal) return;
     const text = all ? exportText(readTerminal(terminal.buffer.active, terminal.options.theme), /Windows/i.test(navigator.userAgent)) : terminal.getSelection();
-    if (all || text) void navigator.clipboard.writeText(text).catch(error => onStatus(`Kopieren: ${String(error)}`));
+    if (all || text) void writeClipboardText(text).catch(error => onStatus(`Kopieren: ${String(error)}`));
     closeMenu();
   };
   const saveContent = async (format: "txt" | "html" | "rtf") => {

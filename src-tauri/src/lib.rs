@@ -33,6 +33,7 @@ pub fn run() {
         .manage(Arc::new(commands::PendingPrompts::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             folder_diff::folder_diff_compare,
             folder_diff::folder_diff_cancel,

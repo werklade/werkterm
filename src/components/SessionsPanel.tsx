@@ -1,3 +1,4 @@
+import { keyringErrorText } from "../lib/keyringErrors";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { buildSessionTree, collectFolderSessions, deleteSessions, selectSessions, jumpHostHint, searchSessions, sessionLabel, type SavedSession, type SessionFolder } from "../lib/sessions";
 import { KindIcon } from "./KindIcon";
@@ -85,11 +86,11 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus 
     }
   }}>
     <div className="sessions-toolbar" aria-label="Sitzungsaktionen">
-      <span aria-live="polite">{selectedSessions.length} ausgewählt</span>
+      {selectedSessions.length >= 2 && <span aria-live="polite">{selectedSessions.length} ausgewählt</span>}
       <button title="Neue Sitzung" aria-label="Neue Sitzung" onClick={() => onEdit()}><Icon name="file-new" /></button>
       <button title="Bearbeiten" aria-label="Bearbeiten" disabled={!current} onClick={() => onEdit(current)}><Icon name="edit" /></button>
       <button title="Löschen" aria-label="Löschen" disabled={!selectedSessions.length} onClick={() => setDeleting(selectedSessions)}><Icon name="delete" /></button>
-      <button title="Importieren" aria-expanded={importMenu} onClick={() => setImportMenu(!importMenu)}>Importieren</button>
+      <button title="Importieren" aria-label="Importieren" aria-expanded={importMenu} onClick={() => setImportMenu(!importMenu)}><Icon name="upload" /></button>
       <button title="Aktualisieren" aria-label="Aktualisieren" onClick={onReload}><Icon name="refresh" /></button>
     </div>
     {importMenu && <div className="sessions-import-menu"><button title="Aus MobaXterm importieren" onClick={() => { setImportMenu(false); setImportSource("mobaxterm"); }}>Aus MobaXterm…</button><button title="Aus WindTerm importieren" onClick={() => { setImportMenu(false); setImportSource("windterm"); }}>Aus WindTerm…</button></div>}
@@ -112,8 +113,8 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus 
       if (accepted) void deleteSessions(targets.map(session => session.id)).then(result => {
         onReload();
         setSelection(previous => ({ ...previous, ids: previous.ids.filter(id => !result.deleted.includes(id)) }));
-        onStatus([`${result.deleted.length}${result.blocked.length ? ` gelöscht, ${result.blocked.length} nicht gelöscht: ${result.blocked.map(item => `${item.name} (${item.reason})`).join(", ")}` : " Sitzungen gelöscht"}`, ...result.warnings].join("; "));
-      }).catch(reason => { onReload(); onStatus(typeof reason === "string" ? reason : "Sitzungen konnten nicht gelöscht werden."); });
+        onStatus([`${result.deleted.length}${result.blocked.length ? ` gelöscht, ${result.blocked.length} nicht gelöscht: ${result.blocked.map(item => `${item.name} (${item.reason})`).join(", ")}` : " Sitzungen gelöscht"}`, ...result.warnings.map(keyringErrorText)].join("; "));
+      }).catch(reason => { onReload(); onStatus(keyringErrorText(reason)); });
     } }} />}
     {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([`${result.imported} Sitzungen importiert, ${result.skippedDuplicates} Duplikate übersprungen`, ...(result.warnings ?? [])].join("; ")); }} />}
   </div>;

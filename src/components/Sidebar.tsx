@@ -19,7 +19,7 @@ const panels: { name: string; icon: IconName; placeholder: string }[] = [
 ];
 import type { MenuItem } from "./MenuBar";
 const toolIcons: Partial<Record<string, IconName>> = {
-  local: "terminal", root: "terminal", processes: "view", hardware: "tools", tux: "tux", openFile: "file", ascii: "edit",
+  local: "terminal", root: "terminal", processes: "view", hardware: "tools", tux: "tux", openFile: "file", ascii: "edit", compareFiles: "edit",
   keygen: "permissions", ports: "globe", tunnels: "jump", multiexec: "multiexec", settings: "settings",
 };
 interface Props {

@@ -1,3 +1,4 @@
+import { writeClipboardText } from "../lib/clipboard";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useModal } from "./useModal";
@@ -33,7 +34,7 @@ export function SerialPermissionDialog({ info, onClose, onRetry, onExecute }: Pr
   }, [info]);
   const mode = permissionMode(info, fixes);
   const option = fixes?.options[selected];
-  const copy = (text: string) => { void navigator.clipboard.writeText(text).catch(reason => setError(String(reason))); };
+  const copy = (text: string) => { void writeClipboardText(text).catch(reason => setError(String(reason))); };
   const newgrp = "newgrp " + "'" + info.group.split("'").join(String.fromCharCode(39, 34, 39, 34, 39)) + "'";
   return <dialog ref={dialog} className="ssh-dialog" aria-labelledby="serial-permission-title"
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>

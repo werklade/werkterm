@@ -10,11 +10,12 @@ import type { SavedSession } from "../lib/sessions";
 // Only the React hook host is replaced; the password reducer and JSX are real.
 const host = vi.hoisted(() => ({
   password: { value: "typed input", visible: true },
+  keyring: null as boolean | null,
   answer: vi.fn(), save: vi.fn().mockResolvedValue({}),
 }));
 vi.mock("react", async importOriginal => ({
   ...await importOriginal<typeof import("react")>(),
-  useState: (initial: unknown) => [typeof initial === "function" ? initial() : initial, vi.fn()],
+  useState: (initial: unknown) => [initial === null ? host.keyring : typeof initial === "function" ? initial() : initial, vi.fn()],
   useRef: (current: unknown) => ({ current }),
   useId: () => "test-dialog",
   useEffect: vi.fn(),
@@ -54,7 +55,7 @@ const saved: SavedSession = {
 const sessionDialog = () => SessionDialog({ session: saved, sessions: [], onClose: host.answer, onSaved: host.answer });
 const secretDialog = () => SecretDialog({ prompt: { type: "secret", requestId: 1, kind: "password", label: "Server" }, onAnswer: host.answer });
 
-beforeEach(() => { host.password = { value: "typed input", visible: true }; vi.clearAllMocks(); });
+beforeEach(() => { host.keyring = null; host.password = { value: "typed input", visible: true }; vi.clearAllMocks(); });
 
 describe("password dialog lifecycle", () => {
   it.each([secretDialog, sessionDialog])("hides and clears the input when cancelling", render => {
@@ -92,6 +93,19 @@ describe("password dialog lifecycle", () => {
 });
 
 describe("password field accessibility and errors", () => {
+  it("disables password storage and shows one availability hint without a duplicate alert", () => {
+    host.keyring = false;
+    const dialog = sessionDialog();
+    expect(find(dialog, element => element.type === "option" && element.props.value === "password").props.disabled).toBe(true);
+    expect(find(dialog, element => element.type === PasswordField).props.disabled).toBe(true);
+    const message = "Kein Schlüsselbund verfügbar – Passwort wird beim Verbinden abgefragt.";
+    expect(JSON.stringify(dialog).split(message)).toHaveLength(2);
+    expect(() => find(dialog, element => element.props.role === "alert")).toThrow("Element not found");
+  });
+  it("enables password storage when the keyring is available", () => {
+    host.keyring = true;
+    expect(find(sessionDialog(), element => element.type === "option" && element.props.value === "password").props.disabled).toBe(false);
+  });
   it.each([false, true])("renders visibility %s with an accessible toggle", visible => {
     const toggle = vi.fn();
     const field = PasswordField({ visible, onToggle: toggle, value: "input" });
@@ -104,7 +118,7 @@ describe("password field accessibility and errors", () => {
   });
   it("shows the specific keyring error and the alternative login hint", () => {
     expect(sessionSaveError("KEYRING_LOCKED: Schlüsselbund ist gesperrt")).toBe(
-      "KEYRING_LOCKED: Schlüsselbund ist gesperrt. Tipp: Anmeldung 'Beim Verbinden fragen' wählen",
+      "Schlüsselbund ist gesperrt. Bitte entsperren oder Anmeldung 'Beim Verbinden fragen' wählen.",
     );
     expect(sessionSaveError(new Error("Sitzungsdatei konnte nicht gespeichert werden"))).toBe("Sitzungsdatei konnte nicht gespeichert werden");
   });

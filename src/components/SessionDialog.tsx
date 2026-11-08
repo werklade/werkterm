@@ -1,3 +1,4 @@
+import { keyringErrorText } from "../lib/keyringErrors";
 import { invoke } from "@tauri-apps/api/core";
 import { defaultSerial, validateSession, type SerialConfig } from "../lib/sessions";
 import { useEffect, useId, useRef, useState } from "react";
@@ -50,10 +51,9 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
       setKeyring(value);
       if (!authChanged.current) setAuthType(initialSessionAuthType(session, preferPassword, value));
     };
-    void keyringAvailable().then(resolve, reason => {
+    void keyringAvailable().then(resolve, () => {
       if (!active) return;
       resolve(false);
-      setError(sessionSaveError(reason));
     });
     return () => { active = false; };
   }, [session, preferPassword]);
@@ -120,7 +120,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
           <option value="default">Standard (Agent/~/.ssh)</option><option value="keyFile">Schlüsseldatei</option>
           <option value="password" disabled={keyring !== true}>Passwort (im Schlüsselbund)</option><option value="ask">Beim Verbinden fragen</option>
         </select></label>
-        {keyring === false && <p className="session-hint">Schlüsselbund nicht verfügbar: Passwortspeicherung ist deaktiviert.</p>}
+        {keyring === false && <p className="session-hint">Kein Schlüsselbund verfügbar – Passwort wird beim Verbinden abgefragt.</p>}
         {authType === "keyFile" && <label>Schlüsseldatei<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title="Schlüsseldatei auswählen" onClick={() => void browse()}>Durchsuchen…</button></div></label>}
         {authType === "password" && <label>Passwort<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">Leer lassen, um das vorhandene Passwort zu behalten.</span>}</label>}
@@ -139,7 +139,5 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
 
 export function sessionSaveError(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : String(reason);
-  return /\bKEYRING_[A-Z_]+:/.test(message)
-    ? `${message}. Tipp: Anmeldung 'Beim Verbinden fragen' wählen`
-    : message;
+  return keyringErrorText(message);
 }
