@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Werklade Dunkel and Werklade Hell are built directly from the shared Werklade design tokens; `npm run sync-design` also copies the shared icons, `npm run check-design` reports differences without changing files.
+
+### Fixed
+
+- Werklade icons: the quit icon's accent fill stays inside its ring instead of covering a full disc.
+
 ## [0.1.3] – 2026-11-08
 
 ### Added

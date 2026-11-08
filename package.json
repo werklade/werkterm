@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "sync-design": "node scripts/sync-design.mjs"
+    "sync-design": "node scripts/sync-design.mjs",
+    "check-design": "node scripts/sync-design.mjs --check"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
