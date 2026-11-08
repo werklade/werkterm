@@ -5,7 +5,7 @@ Deutsche Fassung: [README.de.md](README.de.md)
 Werkterm is a desktop application built with Tauri 2, Rust and React. It provides local terminals, SSH with an SFTP browser that follows the terminal directory, and an integrated editor. It targets Linux first and also runs on Windows 10/11 x64.
 
 > [!NOTE]
-> Werkterm is a prerelease (currently 0.1.6) for invited testers. Please submit feedback through Issues.
+> Werkterm is a prerelease (currently 0.1.7) for invited testers. Please submit feedback through Issues.
 
 ## Independence and trademarks
 
@@ -42,7 +42,7 @@ Prebuilt packages (`.deb`, AppImage, `SHA256SUMS`) are attached to the GitHub re
 Debian-family systems, Bash (installs a system package):
 
 ```bash
-sudo apt install ./Werkterm_0.1.6_amd64.deb
+sudo apt install ./Werkterm_0.1.7_amd64.deb
 ```
 
 Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`.
@@ -50,13 +50,13 @@ Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`.
 AppImage, Bash (`libfuse2` required; its package name can vary by distribution):
 
 ```bash
-chmod +x ./Werkterm_0.1.6_amd64.AppImage
-./Werkterm_0.1.6_amd64.AppImage
+chmod +x ./Werkterm_0.1.7_amd64.AppImage
+./Werkterm_0.1.7_amd64.AppImage
 ```
 
 Verify that the application window opens.
 
-Windows: run `Werkterm_0.1.6_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_0.1.6_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`. If the taskbar still shows the old icon after an update, that is the Windows icon cache: run `ie4uinit.exe -show` or sign out and back in.
+Windows: run `Werkterm_0.1.7_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_0.1.7_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`. If the taskbar still shows the old icon after an update, that is the Windows icon cache: run `ie4uinit.exe -show` or sign out and back in.
 
 Check downloads against `SHA256SUMS` (Linux: `sha256sum -c SHA256SUMS`, Windows PowerShell: `Get-FileHash <file>`).
 

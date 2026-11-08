@@ -1,5 +1,7 @@
 // LC_ALL=C makes Bash iterate UTF-8 bytes, matching URI percent encoding.
-export const SSH_PROMPT_COMMAND = String.raw` __werkterm_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${"${#p}"};i++)); do c="${"${p:i:1}"}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "$HOSTNAME" "$out"; }; export PROMPT_COMMAND="__werkterm_osc7${"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"}"` + "\r";
+// PROMPT_COMMAND is not exported and checks for the function, because child shells
+// (pct enter, su, tmux) may inherit the variable without the function.
+export const SSH_PROMPT_COMMAND = String.raw` __werkterm_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${"${#p}"};i++)); do c="${"${p:i:1}"}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "$HOSTNAME" "$out"; }; PROMPT_COMMAND="declare -F __werkterm_osc7 >/dev/null && __werkterm_osc7${"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"}"` + "\r";
 
 /** Clear the echoed integration command and its old prompt before Bash redraws it. */
 export function buildPromptCommand(cols: number, cursorX: number): string {

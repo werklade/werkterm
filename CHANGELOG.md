@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.7] – 2026-11-08
+
+### Fixed
+
+- SSH: shells started inside an SSH session, for example `pct enter` on Proxmox, `su` or new tmux windows, no longer print `__werkterm_osc7: command not found` before every prompt. The Follow Terminal Folder hook no longer exports `PROMPT_COMMAND` and only runs where its function is defined.
+
 ## [0.1.6] – 2026-11-08
 
 ### Changed
