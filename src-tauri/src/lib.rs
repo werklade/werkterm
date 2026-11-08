@@ -97,6 +97,8 @@ pub fn run() {
             commands::ssh_sudo_enable,
             commands::ssh_sudo_disable,
             commands::ssh_chmod,
+            ssh::permissions::local_chmod,
+            ssh::permissions::local_count_entries,
             commands::ssh_download,
             commands::ssh_upload,
             commands::ssh_cancel_transfer,

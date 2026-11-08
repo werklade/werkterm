@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { PermissionsDialog } from "./PermissionsDialog";
 import { SecretDialog } from "./SecretDialog";
 import { BrowserContextMenu } from "./BrowserContextMenu";
-import { chmod, disableSudo, enableSudo, modeToRwx, type ChmodOptions } from "../lib/permissions";
+import { changePermissions, countPermissionEntries, permissionRoute, disableSudo, enableSudo, modeToRwx, type ChmodOptions } from "../lib/permissions";
 import { parseQuickConnect } from "../lib/quickConnect";
 import { ResizeGrip } from "./ResizeGrip";
 import { DEFAULT_COLUMNS, loadWidth, storeWidth, type ColumnWidths } from "../lib/browserWidths";
@@ -185,6 +185,8 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   };
   const sudoReady = ready && kind === "ssh" && browserMode === "sftp";
   const writable = ready && kind === "ssh" && listing?.mode === "sftp" && !loading;
+  const permissionsRoute = permissionRoute(listing?.mode, listing?.path ?? path, /Windows/i.test(navigator.userAgent), kind === "wsl");
+  const permissionsReady = ready && !loading && permissionsRoute !== null && (permissionsRoute !== "sftp" || sessionId !== undefined);
   const selectedEntry = listing?.entries.find(entry => entry.name === selected);
   const sortedEntries = listing ? sortFileEntries(listing.entries, sort) : [];
   const editorReady = ready && !loading && (kind !== "ssh" || listing?.mode === "sftp");
@@ -211,7 +213,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     setPrompt(next);
   });
   const run = async (work: () => Promise<void>) => {
-    if ((!writable && !sudoReady) || operation.current) return;
+    if ((!writable && !sudoReady && !permissionsReady) || operation.current) return;
     operation.current = true;
     setBusy(true);
     setError("");
@@ -232,6 +234,26 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     if (action === "up") { navigate(parentPath(listing?.path ?? path)); return; }
     if (action === "refresh") { refresh(); return; }
     if (action === "edit") { const entry = contextEntry ?? selectedEntry; if (entry) openEntry(entry); return; }
+    if (action === "chmod") {
+      const entry = contextEntry ?? selectedEntry;
+      if (!permissionsReady || !permissionsRoute || !listing || !entry || entry.kind === "symlink" || operation.current) return;
+      const route = permissionsRoute, targetPath = childPath(listing.path, entry.name), targetId = sessionId;
+      void run(async () => {
+        const options = await ask<ChmodOptions | null>(answer => ({ type: "permissions", entry, answer }));
+        if (!options || !mounted.current) return;
+        if (options.recursive) {
+          const count = await countPermissionEntries(route, targetId, targetPath);
+          if (!mounted.current) return;
+          const accepted = await ask<boolean>(answer => ({ type: "delete", message: `${count + 1} Einträge ändern? Symlinks werden übersprungen.`, confirmLabel: "Rechte ändern", answer }));
+          if (!accepted || !mounted.current) return;
+        }
+        const result = await changePermissions(route, targetId, targetPath, options);
+        const message = `${result.changed} geändert, ${result.failed} fehlgeschlagen${result.errors.length ? ` · Fehlerpfade: ${result.errors.join(", ")}` : ""}`;
+        callbacks.current.onStatus(message);
+        if (result.failed && mounted.current) setError(message);
+      });
+      return;
+    }
     if ((action === "sudo" ? !sudoReady : !writable || !listing) || sessionId === undefined || operation.current) return;
     const targetId = sessionId;
     const targetDir = listing?.path ?? path;
@@ -257,20 +279,6 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
           if (id !== undefined) callbacks.current.onAccess(id, targetId, "sftp", true);
           callbacks.current.onStatus("sudo-Modus aktiviert");
         }
-      } else if (action === "chmod" && entry && entry.kind !== "symlink") {
-        const options = await ask<ChmodOptions | null>(answer => ({ type: "permissions", entry, answer }));
-        if (!options || !mounted.current) return;
-        const remotePath = remoteChild(targetDir, entry.name);
-        if (options.recursive) {
-          const count = await countEntries(targetId, remotePath);
-          if (!mounted.current) return;
-          const accepted = await ask<boolean>(answer => ({ type: "delete", message: `${count + 1} Einträge ändern? Symlinks werden übersprungen.`, confirmLabel: "Rechte ändern", answer }));
-          if (!accepted || !mounted.current) return;
-        }
-        const result = await chmod(targetId, remotePath, options);
-        const message = `${result.changed} geändert, ${result.failed} fehlgeschlagen${result.errors.length ? ` · Fehlerpfade: ${result.errors.join(", ")}` : ""}`;
-        callbacks.current.onStatus(message);
-        if (result.failed) setError(message);
       } else if (action === "upload") {
         const paths = await open({ multiple: true, directory: false, title: "Dateien auswählen" });
         if (paths) transferQueue.enqueue(paths.map(localPath => ({ kind: "upload", sessionId: targetId, localPath, remoteDir: targetDir })));
@@ -350,7 +358,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
         listRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[next]?.focus();
       }
     }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">Leeres Verzeichnis</p>}</div>}
-    {context && <BrowserContextMenu {...context} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
+    {context && <BrowserContextMenu {...context} permissionsDisabled={!permissionsReady} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? "Unix-Rechte sind hier nicht änderbar" : "Nur mit SFTP verfügbar"} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
     {prompt?.type === "sudo" ? <SecretDialog key={promptSequence} title={`sudo-Passwort für ${prompt.label}`} prompt={{ type: "secret", requestId: 0, kind: "password", label: prompt.label }} onAnswer={prompt.answer} />
       : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} onAnswer={prompt.answer} />
       : prompt && <FileActionDialog key={promptSequence} prompt={prompt} />}

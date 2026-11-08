@@ -38,3 +38,14 @@ export interface ChmodResult { changed: number; failed: number; errors: string[]
 export const chmod = (id: number, path: string, options: ChmodOptions) => invoke<ChmodResult>("ssh_chmod", { id, path, ...options });
 export const enableSudo = (id: number, password: string | null = null) => invoke<void>("ssh_sudo_enable", { id, password });
 export const disableSudo = (id: number) => invoke<void>("ssh_sudo_disable", { id });
+
+export type PermissionRoute = "sftp" | "local";
+export function permissionRoute(mode: string | null | undefined, path: string, windows: boolean, wsl = false): PermissionRoute | null {
+  if (mode === "sftp") return "sftp";
+  if (mode !== "local" || windows || wsl || /^(?:\\\\|\/\/|\\wsl\$)/i.test(path)) return null;
+  return "local";
+}
+export const changePermissions = (route: PermissionRoute, id: number | undefined, path: string, options: ChmodOptions) =>
+  route === "sftp" ? chmod(id!, path, options) : invoke<ChmodResult>("local_chmod", { path, options });
+export const countPermissionEntries = (route: PermissionRoute, id: number | undefined, path: string) =>
+  invoke<number>(route === "sftp" ? "ssh_count_entries" : "local_count_entries", route === "sftp" ? { id, path } : { path });

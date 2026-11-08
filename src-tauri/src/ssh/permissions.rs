@@ -9,7 +9,8 @@ pub enum Scope {
     Dirs,
     Files,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Options {
     pub mode: u32,
     pub recursive: bool,
@@ -122,6 +123,87 @@ impl Tree for SftpSession {
         )
         .await
         .map_err(ssh_error)
+    }
+}
+#[cfg(unix)]
+struct LocalTree;
+#[cfg(unix)]
+impl Tree for LocalTree {
+    async fn kind(&self, path: &str) -> Result<(bool, bool), String> {
+        let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        Ok((meta.is_dir(), meta.is_symlink()))
+    }
+    async fn children(&self, path: &str) -> Result<Vec<String>, String> {
+        std::fs::read_dir(path)
+            .map_err(|e| e.to_string())?
+            .map(|entry| {
+                entry
+                    .map_err(|e| e.to_string())?
+                    .path()
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| "Ungültiger UTF-8-Pfad".into())
+            })
+            .collect()
+    }
+    async fn chmod(&self, path: &str, mode: u32) -> Result<(), String> {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::symlink_metadata(path)
+            .map_err(|e| e.to_string())?
+            .is_symlink()
+        {
+            return Err("Symlink wird übersprungen".into());
+        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| e.to_string())
+    }
+}
+#[cfg(unix)]
+fn local_path(path: &str) -> Result<String, String> {
+    if !std::path::Path::new(path).is_absolute() {
+        return Err("Pfad muss absolut sein".into());
+    }
+    super::actions::action_path(path)
+}
+#[tauri::command]
+pub async fn local_chmod(path: String, options: Options) -> Result<ChmodResult, String> {
+    options.validate()?;
+    #[cfg(unix)]
+    {
+        Ok(apply(&LocalTree, local_path(&path)?, options).await)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Err("Unix-Rechte sind hier nicht änderbar".into())
+    }
+}
+#[tauri::command]
+pub async fn local_count_entries(path: String) -> Result<u64, String> {
+    #[cfg(unix)]
+    {
+        let path = local_path(&path)?;
+        let mut pending = vec![path];
+        let mut count = 0;
+        while let Some(path) = pending.pop() {
+            let (directory, symlink) = LocalTree.kind(&path).await?;
+            if symlink || !directory {
+                continue;
+            }
+            for child in LocalTree.children(&path).await? {
+                count += 1;
+                let (directory, symlink) = LocalTree.kind(&child).await?;
+                if directory && !symlink {
+                    pending.push(child);
+                }
+            }
+        }
+        Ok(count)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Err("Unix-Rechte sind hier nicht änderbar".into())
     }
 }
 async fn apply(tree: &impl Tree, path: String, options: Options) -> ChmodResult {
@@ -336,5 +418,135 @@ mod tests {
         let sftp = SftpSession::new(client).await.unwrap();
         Tree::chmod(&sftp, "/file", 0o4755).await.unwrap();
         peer.await.unwrap();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod local_tests {
+    use super::*;
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt, symlink},
+        path::PathBuf,
+    };
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "werkterm-chmod-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir(&path).unwrap();
+            fs::create_dir(path.join("dir")).unwrap();
+            fs::write(path.join("dir/file"), b"test").unwrap();
+            symlink(path.join("dir"), path.join("link")).unwrap();
+            Self(path)
+        }
+        fn path(&self, name: &str) -> String {
+            self.0.join(name).to_str().unwrap().into()
+        }
+        fn mode(&self, name: &str) -> u32 {
+            fs::symlink_metadata(self.path(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(self.0.join("dir"), fs::Permissions::from_mode(0o700)).unwrap();
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    fn options() -> Options {
+        Options {
+            mode: 0o700,
+            recursive: false,
+            scope: Scope::All,
+            dir_mode: None,
+            file_mode: None,
+        }
+    }
+    #[tokio::test]
+    async fn local_file_recursive_scopes_split_links_and_errors() {
+        let f = Fixture::new();
+        let result = local_chmod(
+            f.path("dir/file"),
+            Options {
+                mode: 0o600,
+                ..options()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!((result.changed, result.failed), (1, 0));
+        assert_eq!(f.mode("dir/file"), 0o600);
+        assert_eq!(local_count_entries(f.path("")).await.unwrap(), 3);
+        assert_eq!(local_count_entries(f.path("link/")).await.unwrap(), 0);
+        let result = local_chmod(f.path("link/"), options()).await.unwrap();
+        assert_eq!(result.changed, 0);
+        let result = local_chmod(
+            f.path(""),
+            Options {
+                recursive: true,
+                scope: Scope::Dirs,
+                ..options()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.changed, 2);
+        assert_eq!(f.mode("dir/file"), 0o600);
+        let result = local_chmod(
+            f.path(""),
+            Options {
+                recursive: true,
+                scope: Scope::Files,
+                mode: 0o640,
+                ..options()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.changed, 1);
+        assert_eq!(f.mode("dir"), 0o700);
+        let result = local_chmod(
+            f.path(""),
+            Options {
+                recursive: true,
+                dir_mode: Some(0o750),
+                file_mode: Some(0o644),
+                ..options()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!((result.changed, result.failed), (3, 0));
+        assert_eq!(f.mode("dir"), 0o750);
+        assert_eq!(f.mode("dir/file"), 0o644);
+        let result = local_chmod(f.path("missing"), options()).await.unwrap();
+        assert_eq!(
+            (result.changed, result.failed, result.errors.len()),
+            (0, 1, 1)
+        );
+        assert!(local_chmod("relative".into(), options()).await.is_err());
+        assert!(local_count_entries("relative".into()).await.is_err());
+        assert!(
+            local_chmod(
+                f.path(""),
+                Options {
+                    mode: 0o10000,
+                    ..options()
+                }
+            )
+            .await
+            .is_err()
+        );
     }
 }

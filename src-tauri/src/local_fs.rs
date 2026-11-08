@@ -88,7 +88,13 @@ pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirLis
             "other"
         };
         entries.push(DirEntry {
+            #[cfg(unix)]
+            uid: Some(std::os::unix::fs::MetadataExt::uid(&metadata)),
+            #[cfg(not(unix))]
             uid: None,
+            #[cfg(unix)]
+            gid: Some(std::os::unix::fs::MetadataExt::gid(&metadata)),
+            #[cfg(not(unix))]
             gid: None,
             user: None,
             group: None,
