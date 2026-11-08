@@ -471,6 +471,64 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_hardware_script_is_valid_encoded_and_keeps_shell_open() {
+        let mut spec = ShellSpec {
+            program: String::new(),
+            args: vec![],
+            env: vec![],
+        };
+        apply_start_command(&mut spec, Some(StartCommand::Hardware)).unwrap();
+        assert_eq!(spec.program, "powershell.exe");
+        assert_eq!(
+            spec.args[..4],
+            ["-NoLogo", "-NoProfile", "-NoExit", "-EncodedCommand"]
+        );
+        let script = include_str!("hardware.ps1");
+        // Decode independently with PowerShell/.NET and parse with the Windows 5.1 parser.
+        let validation = format!(
+            "$script = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{}')); \
+             $expected = [Console]::In.ReadToEnd(); if ($script -cne $expected) {{ exit 2 }}; \
+             $tokens = $null; $errors = $null; \
+             [void][System.Management.Automation.Language.Parser]::ParseInput($script, [ref]$tokens, [ref]$errors); \
+             if ($errors.Count) {{ $errors | ForEach-Object {{ [Console]::Error.WriteLine($_) }}; exit 1 }}",
+            spec.args[4]
+        );
+        let mut child = std::process::Command::new(&spec.program)
+            .args(["-NoProfile", "-Command", &validation])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for command in [StartCommand::Root, StartCommand::Processes] {
+            assert!(apply_start_command(&mut spec, Some(command)).is_err());
+        }
+        // Include non-ASCII and supplementary characters, and every base64 padding length.
+        for (value, expected) in [
+            ("", ""),
+            ("a", "YQA="),
+            ("ab", "YQBiAA=="),
+            ("abc", "YQBiAGMA"),
+            ("ä😀", "5AA92ADe"),
+        ] {
+            assert_eq!(encoded_powershell(value), expected);
+        }
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn tool_scripts_are_valid_and_keep_the_shell_open() {
@@ -894,6 +952,32 @@ pub enum StartCommand {
     Processes,
     Hardware,
 }
+
+#[cfg(windows)]
+fn encoded_powershell(script: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut encoded = String::new();
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0];
+        let b = chunk.get(1).copied().unwrap_or(0);
+        let c = chunk.get(2).copied().unwrap_or(0);
+        encoded.push(ALPHABET[(a >> 2) as usize] as char);
+        encoded.push(ALPHABET[((a & 3) << 4 | b >> 4) as usize] as char);
+        encoded.push(if chunk.len() > 1 {
+            ALPHABET[((b & 15) << 2 | c >> 6) as usize] as char
+        } else {
+            '='
+        });
+        encoded.push(if chunk.len() > 2 {
+            ALPHABET[(c & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    encoded
+}
+
 pub fn apply_start_command(
     spec: &mut ShellSpec,
     command: Option<StartCommand>,
@@ -901,6 +985,16 @@ pub fn apply_start_command(
     let Some(command) = command else {
         return Ok(());
     };
+    #[cfg(windows)]
+    if matches!(command, StartCommand::Hardware) {
+        spec.program = "powershell.exe".into();
+        spec.args = ["-NoLogo", "-NoProfile", "-NoExit", "-EncodedCommand"]
+            .map(str::to_owned)
+            .to_vec();
+        spec.args
+            .push(encoded_powershell(include_str!("hardware.ps1")));
+        return Ok(());
+    }
     if !cfg!(target_os = "linux") {
         return Err("Systemwerkzeuge sind nur unter Linux verfügbar".into());
     }

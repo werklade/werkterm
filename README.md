@@ -1,4 +1,4 @@
-# Werkterm – SSH terminal with SFTP browser and editor for Linux
+# Werkterm – SSH terminal with SFTP browser and editor for Linux and Windows
 
 Deutsche Fassung: [README.de.md](README.de.md)
 
@@ -22,7 +22,7 @@ Werkterm is a private, independent project with no affiliation to Mobatek. It ha
 
 ## Features
 
-- **Terminals:** local Bash/configured shell on Linux; PowerShell, cmd and WSL for Windows development/testing. Linux root terminal, process and hardware tools; SSH, Telnet and serial sessions. Tabs, split views, MultiExec, font/cursor/scrollback/color settings. Context menu: copy, copy all, clear, save as TXT/HTML/RTF. Editable paste confirmation, session logging and close confirmation. Session-end menu: Return closes, R reconnects in the same tab, S saves output.
+- **Terminals:** local Bash/configured shell on Linux; PowerShell, cmd and WSL on Windows. Hardware overview on Linux and Windows, root terminal and processes on Linux; SSH, Telnet and serial sessions. Tabs, split views, MultiExec, font/cursor/scrollback/color settings. Context menu: copy, copy all, clear, save as TXT/HTML/RTF. Editable paste confirmation, session logging and close confirmation. Session-end menu: Return closes, R reconnects in the same tab, S saves output.
 - **SSH:** one connection with shell and SFTP channels, exec listing fallback, host-key verification against `known_hosts`, agent/key (including `.ppk`)/password authentication, keepalive and jump-host chains. Tunnel manager for `-L`, `-R` and SOCKS5, with separate background connections, autostart, reconnect and status. Monitoring bar with tooltips for host, CPU, RAM, network, uptime, users and filesystems.
 - **SFTP browser:** Follow Terminal Folder via OSC 7, navigation, sorting, queued file transfers with progress/cancellation and drag and drop. Create files/directories, confirmed recursive deletion, recursive chmod with separate file/directory settings, sudo mode and “remember for comparison”. Local and WSL directory browsing is also available.
 - **Sessions:** folders, search, quick connect, recent sessions and last-tab restoration. Session import from MobaXterm and WindTerm; color import from MobaXterm. Saved passwords use the system keyring. Encrypted imported passwords are not recovered.
@@ -30,6 +30,8 @@ Werkterm is a private, independent project with no affiliation to Mobatek. It ha
 - **Tools:** read-only file comparison (local/remote/mixed), recursive folder comparison with optional content comparison, macros with recording, text/wait/prompt steps and shortcuts, SSH key generation, open local ports, ASCII table and Tux wanderer idle animation. Linux serial-permission assistance identifies device groups such as dialout/uucp and offers a confirmed command in a local terminal.
 
 ## Requirements
+
+Windows 10/11 x64 with Microsoft Edge WebView2 (preinstalled on current Windows; the installer downloads it if missing).
 
 Linux x86_64 with WebKitGTK 4.1 and GTK 3: Debian-family runtime packages include `libwebkit2gtk-4.1-0` and `libgtk-3-0`. Recommended: `gnome-keyring` or another Secret Service provider, and `fonts-noto-color-emoji`. OpenSSH is the intended SSH server; SFTP is recommended. Browser writes/transfers require SFTP; sudo mode also needs sudo permission and an external `sftp-server` executable.
 
@@ -40,7 +42,7 @@ Prebuilt packages (`.deb`, AppImage, `SHA256SUMS`) are attached to the GitHub re
 Debian-family systems, Bash (installs a system package):
 
 ```bash
-sudo apt install ./Werkterm_0.1.0_amd64.deb
+sudo apt install ./Werkterm_0.1.3_amd64.deb
 ```
 
 Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`.
@@ -48,15 +50,19 @@ Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`.
 AppImage, Bash (`libfuse2` required; its package name can vary by distribution):
 
 ```bash
-chmod +x ./Werkterm_0.1.0_amd64.AppImage
-./Werkterm_0.1.0_amd64.AppImage
+chmod +x ./Werkterm_0.1.3_amd64.AppImage
+./Werkterm_0.1.3_amd64.AppImage
 ```
 
-Verify that the application window opens. These filenames describe the recorded build, not downloadable release assets.
+Verify that the application window opens.
+
+Windows: run `Werkterm_0.1.3_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_0.1.3_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`.
+
+Check downloads against `SHA256SUMS` (Linux: `sha256sum -c SHA256SUMS`, Windows PowerShell: `Get-FileHash <file>`).
 
 ## Building
 
-Use Linux x86_64, Rust stable with Edition 2024 support, Node.js with npm and the [official Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/). Windows is for development/testing only. The frontend uses TypeScript `~6.0.3`; manifests and lockfiles define dependencies. The project declares no minimum Node.js version.
+Use Linux x86_64, Rust stable with Edition 2024 support, Node.js with npm and the [official Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/). Windows packages are built on Windows. The frontend uses TypeScript `~6.0.3`; manifests and lockfiles define dependencies. The project declares no minimum Node.js version.
 
 From the project root, Bash:
 
@@ -71,7 +77,7 @@ For Linux packages, Bash:
 npm run tauri build
 ```
 
-Output: `src-tauri/target/release/bundle/{deb,appimage}`. Verify the generated artifacts and launch the installed package or AppImage.
+Output: `src-tauri/target/release/bundle/{deb,appimage}` on Linux, `src-tauri/target/release/bundle/{nsis,msi}` on Windows (stop a running dev instance first). Verify the generated artifacts and launch the installed package or AppImage.
 
 Tests, Bash:
 

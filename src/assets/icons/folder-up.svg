@@ -11,8 +11,10 @@
   class="icon icon-tabler icons-tabler-outline icon-tabler-folder-up"
 >
   <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-  <path class="wl-fill" stroke="none" d="M5 4h4l3 3h7a2 2 0 0 1 2 2v3.5H12V19H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
-  <path d="M12 19h-7a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2h4l3 3h7a2 2 0 0 1 2 2v3.5" />
-  <path d="M19 22v-6" />
-  <path d="M22 19l-3 -3l-3 3" />
+  <path class="wl-fill" stroke="none" d="M13.97 19H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v4.65A4.5 4.5 0 0 0 13.97 19z" />
+  <circle class="wl-fill" stroke="none" cx="18" cy="17" r="4.5" />
+  <path d="M13.97 19H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v4.65" />
+  <circle cx="18" cy="17" r="4.5" />
+  <path d="M18 19.25v-4.5" />
+  <path d="M16 16.75l2 -2l2 2" />
 </svg>

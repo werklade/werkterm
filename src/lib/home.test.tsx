@@ -46,10 +46,15 @@ describe("View preferences and shared action definitions", () => {
     expect(new Set(all.map(i => i.action)).size).toBe(all.length);
     expect(all.map(i => i.action).sort()).toEqual(shortcuts.map(i => i.action).sort());
   });
-  it("groups sessions and restricts system tools to Linux", () => {
+  it("groups sessions and restricts root and processes to Linux while sharing hardware with Windows", () => {
     expect(definitions().find(m => m.label === "Sessions")?.items.find(item => item.heading)).toMatchObject({ label: "Work/Servers", heading: true });
     expect(definitions().flatMap(m => m.items).some(i => i.action === "root")).toBe(false);
     expect(definitions(true).flatMap(m => m.items).some(i => i.action === "root")).toBe(true);
+    for (const isLinux of [false, true]) {
+      const tools = definitions(isLinux).find(menu => menu.label === "Tools")!.items;
+      expect(tools.filter(item => item.action === "hardware")).toEqual([{ label: "Hardware anzeigen", action: "hardware" }]);
+      expect(tools.some(item => item.action === "processes")).toBe(isLinux);
+    }
     expect(definitions().find(m => m.label === "Split")?.items.filter(i => !i.disabled).map(i => i.action)).toEqual([]);
   });
   it("activates all split layouts and local tools outside MultiExec", () => {

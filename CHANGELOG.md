@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] – 2026-11-08
+
+### Added
+
+- Windows 10/11 x64 packages: NSIS installer (per user, no admin rights, German/English) and MSI.
+- Hardware overview on Windows with the same sections as on Linux (System, CPU, Memory, Hardware, Disks, Network, DNS).
+
+### Changed
+
+- Werklade icons: new-session, new-folder, new-file and parent-folder icons carry a round badge (plus or arrow) that closes the outline; refresh, undo, redo, wrap and jump arrows sit in a tinted ring instead of a filled disc.
+
 ## [0.1.2] – 2026-11-08
 
 ### Added

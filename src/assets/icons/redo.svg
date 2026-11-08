@@ -10,8 +10,10 @@
   stroke-linejoin="round"
   class="icon icon-tabler icons-tabler-outline icon-tabler-arrow-forward-up"
 >
-  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-  <circle class="wl-fill" stroke="none" cx="12" cy="12" r="8" />
-  <path d="M15 14l4 -4l-4 -4" />
-  <path d="M19 10h-11a4 4 0 1 0 0 8h1" />
+  <circle class="wl-fill" stroke="none" cx="12" cy="12" r="9.5" />
+  <circle cx="12" cy="12" r="9.5" />
+  <g transform="translate(12 12) scale(0.6) translate(-12 -12)" stroke-width="3.333333" fill="none">
+    <path d="M15 14l4 -4l-4 -4" />
+    <path d="M19 10h-11a4 4 0 1 0 0 8h1" />
+  </g>
 </svg>

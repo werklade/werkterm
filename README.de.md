@@ -1,4 +1,4 @@
-# Werkterm – SSH-Terminal mit SFTP-Browser und Editor für Linux
+# Werkterm – SSH-Terminal mit SFTP-Browser und Editor für Linux und Windows
 
 English version: [README.md](README.md)
 
@@ -22,7 +22,7 @@ Werkterm ist ein privates, unabhängiges Projekt ohne Verbindung zu Mobatek. Es 
 
 ## Funktionen
 
-- **Terminals:** lokal Bash/konfigurierte Shell unter Linux; PowerShell, cmd und WSL für Entwicklung/Tests unter Windows. Linux-Werkzeuge für Root-Terminal, Prozesse und Hardware; SSH-, Telnet- und serielle Sitzungen. Tabs, Split-Ansichten, MultiExec, Einstellungen für Schrift/Cursor/Scrollback/Farben. Kontextmenü: Kopieren, Alles kopieren, Leeren, Speichern als TXT/HTML/RTF. Bearbeitbare Einfüge-Rückfrage, Sitzungs-Logging und Schließen-Rückfrage. Ende-Menü: Return schließt, R verbindet im selben Tab erneut, S speichert die Ausgabe.
+- **Terminals:** lokal Bash/konfigurierte Shell unter Linux; PowerShell, cmd und WSL unter Windows. Hardware-Übersicht unter Linux und Windows, Root-Terminal und Prozesse unter Linux; SSH-, Telnet- und serielle Sitzungen. Tabs, Split-Ansichten, MultiExec, Einstellungen für Schrift/Cursor/Scrollback/Farben. Kontextmenü: Kopieren, Alles kopieren, Leeren, Speichern als TXT/HTML/RTF. Bearbeitbare Einfüge-Rückfrage, Sitzungs-Logging und Schließen-Rückfrage. Ende-Menü: Return schließt, R verbindet im selben Tab erneut, S speichert die Ausgabe.
 - **SSH:** eine Verbindung mit Shell- und SFTP-Kanälen, exec-Listing-Fallback, Hostkey-Prüfung gegen `known_hosts`, Agent-/Schlüssel- (einschließlich `.ppk`)/Passwortanmeldung, Keepalive und Jump-host-Ketten. Tunnel-Manager für `-L`, `-R` und SOCKS5 mit eigenen Hintergrundverbindungen, Autostart, Reconnect und Status. Monitoring-Leiste mit Tooltips für Host, CPU, RAM, Netzwerk, Laufzeit, Benutzer und Dateisysteme.
 - **SFTP-Browser:** Follow Terminal Folder über OSC 7, Navigation, Sortierung, Dateitransfers mit Warteschlange, Fortschritt/Abbruch und Drag & Drop. Dateien/Ordner anlegen, rekursiv mit Bestätigung löschen, rekursives chmod mit getrennten Einstellungen für Dateien/Ordner, sudo-Modus und „Zum Vergleich merken“. Auch lokale und WSL-Verzeichnisse lassen sich anzeigen.
 - **Sitzungen:** Ordner, Suche, Quick connect, zuletzt verwendete Sitzungen und Wiederherstellen letzter Tabs. Sitzungsimport aus MobaXterm und WindTerm; Farbimport aus MobaXterm. Gespeicherte Passwörter liegen im System-Schlüsselbund. Verschlüsselte importierte Passwörter werden nicht wiederhergestellt.
@@ -30,6 +30,8 @@ Werkterm ist ein privates, unabhängiges Projekt ohne Verbindung zu Mobatek. Es 
 - **Werkzeuge:** schreibgeschützter Dateivergleich (lokal/remote/gemischt), rekursiver Ordnervergleich mit optionalem Inhaltsvergleich, Makros mit Aufnahme, Text-/Warte-/Rückfrage-Schritten und Tastenkürzeln, SSH-Schlüssel erzeugen, offene lokale Ports, ASCII-Tabelle und Tux-Wanderer als Leerlauf-Animation. Die Linux-Seriell-Berechtigungshilfe ermittelt Gerätegruppen wie dialout/uucp und bietet nach Bestätigung einen Befehl im lokalen Terminal an.
 
 ## Voraussetzungen
+
+Windows 10/11 x64 mit Microsoft Edge WebView2 (auf aktuellem Windows vorinstalliert; fehlt es, lädt der Installer es nach).
 
 Linux x86_64 mit WebKitGTK 4.1 und GTK 3: Laufzeitpakete auf Debian-basierten Systemen heißen unter anderem `libwebkit2gtk-4.1-0` und `libgtk-3-0`. Empfohlen: `gnome-keyring` oder ein anderer Secret-Service-Dienst sowie `fonts-noto-color-emoji`. Als SSH-Server ist OpenSSH vorgesehen; SFTP wird empfohlen. Schreibaktionen/Transfers im Browser benötigen SFTP; der sudo-Modus zusätzlich sudo-Rechte und ein externes `sftp-server`-Programm.
 
@@ -40,7 +42,7 @@ Fertige Pakete (`.deb`, AppImage, `SHA256SUMS`) hängen am GitHub-Release, sicht
 Debian-basierte Systeme, Bash (installiert ein Systempaket):
 
 ```bash
-sudo apt install ./Werkterm_0.1.0_amd64.deb
+sudo apt install ./Werkterm_0.1.3_amd64.deb
 ```
 
 Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`.
@@ -48,15 +50,19 @@ Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`.
 AppImage, Bash (`libfuse2` erforderlich; der Paketname kann je Distribution abweichen):
 
 ```bash
-chmod +x ./Werkterm_0.1.0_amd64.AppImage
-./Werkterm_0.1.0_amd64.AppImage
+chmod +x ./Werkterm_0.1.3_amd64.AppImage
+./Werkterm_0.1.3_amd64.AppImage
 ```
 
-Zur Prüfung muss sich das Anwendungsfenster öffnen. Die Dateinamen beschreiben den dokumentierten Build, keine herunterladbaren Release-Dateien.
+Zur Prüfung muss sich das Anwendungsfenster öffnen.
+
+Windows: `Werkterm_0.1.3_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_0.1.3_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`.
+
+Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum -c SHA256SUMS`, Windows-PowerShell: `Get-FileHash <Datei>`).
 
 ## Selbst bauen
 
-Benötigt werden Linux x86_64, Rust stable mit Unterstützung für Edition 2024, Node.js mit npm und die [offiziellen Tauri-Linux-Abhängigkeiten](https://v2.tauri.app/start/prerequisites/). Windows dient ausschließlich Entwicklung/Tests. Das Frontend verwendet TypeScript `~6.0.3`; Manifeste und Lockdateien legen Abhängigkeiten fest. Das Projekt nennt keine minimale Node.js-Version.
+Benötigt werden Linux x86_64, Rust stable mit Unterstützung für Edition 2024, Node.js mit npm und die [offiziellen Tauri-Linux-Abhängigkeiten](https://v2.tauri.app/start/prerequisites/). Windows-Pakete werden unter Windows gebaut. Das Frontend verwendet TypeScript `~6.0.3`; Manifeste und Lockdateien legen Abhängigkeiten fest. Das Projekt nennt keine minimale Node.js-Version.
 
 Im Projektverzeichnis, Bash:
 
@@ -71,7 +77,7 @@ Für Linux-Pakete, Bash:
 npm run tauri build
 ```
 
-Ausgabe: `src-tauri/target/release/bundle/{deb,appimage}`. Zur Prüfung die erzeugten Dateien kontrollieren und installiertes Paket oder AppImage starten.
+Ausgabe: `src-tauri/target/release/bundle/{deb,appimage}` unter Linux, `src-tauri/target/release/bundle/{nsis,msi}` unter Windows (laufende Dev-Instanz vorher beenden). Zur Prüfung die erzeugten Dateien kontrollieren und installiertes Paket oder AppImage starten.
 
 Tests, Bash:
 
