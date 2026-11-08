@@ -1,3 +1,6 @@
+import { useSyncExternalStore } from "react";
+import { getIconSnapshot, subscribeIcons, iconSvg } from "../lib/iconSets";
+import debianIcon from "../assets/icons/debian.svg?raw";
 import telnetIcon from "../assets/icons/telnet.svg?raw";
 import serialIcon from "../assets/icons/serial.svg?raw";
 import powershellIcon from "../assets/icons/powershell.svg?raw";
@@ -32,7 +35,8 @@ import sessionNewIcon from "../assets/icons/session-new.svg?raw";
 import settingsIcon from "../assets/icons/settings.svg?raw";
 
 const inline = (paths: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-const icons = {
+export const standardIcons = {
+  debian: debianIcon,
   telnet: telnetIcon,
   serial: serialIcon,
   powershell: powershellIcon,
@@ -72,7 +76,8 @@ const icons = {
   "folder": folderIcon,
   "file": fileIcon,
 };
-export type IconName = keyof typeof icons;
+export type IconName = keyof typeof standardIcons;
 export function Icon({ name }: { name: IconName }) {
-  return <span className="icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icons[name] }} />;
+  const set = useSyncExternalStore(subscribeIcons, getIconSnapshot, getIconSnapshot);
+  return <span className="icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconSvg(set, name, standardIcons) }} />;
 }

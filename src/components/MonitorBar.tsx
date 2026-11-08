@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
-import tux from "../assets/icons/tux.svg";
-import debianLogo from "../assets/icons/debian.svg";
+import { Icon } from "./Icon";
 import { MonitorTooltip as Tip } from "./MonitorTooltip";
 import { decimal, rate, size, uptime, users, distro, distroBadges, history, dfTable, orderDisks, fittingCount, type Disk } from "./monitorFormat";
 import "./MonitorBar.css";
@@ -63,7 +62,7 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
   const network = (upload: boolean) => <Table rows={sample.interfaces.flatMap(n => [[`${n.name} ${upload ? "gesendet" : "empfangen"} gesamt`, size(upload ? n.tx : n.rx)], [`${n.name} Fehler`, decimal(upload ? n.txErrors : n.rxErrors)], [`${n.name} verworfen`, decimal(upload ? n.txDrop : n.rxDrop)]] as [string, string][])} />;
   const df = <><strong>Ausgabe von df:</strong><pre>{dfTable(sample.dfAll)}</pre></>;
   const dist = distro(sample.osId, sample.osIdLike);
-  const distIcon = dist === "debian" ? <img className="monitor-tux" src={debianLogo} alt="Debian" /> : dist === "tux" ? <img className="monitor-tux" src={tux} alt="Linux" /> : <span className="monitor-distro" style={{ background: distroBadges[dist][1] }} aria-hidden="true">{distroBadges[dist][0]}</span>;
+  const distIcon = dist === "debian" ? <span className="monitor-tux" role="img" aria-label="Debian"><Icon name="debian" /></span> : dist === "tux" ? <span className="monitor-tux" role="img" aria-label="Linux"><Icon name="tux" /></span> : <span className="monitor-distro" style={{ background: distroBadges[dist][1] }} aria-hidden="true">{distroBadges[dist][0]}</span>;
   const visible = disks.slice(0, shown), hidden = disks.slice(visible.length);
   return <div className="monitor-bar" ref={bar}>
     <Tip content={<><div>Hostname: {sample.host || "–"}</div><div>System: {sample.osName ?? "–"}</div><div>Version: {sample.version ?? "–"}</div><div>CPU-Kerne: {sample.cpuCores ?? "–"}</div></>}>{distIcon}{sample.host || "–"}</Tip>

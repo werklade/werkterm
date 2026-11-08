@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Designs: the whole app (interface, terminal, editor, monitoring) follows a design. New built-in designs Werklade Dunkel (default for new installs) and Werklade Hell; a Design tab edits colours with live preview and contrast warnings, duplicates, exports and imports designs.
+- Icon sets: Standard and Werklade built in; import a folder of SVG files (sanitized) and export a template to create your own.
 - Export all, selected or folder sessions to a Werkterm session file (no passwords) and import it on another device with preview, duplicate detection and jump-host remapping.
 
 ### Changed

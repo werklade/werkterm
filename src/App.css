@@ -235,3 +235,10 @@ input::placeholder { color: var(--fg-muted); }
 .folder-diff-row.result-1, .folder-diff-row.result-4 { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .folder-diff-row.result-2 { background: color-mix(in srgb, var(--success) 14%, transparent); }
 .folder-diff-row.result-3 { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+html[data-icons="werklade"] .icon svg [stroke-width], html[data-icons="werklade"] .icon svg { stroke-width: 1.5; }
+html[data-icons="werklade"] .sidebar-icons button[aria-pressed="true"] .icon, html[data-icons="werklade"] :is(.toolbar, .browser-toolbar) button:not(:disabled):hover .icon { color: var(--accent); }
+.monitor-tux .icon { width: 100%; height: 100%; }
+.icon-set-editor { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.icon-set-preview { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0; }
+.icon-set-actions { display: flex; flex-wrap: wrap; gap: 8px; }

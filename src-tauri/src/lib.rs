@@ -2,6 +2,7 @@ mod commands;
 mod designs;
 pub mod editor;
 mod folder_diff;
+mod icon_sets;
 mod keygen;
 pub mod local_fs;
 mod local_ports;
@@ -41,6 +42,11 @@ pub fn run() {
             designs::designs_delete,
             designs::designs_export,
             designs::designs_import,
+            icon_sets::icon_sets_list,
+            icon_sets::icon_sets_load,
+            icon_sets::icon_sets_import,
+            icon_sets::icon_sets_delete,
+            icon_sets::icon_sets_export_template,
             folder_diff::folder_diff_compare,
             folder_diff::folder_diff_cancel,
             folder_diff::folder_diff_kind,

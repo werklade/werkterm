@@ -15,12 +15,12 @@ describe("settings validation and migration", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("defaults invalid and old settings without losing existing booleans", () => {
     for (const input of [null, [], "invalid", 42]) expect(normalizeSettings(input)).toEqual(defaultSettings);
-    expect(normalizeSettings({ followTerminalFolder: false, sshPromptCommand: false })).toEqual({ ...defaultSettings, design: "Werkterm Dunkel", theme: "Werkterm Dunkel", followTerminalFolder: false, sshPromptCommand: false });
+    expect(normalizeSettings({ followTerminalFolder: false, sshPromptCommand: false })).toEqual({ ...defaultSettings, design: "Werkterm Dunkel", iconSet: "Standard", theme: "Werkterm Dunkel", followTerminalFolder: false, sshPromptCommand: false });
   });
   it("clamps bounds and rejects invalid values", () => {
     const value = normalizeSettings({ fontSize: 99, editorFontSize: -1, lineHeight: 9, scrollback: -5, cursorStyle: "invalid", editorTabSize: 3, theme: "toString", monitoring: "false" });
     expect(value).toMatchObject({ fontSize: 32, editorFontSize: 8, lineHeight: 2, scrollback: 1000, cursorStyle: "block", editorTabSize: 4, monitoring: true, theme: defaultSettings.theme });
-    expect(normalizeSettings({ fontSize: NaN, scrollback: Infinity, fontFamily: " " })).toEqual({ ...defaultSettings, design: "Werkterm Dunkel", theme: "Werkterm Dunkel" });
+    expect(normalizeSettings({ fontSize: NaN, scrollback: Infinity, fontFamily: " " })).toEqual({ ...defaultSettings, design: "Werkterm Dunkel", iconSet: "Standard", theme: "Werkterm Dunkel" });
     expect(normalizeSettings({ fontSize: 8, editorFontSize: 32, lineHeight: 1, scrollback: 100000, editorTabSize: 8 })).toMatchObject({ fontSize: 8, editorFontSize: 32, lineHeight: 1, scrollback: 100000, editorTabSize: 8 });
   });
   it("migrates the previous storage key and tolerates storage errors", () => {
@@ -63,8 +63,8 @@ describe("design settings migration", () => {
     vi.stubGlobal("localStorage", { getItem: () => null });
     expect(loadSettings()).toMatchObject({ design: "Werklade Dunkel", theme: "design" });
     vi.stubGlobal("localStorage", { getItem: (key: string) => key === "werkterm.settings" ? "{}" : null });
-    expect(loadSettings()).toMatchObject({ design: "Werkterm Dunkel", theme: "Werkterm Dunkel" });
-    expect(normalizeSettings({ theme: "Solarized Dark" })).toMatchObject({ design: "Werkterm Dunkel", theme: "Solarized Dark" });
+    expect(loadSettings()).toMatchObject({ design: "Werkterm Dunkel", iconSet: "Standard", theme: "Werkterm Dunkel" });
+    expect(normalizeSettings({ theme: "Solarized Dark" })).toMatchObject({ design: "Werkterm Dunkel", iconSet: "Standard", theme: "Solarized Dark" });
   });
   it("takes terminal colors from the active built-in or user design", () => {
     const settings = normalizeSettings({ design: "Werklade Hell", theme: "design" });
@@ -75,4 +75,11 @@ describe("design settings migration", () => {
     unregisterUserDesign("user-colors");
     expect(selectedTheme({ ...settings, design: "unknown" })).toEqual(builtInDesigns["Werklade Dunkel"].terminal);
   });
+});
+
+it("uses Werklade icons for new installs and Standard for existing settings", () => {
+  expect(normalizeSettings(null).iconSet).toBe("Werklade");
+  expect(normalizeSettings({}).iconSet).toBe("Standard");
+  expect(normalizeSettings({ iconSet: "custom-123" }).iconSet).toBe("custom-123");
+  expect(normalizeSettings({ iconSet: 3 }).iconSet).toBe("Standard");
 });

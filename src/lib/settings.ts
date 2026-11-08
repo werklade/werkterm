@@ -2,6 +2,7 @@ import { getDesign } from "./designs";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 export interface Settings {
   design: string;
+  iconSet: string;
   tuxEnabled: boolean; tuxIdleMinutes: number; tuxCount: number;
   logFolder: string; logAllSessions: boolean; logStripAnsi: boolean; pasteConfirm: import("./paste").PasteConfirm;
   copyOnSelect: boolean; rightClick: "menu" | "paste";
@@ -16,6 +17,7 @@ export interface Settings {
 }
 export const defaultSettings: Settings = {
   design: "Werklade Dunkel",
+  iconSet: "Werklade",
   tuxEnabled: true, tuxIdleMinutes: 10, tuxCount: 4,
   logFolder: "", logAllSessions: false, logStripAnsi: true, pasteConfirm: "multiline",
   copyOnSelect: true, rightClick: "menu",
@@ -32,6 +34,7 @@ export function normalizeSettings(input: unknown): Settings {
   const v = input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
   const result = { ...defaultSettings };
   if (input && typeof input === "object" && !Array.isArray(input)) {
+    result.iconSet = typeof v.iconSet === "string" && v.iconSet.trim() ? v.iconSet.slice(0,64) : "Standard";
     result.design = typeof v.design === "string" ? v.design.slice(0,60) : "Werkterm Dunkel";
     if (!("theme" in v)) result.theme = "Werkterm Dunkel";
   }

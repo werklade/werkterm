@@ -1,3 +1,4 @@
+import { activateIconSet } from "./lib/iconSets";
 import { applyDesign, getDesign, getUserDesigns, registerUserDesign, designsChangedEvent, type StoredDesign } from "./lib/designs";
 import { SerialPermissionDialog } from "./components/SerialPermissionDialog";
 import { serialFixCommands, type SerialPermission } from "./lib/serialPermission";
@@ -231,6 +232,7 @@ export default function App() {
   const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
   const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | "werkterm" | null>(null);
   const fullscreenPending = useRef(false);
+  useEffect(() => { void activateIconSet(settings.iconSet).catch(reason => setStatus(String(reason))); }, [settings.iconSet]);
   useLayoutEffect(() => { applyDesign(getDesign(settings.design)); }, [settings, designRevision]);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
   const promptQueue = useRef<QueuedPrompt[]>([]);
