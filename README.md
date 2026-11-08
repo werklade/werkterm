@@ -17,9 +17,8 @@ Werkterm is a private, independent project with no affiliation to Mobatek. It ha
 | --- | --- |
 | ![SSH terminal beside the directory-following SFTP browser](docs/screenshots/terminal-sftp.png) | ![Editor with syntax highlighting and color-code backgrounds](docs/screenshots/editor-colors.png) |
 | Sessions and import | Permissions and sudo |
-| ![Session folders and session import dialog](docs/screenshots/sessions-import.png) | ![File permissions dialog and browser sudo mode](docs/screenshots/permissions-sudo.png) |
+| ![Session import dialog](docs/screenshots/sessions-import.png) | ![File permissions dialog of the SFTP browser](docs/screenshots/permissions-sudo.png) |
 
-<!-- screenshots pending -->
 
 ## Features
 
