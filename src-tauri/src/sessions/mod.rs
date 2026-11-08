@@ -769,20 +769,7 @@ pub async fn sessions_import_preview(
                         .get("path")
                         .and_then(serde_json::Value::as_str)
                         .ok_or_else(|| "profiles.config enthält keinen Profilpfad".to_owned())?;
-                    let directory = expand_home(directory, &home);
-                    let directory = if directory.is_absolute() {
-                        directory
-                    } else {
-                        path.parent()
-                            .unwrap_or_else(|| Path::new("."))
-                            .join(directory)
-                    };
-                    directory
-                        .join(".wind")
-                        .join("profiles")
-                        .join("default.v10")
-                        .join("terminal")
-                        .join("user.sessions")
+                    windterm_sessions_path(directory, &path, &home)?
                 } else {
                     path
                 };
@@ -933,8 +920,117 @@ pub async fn sessions_import_commit(
     Ok(result)
 }
 
+/// True for `C:\...`, `C:/...` or UNC paths, which cannot be resolved on Linux.
+fn is_windows_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/'))
+        || path.starts_with("\\\\")
+}
+
+/// Resolves the `user.sessions` file a WindTerm `profiles.config` points to. WindTerm keeps
+/// sessions in `<path>/.wind/profiles/default.v<N>/terminal/user.sessions`; `default.v10` is
+/// preferred, otherwise the newest other `default.v*` profile that contains the file is used.
+fn windterm_sessions_path(directory: &str, config: &Path, home: &Path) -> Result<PathBuf, String> {
+    if !cfg!(windows) && is_windows_path(directory) {
+        return Err(format!(
+            "profiles.config verweist auf einen Windows-Pfad ({directory}). Bitte user.sessions aus dem WindTerm-Profil kopieren und direkt auswählen."
+        ));
+    }
+    let directory = expand_home(directory, home);
+    let directory = if directory.is_absolute() {
+        directory
+    } else {
+        config
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(directory)
+    };
+    let profiles = directory.join(".wind").join("profiles");
+    let sessions = |profile: &Path| profile.join("terminal").join("user.sessions");
+    let preferred = sessions(&profiles.join("default.v10"));
+    if preferred.is_file() {
+        return Ok(preferred);
+    }
+    let mut others: Vec<PathBuf> = fs::read_dir(&profiles)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("default.v"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    // Newest profile version first ("default.v12" before "default.v9").
+    others.sort_by_key(|path| {
+        std::cmp::Reverse(
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix("default.v"))
+                .and_then(|version| version.parse::<u32>().ok())
+                .unwrap_or(0),
+        )
+    });
+    others
+        .iter()
+        .map(|profile| sessions(profile))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            format!(
+                "Im WindTerm-Profilordner {} wurde keine user.sessions gefunden. Bitte direkt user.sessions auswählen.",
+                profiles.display()
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn windterm_profiles_config_paths() {
+        let root = std::env::temp_dir().join(format!("werkterm-windterm-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let config = root.join("profiles.config");
+        let home = root.join("home");
+        // Missing profile: clear message with the searched folder.
+        let error = windterm_sessions_path("profile", &config, &home).unwrap_err();
+        assert!(error.contains("keine user.sessions"), "{error}");
+        // Only another version present: the newest one is used.
+        for version in ["default.v9", "default.v12"] {
+            let dir = root
+                .join("profile/.wind/profiles")
+                .join(version)
+                .join("terminal");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("user.sessions"), "[]").unwrap();
+        }
+        let found = windterm_sessions_path("profile", &config, &home).unwrap();
+        assert!(found.to_string_lossy().contains("default.v12"));
+        // default.v10 wins when present.
+        let v10 = root.join("profile/.wind/profiles/default.v10/terminal");
+        fs::create_dir_all(&v10).unwrap();
+        fs::write(v10.join("user.sessions"), "[]").unwrap();
+        assert_eq!(
+            windterm_sessions_path("profile", &config, &home).unwrap(),
+            v10.join("user.sessions")
+        );
+        fs::remove_dir_all(&root).unwrap();
+        assert!(is_windows_path("C:/Users/x/WindTerm"));
+        assert!(is_windows_path("D:\\Tools"));
+        assert!(is_windows_path("\\\\server\\share"));
+        assert!(!is_windows_path("/home/x"));
+        assert!(!is_windows_path("~/WindTerm"));
+        if !cfg!(windows) {
+            let error = windterm_sessions_path("C:/Users/x/WindTerm", &config, &home).unwrap_err();
+            assert!(error.contains("Windows-Pfad"), "{error}");
+        }
+    }
     #[test]
     fn kind_changes_preserve_named_jump_and_tunnel_references() {
         let original = jump_sample("gateway", None);
