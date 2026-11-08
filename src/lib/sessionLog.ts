@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { documentDir, join } from "@tauri-apps/api/path";
+import { documentDir, homeDir, join } from "@tauri-apps/api/path";
 import type { Settings } from "./settings";
-export const defaultLogFolder = async () => join(await documentDir(), "Werkterm-Logs");
+/** Documents folder when the system defines one (not on minimal Linux without XDG user dirs), else the home folder. */
+export const defaultLogFolder = async () => join(await documentDir().catch(() => homeDir()), "Werkterm-Logs");
 export function localTimestamp(date = new Date()): string {
   const n = (v: number) => String(v).padStart(2, "0");
   return `${date.getFullYear()}-${n(date.getMonth() + 1)}-${n(date.getDate())}_${n(date.getHours())}-${n(date.getMinutes())}-${n(date.getSeconds())}`;

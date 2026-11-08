@@ -144,6 +144,15 @@ fn report_error(app: &tauri::AppHandle, id: u32, error: impl std::fmt::Display) 
         },
     );
 }
+/// Documents folder when the system defines one (minimal Linux often has no XDG user dirs),
+/// otherwise the home folder.
+fn default_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let path = app.path();
+    path.document_dir()
+        .or_else(|_| path.home_dir())
+        .map(|dir| dir.join("Werkterm-Logs"))
+        .map_err(|e| e.to_string())
+}
 static LOGS: OnceLock<Mutex<Logs>> = OnceLock::new();
 fn logs() -> &'static Mutex<Logs> {
     LOGS.get_or_init(|| Mutex::new(Logs::default()))
@@ -281,11 +290,7 @@ pub async fn session_log_start(
     tauri::async_runtime::spawn_blocking(move || {
         let folder = match folder.filter(|v| !v.is_empty()) {
             Some(path) => PathBuf::from(path),
-            None => app
-                .path()
-                .document_dir()
-                .map_err(|e| e.to_string())?
-                .join("Werkterm-Logs"),
+            None => default_log_dir(&app)?,
         };
         if !folder.is_absolute() {
             return Err("Protokollordner muss ein absoluter Pfad sein".into());
@@ -355,11 +360,7 @@ pub async fn session_log_open_folder(
         use tauri_plugin_opener::OpenerExt;
         let path = match folder.filter(|v| !v.is_empty()) {
             Some(path) => PathBuf::from(path),
-            None => app
-                .path()
-                .document_dir()
-                .map_err(|e| e.to_string())?
-                .join("Werkterm-Logs"),
+            None => default_log_dir(&app)?,
         };
         if !path.is_absolute() {
             return Err("Protokollordner muss ein absoluter Pfad sein".into());
