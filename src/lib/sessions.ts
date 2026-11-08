@@ -66,6 +66,8 @@ export const listSessions = () => invoke<SavedSession[]>("sessions_list");
 export const saveSession = (session: SavedSession, password: string | null) =>
   invoke<SavedSession>("sessions_save", { session, password });
 export const deleteSession = (id: string) => invoke<void>("sessions_delete", { id });
+export interface DeleteManyResult { deleted: string[]; blocked: { id: string; name: string; reason: string }[]; warnings: string[] }
+export const deleteSessions = (ids: string[]) => invoke<DeleteManyResult>("sessions_delete_many", { ids });
 export const keyringAvailable = () => invoke<boolean>("sessions_keyring_available");
 
 /** Existing sessions retain their authentication; quick-connect drafts prefer the keyring. */
@@ -208,4 +210,20 @@ export function jumpHostOptions(sessions: readonly SavedSession[], sessionId?: s
 export function jumpHostHint(session: SavedSession, sessions: readonly SavedSession[]): string {
   if (!session.jumpSessionId) return "";
   return `über ${sessions.find(item => item.id === session.jumpSessionId)?.name ?? "unbekannten Jump host"}`;
+}
+
+export interface SessionSelection { ids: string[]; anchor: string }
+export function selectSessions(previous: SessionSelection, visible: readonly string[], target: string, action: "single" | "toggle" | "range" | "all"): SessionSelection {
+  if (action === "all") return { ids: [...visible], anchor: visible.includes(previous.anchor) ? previous.anchor : visible[0] ?? "" };
+  if (action === "range") {
+    const end = visible.indexOf(target);
+    const start = visible.indexOf(previous.anchor);
+    if (end < 0) return previous;
+    if (start >= 0) return { ids: visible.slice(Math.min(start, end), Math.max(start, end) + 1), anchor: previous.anchor };
+  }
+  if (action === "toggle") return { ids: previous.ids.includes(target) ? previous.ids.filter(id => id !== target) : [...previous.ids, target], anchor: target };
+  return { ids: target ? [target] : [], anchor: target };
+}
+export function collectFolderSessions(folder: SessionFolder): SavedSession[] {
+  return [...folder.sessions, ...folder.folders.flatMap(collectFolderSessions)];
 }

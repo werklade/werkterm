@@ -107,6 +107,7 @@ pub fn run() {
             sessions::sessions_list,
             sessions::sessions_save,
             sessions::sessions_delete,
+            sessions::sessions_delete_many,
             sessions::sessions_keyring_available,
             sessions::sessions_import_default_path,
             sessions::sessions_import_preview,

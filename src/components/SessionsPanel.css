@@ -20,3 +20,5 @@
 
 .jump-inline { display: inline-flex; vertical-align: middle; color: inherit; }
 .jump-inline .icon, .jump-inline svg { width: 12px; height: 12px; color: inherit; }
+
+.sessions-panel .file-action-dialog h2 { white-space: pre-line; }

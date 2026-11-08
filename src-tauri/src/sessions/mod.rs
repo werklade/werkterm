@@ -467,6 +467,113 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
     Ok(())
 }
 
+#[derive(Debug, Serialize)]
+pub struct DeleteBlocked {
+    id: String,
+    name: String,
+    reason: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct DeleteManyResult {
+    deleted: Vec<String>,
+    blocked: Vec<DeleteBlocked>,
+    warnings: Vec<String>,
+}
+
+fn plan_delete_many(
+    sessions: &[SavedSession],
+    ids: &[String],
+    mut protect: impl FnMut(&str) -> Result<(), String>,
+) -> DeleteManyResult {
+    let mut result = DeleteManyResult::default();
+    let mut candidates: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    let requested: Vec<_> = sessions
+        .iter()
+        .filter(|s| candidates.contains(&s.id))
+        .collect();
+    for session in requested {
+        if let Err(reason) = protect(&session.id) {
+            candidates.remove(&session.id);
+            result.blocked.push(DeleteBlocked {
+                id: session.id.clone(),
+                name: session.name.clone(),
+                reason,
+            });
+        }
+    }
+    loop {
+        let blocked: Vec<_> = sessions
+            .iter()
+            .filter(|s| {
+                candidates.contains(&s.id)
+                    && sessions.iter().any(|dependent| {
+                        !candidates.contains(&dependent.id)
+                            && dependent.jump_session_id.as_deref() == Some(s.id.as_str())
+                    })
+            })
+            .collect();
+        if blocked.is_empty() {
+            break;
+        }
+        for session in blocked {
+            candidates.remove(&session.id);
+            result.blocked.push(DeleteBlocked {
+                id: session.id.clone(),
+                name: session.name.clone(),
+                reason: "als Jump host verwendet".into(),
+            });
+        }
+    }
+    result.deleted = sessions
+        .iter()
+        .filter(|s| candidates.contains(&s.id))
+        .map(|s| s.id.clone())
+        .collect();
+    result
+}
+
+async fn delete_many_at<P, F>(
+    path: PathBuf,
+    ids: Vec<String>,
+    protect: P,
+    mut delete_secret: F,
+) -> Result<DeleteManyResult, String>
+where
+    P: FnMut(&str) -> Result<(), String>,
+    F: AsyncFnMut(String) -> Result<(), String>,
+{
+    let mut sessions = read_file(path.clone()).await?;
+    let mut result = plan_delete_many(&sessions, &ids, protect);
+    if !result.deleted.is_empty() {
+        sessions.retain(|s| !result.deleted.contains(&s.id));
+        persist(path, sessions).await?;
+        for id in &result.deleted {
+            if let Err(error) = delete_secret(format!("session:{id}")).await {
+                result
+                    .warnings
+                    .push(format!("Sitzung wurde gelöscht; Schlüsselbund: {error}"));
+            }
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn sessions_delete_many(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+) -> Result<DeleteManyResult, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    delete_many_at(
+        config_path(&app)?,
+        ids,
+        |id| crate::tunnels::protect_session(&app, id),
+        crate::secrets::delete_password,
+    )
+    .await
+}
+
 fn protect_kind_change(
     session: &SavedSession,
     sessions: &[SavedSession],
@@ -1002,6 +1109,122 @@ mod tests {
                 .unwrap_err()
                 .contains("Zyklus")
         );
+    }
+
+    #[test]
+    fn bulk_delete_respects_dependencies_and_tunnel_protection() {
+        let sessions = vec![
+            jump_sample("gateway", None),
+            jump_sample("middle", Some("gateway")),
+            jump_sample("target", Some("middle")),
+        ];
+        let all = vec![
+            "gateway".into(),
+            "middle".into(),
+            "target".into(),
+            "unknown".into(),
+            "target".into(),
+        ];
+        assert_eq!(
+            plan_delete_many(&sessions, &all, |_| Ok(())).deleted.len(),
+            3
+        );
+        let blocked = plan_delete_many(&sessions, &all, |id| {
+            if id == "target" {
+                Err("Tunnel verwendet Sitzung".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(blocked.deleted.is_empty());
+        assert_eq!(blocked.blocked.len(), 3);
+        assert!(
+            blocked
+                .blocked
+                .iter()
+                .any(|s| s.id == "target" && s.reason.contains("Tunnel"))
+        );
+        let gateway = plan_delete_many(&sessions, &["gateway".into()], |_| Ok(()));
+        assert_eq!(gateway.blocked.len(), 1);
+        assert!(gateway.deleted.is_empty());
+        assert!(
+            plan_delete_many(&sessions, &["unknown".into()], |_| panic!(
+                "unknown ID must not be protected"
+            ))
+            .deleted
+            .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_delete_persists_once_before_cleaning_each_secret() {
+        let directory = std::env::temp_dir().join(format!("werkterm-bulk-{}", new_id()));
+        let path = directory.join("sessions.json");
+        write_atomic(
+            &path,
+            vec![
+                jump_sample("gateway", None),
+                jump_sample("target", Some("gateway")),
+                jump_sample("keep", None),
+            ],
+        )
+        .unwrap();
+        let calls = std::cell::RefCell::new(Vec::new());
+        let result = delete_many_at(
+            path.clone(),
+            vec![
+                "gateway".into(),
+                "target".into(),
+                "target".into(),
+                "unknown".into(),
+            ],
+            |_| Ok(()),
+            async |account| {
+                assert_eq!(
+                    load(&path)
+                        .unwrap()
+                        .iter()
+                        .map(|s| s.id.as_str())
+                        .collect::<Vec<_>>(),
+                    ["keep"]
+                );
+                calls.borrow_mut().push(account);
+                Err("mock keyring failure".into())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.deleted, ["gateway", "target"]);
+        assert_eq!(*calls.borrow(), ["session:gateway", "session:target"]);
+        assert_eq!(result.warnings.len(), 2);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        // Force failure after the initial read, in write_atomic's validation.
+        assert!(
+            delete_many_at(
+                path.clone(),
+                vec!["keep".into()],
+                |_| {
+                    fs::write(&path, b"broken").unwrap();
+                    Ok(())
+                },
+                async |_| panic!("failed persistence must not remove credentials")
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"broken");
+        assert!(
+            delete_many_at(
+                path.clone(),
+                vec!["keep".into()],
+                |_| Ok(()),
+                async |_| panic!("must not remove credentials on persistence failure")
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"broken");
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
