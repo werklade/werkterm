@@ -1,3 +1,4 @@
+import { parseSerialPermission, serialFixCommands, type SerialPermission } from "../lib/serialPermission";
 import { TuxOverlay } from "./TuxOverlay";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,6 +21,7 @@ import { inputProvenance, terminalWriters } from "../lib/multiExec";
 import { MonitorBar } from "./MonitorBar";
 
 interface Props {
+  onSerialPermission(id: number, info: SerialPermission): void;
   logPath?: string;
   connected?: boolean;
   onLogToggle(id: number): void;
@@ -55,7 +57,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ onSerialPermission, serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const [tuxTerminal, setTuxTerminal] = useState<Terminal | null>(null);
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
@@ -86,8 +88,8 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
   const shownRef = useRef(visible ?? active); shownRef.current = visible ?? active;
   const activeRef = useRef(active);
   activeRef.current = active;
-  const callbacks = useRef({ onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: (): void => undefined });
-  callbacks.current = { onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: () => { void saveContent("txt"); } };
+  const callbacks = useRef({ onSerialPermission, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: (): void => undefined });
+  callbacks.current = { onSerialPermission, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: () => { void saveContent("txt"); } };
   const settings = useRef({ shellIntegration, sshPromptCommand });
   settings.current = { shellIntegration, sshPromptCommand };
 
@@ -105,6 +107,9 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
       terminal.open(element);
       runtime.current = { terminal, fit };
       setTuxTerminal(terminal);
+      const permissionShell = kind === "local" && serialFixCommands.has(id);
+      let shellReady = false;
+      let permissionReadyTimer: ReturnType<typeof setTimeout> | undefined;
       let sessionId: number | undefined;
       const connectToken = nextConnectToken++ >>> 0;
       let connecting = kind === "ssh" || kind === "telnet";
@@ -115,6 +120,30 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
       const close = wire ? (id: number) => invoke<void>("terminal_close", { id }) : kind === "ssh" ? closeSsh : killPty;
       const report = (error: unknown) => callbacks.current.onStatus(`Terminal: ${String(error)}`);
       const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report, () => ({ cols: terminal.cols, cursorX: terminal.buffer.active.cursorX }));
+      const sendPermissionCommand = () => {
+        if (!permissionShell || !shellReady || sessionId === undefined || cancelled || exited) return;
+        const pending = serialFixCommands.get(id);
+        if (!pending) return;
+        serialFixCommands.delete(id);
+        clearTimeout(permissionReadyTimer);
+        void write(sessionId, pending.command + "\r").then(() => {
+          pending.resolve();
+          requestAnimationFrame(() => terminal.focus());
+        }, pending.reject);
+      };
+      if (permissionShell) permissionReadyTimer = setTimeout(() => {
+        const pending = serialFixCommands.get(id);
+        if (pending) {
+          serialFixCommands.delete(id);
+          pending.reject(new Error("Shell-Bereitschaft nicht bestätigt. Bitte Befehl kopieren und manuell im Terminal ausführen."));
+        }
+      }, 15000);
+      const permissionReady = terminal.parser.registerOscHandler(777, payload => {
+        if (!permissionShell || payload !== "werkterm-serial-ready") return false;
+        shellReady = true;
+        sendPermissionCommand();
+        return true;
+      });
       const osc = terminal.parser.registerOscHandler(7, payload => {
         const cwd = parseOsc7(payload, kind === "local" && /Windows/i.test(navigator.userAgent));
         if (!cwd) return false;
@@ -169,8 +198,8 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
       const otherEvents = ["mousedown", "mouseup", "mousemove", "wheel", "focusout"];
       textEvents.forEach(type => element.addEventListener(type, markTextInput, true));
       otherEvents.forEach(type => element.addEventListener(type, markOtherInput, true));
-      const canDistribute = () => shownRef.current && element.contains(document.activeElement);
-      const requestPaste = (text: string) => { if (!cancelled && !exited && inputRef.current) inputRef.current(id, text, true); };
+      const canDistribute = () => !permissionShell && shownRef.current && element.contains(document.activeElement);
+      const requestPaste = (text: string) => { if (permissionShell) { terminal.paste(text); return; } if (!cancelled && !exited && inputRef.current) inputRef.current(id, text, true); };
       terminalPasteRequests.set(id, () => { void navigator.clipboard.readText().then(requestPaste).catch(report); });
       const paste = (event: ClipboardEvent) => {
         const text = event.clipboardData?.getData("text/plain");
@@ -195,7 +224,11 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         promptCommand.receiveData();
       };
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) { exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh" || wire) callbacks.current.onStatus("Verbindung beendet"); terminal.write("\r\n\r\n\x1b[1;33mSitzung beendet\x1b[0m\r\n    - \x1b[1m<Return>\x1b[0m: Tab schließen\r\n    - \x1b[1mR\x1b[0m: Sitzung neu starten\r\n    - \x1b[1mS\x1b[0m: Terminalausgabe in Datei speichern\r\n"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled && !exited) {
+        const pending = serialFixCommands.get(id);
+        if (pending) { serialFixCommands.delete(id); pending.reject(new Error("Shell vor Befehlsübergabe beendet")); }
+        clearTimeout(permissionReadyTimer);
+        exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh" || wire) callbacks.current.onStatus("Verbindung beendet"); terminal.write("\r\n\r\n\x1b[1;33mSitzung beendet\x1b[0m\r\n    - \x1b[1m<Return>\x1b[0m: Tab schließen\r\n    - \x1b[1mR\x1b[0m: Sitzung neu starten\r\n    - \x1b[1mS\x1b[0m: Terminalausgabe in Datei speichern\r\n"); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);
@@ -208,7 +241,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
       if (activeRef.current) terminal.focus();
       const dimensions = { tabId: id, cols: terminal.cols, rows: terminal.rows, onData, onExit: onExitChannel };
       const spawned = (async () => {
-        if (preferencesRef.current.logAllSessions || logRef.current.logAlways) {
+        if (!permissionShell && (preferencesRef.current.logAllSessions || logRef.current.logAlways)) {
           try { const path = await startLog(id, logRef.current.title, preferencesRef.current); if (!cancelled) logRef.current.onLog(id, path); }
           catch (error) { report(error); }
         }
@@ -221,7 +254,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         }
         return kind === "ssh"
         ? connectSsh({ ...dimensions, target: target ?? "", sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
-        : spawnPty({ ...dimensions, kind, startCommand, shellIntegration: settings.current.shellIntegration });
+        : spawnPty({ ...dimensions, kind, startCommand, serialPermissionShell: permissionShell, shellIntegration: settings.current.shellIntegration });
       })();
       void spawned.then(result => {
         connecting = false;
@@ -233,7 +266,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(`Verbunden mit ${destination ? `${destination.user}@${destination.host}` : target ?? ""} (${result.mode})`);
         if (!exited) {
-          terminalWriters.set(id, (data, pasted) => {
+          if (!permissionShell) terminalWriters.set(id, (data, pasted) => {
             // MultiExec input bypasses xterm's own scroll-on-input, so jump to the end here.
             terminal.scrollToBottom();
             if (!pasted) { send(data); return; }
@@ -242,6 +275,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
             deliveringPaste = true;
             try { terminal.paste(data); } finally { deliveringPaste = false; }
           });
+          sendPermissionCommand();
           callbacks.current.onSession(id, spawnedId);
           void resizeSession(spawnedId, terminal.cols, terminal.rows).catch(report);
           promptCommand.connect(spawnedId);
@@ -250,6 +284,10 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         connecting = false;
         callbacks.current.onClearPrompts(id);
         if (cancelled) return;
+        const permission = kind === "serial" ? parseSerialPermission(error) : null;
+        if (permission) callbacks.current.onSerialPermission(id, permission);
+        const pending = serialFixCommands.get(id);
+        if (pending) { serialFixCommands.delete(id); pending.reject(error); }
         exited = true;
         void stopLog(id).catch(report); logRef.current.onLog(id, null);
         terminal.write(`\r\n\x1b[31m${kind === "ssh" ? "SSH-Verbindung fehlgeschlagen" : wire ? "Verbindung fehlgeschlagen" : "PTY konnte nicht gestartet werden"}: ${String(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
@@ -258,6 +296,9 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         report(error);
       });
       cleanup = () => {
+        clearTimeout(permissionReadyTimer);
+        const pending = serialFixCommands.get(id);
+        if (pending) { serialFixCommands.delete(id); pending.reject(new Error("Terminal geschlossen")); }
         callbacks.current.onClearPrompts(id);
         if (connecting) void (kind === "telnet" ? invoke<void>("terminal_cancel_connect", { connectToken }) : cancelSshConnect(connectToken)).catch(() => undefined);
         terminalPasteRequests.delete(id);
@@ -268,7 +309,7 @@ export function TerminalView({ serial, logPath, connected, onLogToggle, title, l
         otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
         terminalWriters.delete(id);
         clearTimeout(selectionTimer); selection.dispose();
-        provenance.dispose(); observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); promptCommand.dispose();
+        provenance.dispose(); observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); permissionReady.dispose(); promptCommand.dispose();
         onData.onmessage = () => undefined;
         onExitChannel.onmessage = () => undefined;
         onPromptChannel.onmessage = rejectPrompt;

@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 export type ShellKind = "local" | "wsl";
 export type StartCommand = "root" | "processes" | "hardware";
 export interface SpawnOptions {
+  serialPermissionShell?: boolean;
   startCommand?: StartCommand;
   kind: ShellKind;
   tabId: number;

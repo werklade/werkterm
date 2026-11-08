@@ -48,6 +48,7 @@ pub fn run() {
             telnet::serial_break,
             serial::serial_ports,
             serial::serial_connect,
+            serial::serial_permission_fix_options,
             local_fs::save_text_file,
             session_log::session_log_start,
             session_log::session_log_stop,

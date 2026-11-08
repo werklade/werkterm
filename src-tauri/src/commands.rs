@@ -197,6 +197,7 @@ pub async fn pty_spawn(
     rows: u16,
     shell_integration: bool,
     start_command: Option<crate::pty::StartCommand>,
+    serial_permission_shell: Option<bool>,
     on_data: Channel<InvokeResponseBody>,
     on_exit: Channel<Option<u32>>,
 ) -> Result<u32, String> {
@@ -211,6 +212,22 @@ pub async fn pty_spawn(
         )
         .map_err(|error| error.to_string())?;
         crate::pty::apply_start_command(&mut spec, start_command)?;
+        #[cfg(target_os = "linux")]
+        if serial_permission_shell == Some(true) && matches!(kind, ShellKind::Local) {
+            // A dedicated POSIX shell announces readiness at its first interactive prompt.
+            // ENV is cleared so startup scripts cannot consume the queued admin command.
+            spec.program = "/bin/sh".into();
+            spec.args = vec!["-i".into()];
+            spec.env.extend([
+                ("ENV".into(), String::new()),
+                (
+                    "PS1".into(),
+                    "\u{1b}]777;werkterm-serial-ready\u{7}$ ".into(),
+                ),
+            ]);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = serial_permission_shell;
         let exit_app = app.clone();
         manager
             .spawn(

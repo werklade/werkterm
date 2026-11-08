@@ -6,6 +6,22 @@ use std::{
     time::Duration,
 };
 use tauri::ipc::{Channel, InvokeResponseBody};
+#[cfg(any(target_os = "linux", test))]
+#[path = "serial_permission.rs"]
+mod permission;
+
+#[tauri::command]
+pub fn serial_permission_fix_options(device: String) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "linux")]
+    {
+        permission::fix_options(&device)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = device;
+        Err("Nur unter Linux verfügbar".into())
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SerialConfig {
@@ -140,13 +156,18 @@ fn write_interruptible(
 pub fn error_text(device: &str, kind: serialport::ErrorKind) -> String {
     match kind {
         serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) => {
-            if cfg!(target_os = "linux") {
-                format!(
-                    "Keine Berechtigung für {device}. Benutzer zur Gruppe dialout hinzufügen (sudo usermod -aG dialout $USER) und neu anmelden."
-                )
-            } else {
-                format!("Keine Berechtigung für {device}")
+            #[cfg(target_os = "linux")]
+            {
+                match permission::inspect(device) {
+                    Ok(info) => format!(
+                        "SERIAL_PERMISSION:{}",
+                        serde_json::to_string(&info).expect("permission serialization")
+                    ),
+                    Err(error) => error,
+                }
             }
+            #[cfg(not(target_os = "linux"))]
+            format!("Keine Berechtigung für {device}")
         }
         serialport::ErrorKind::Io(
             std::io::ErrorKind::ResourceBusy
@@ -502,7 +523,11 @@ mod tests {
                 "x",
                 serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied)
             )
-            .contains("Berechtigung")
+            .contains(if cfg!(target_os = "linux") {
+                "SERIAL_PERMISSION:"
+            } else {
+                "Berechtigung"
+            })
         );
     }
     #[test]

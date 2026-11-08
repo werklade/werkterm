@@ -1,3 +1,5 @@
+import { SerialPermissionDialog } from "./components/SerialPermissionDialog";
+import { serialFixCommands, type SerialPermission } from "./lib/serialPermission";
 import { FolderDiffView } from "./components/FolderDiffView";
 import { backendSource, type FolderPair, type FolderOptions } from "./lib/folderDiff";
 import { clampPanel, DEFAULT_PANEL_WIDTH, loadWidth, storeWidth } from "./lib/browserWidths";
@@ -85,6 +87,7 @@ function declinePrompt(prompt: SshPrompt) {
 }
 
 export default function App() {
+  const [serialPermission, setSerialPermission] = useState<{ id: number; info: SerialPermission } | null>(null);
   const [tool, setTool] = useState<"ascii" | "ports" | "keygen" | null>(null);
   const [panes, setPanes] = useState<(number | null)[]>([]);
   const [focusedPane, setFocusedPane] = useState(0);
@@ -689,7 +692,7 @@ export default function App() {
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
-            onExit={markExited} onCloseTab={closeTab} onRestart={restartTab} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
+            onSerialPermission={(id, info) => setSerialPermission({ id, info })} onExit={markExited} onCloseTab={closeTab} onRestart={restartTab} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           {splitVisible && <SplitLayout mode={settings.splitMode} panes={panes} terminals={terminals} focusedIndex={activeId !== null && panes.includes(activeId) ? panes.indexOf(activeId) : focusedPane} ratios={ratios} onRatios={setRatios} onAssign={assignSplit}
             onFocus={index => { setFocusedPane(index); setActiveId(panes[index] ?? null); }}
             onNew={index => { setFocusedPane(index); const id = nextId.current; openTab("local"); setPanes(current => assignPane(current, index, id)); }} />}
@@ -720,6 +723,15 @@ export default function App() {
     {diffDialog && <DiffDialog onCompare={compareFiles} onClose={() => setDiffDialog(false)} />}
     {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
     {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
+    {serialPermission && <SerialPermissionDialog key={serialPermission.id} info={serialPermission.info}
+      onClose={() => setSerialPermission(null)}
+      onRetry={() => { setActiveId(serialPermission.id); restartTab(serialPermission.id); setSerialPermission(null); }}
+      onExecute={command => new Promise<void>((resolve, reject) => {
+        if (windowClosing.current) { reject(new Error("Fenster wird geschlossen")); return; }
+        const id = nextId.current;
+        serialFixCommands.set(id, { command, resolve, reject });
+        openTab("local");
+      })} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
     {importSource && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
     {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}
