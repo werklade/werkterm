@@ -471,6 +471,30 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn tool_scripts_are_valid_and_keep_the_shell_open() {
+        for command in [StartCommand::Hardware, StartCommand::Processes] {
+            let mut spec = ShellSpec {
+                program: String::new(),
+                args: vec![],
+                env: vec![],
+            };
+            apply_start_command(&mut spec, Some(command)).unwrap();
+            let script = &spec.args[1];
+            assert!(
+                script.ends_with("\nexec \"${SHELL:-/bin/sh}\" -i"),
+                "{script}"
+            );
+            // `sh -n` only parses; a stray ";" after a multi-line script used to end the tab.
+            let status = std::process::Command::new("/bin/sh")
+                .args(["-n", "-c", script])
+                .status()
+                .unwrap();
+            assert!(status.success(), "syntax error in {command:?} script");
+        }
+    }
+
     #[cfg(unix)]
     struct UnixTestCleanup {
         manager: Arc<PtyManager>,
@@ -896,7 +920,8 @@ pub fn apply_start_command(
             spec.program = "/bin/sh".into();
             spec.args = vec![
                 "-c".into(),
-                format!(r#"{command}; exec "${{SHELL:-/bin/sh}}" -i"#),
+                // A newline (not ";") keeps multi-line scripts valid; the shell stays open afterwards.
+                format!("{}\nexec \"${{SHELL:-/bin/sh}}\" -i", command.trim_end()),
             ];
         }
     }
