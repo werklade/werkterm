@@ -285,7 +285,8 @@ mod tests {
 
     #[test]
     fn validation_keeps_accent_hover_fill() {
-        let result = validate_design(&json!({"name":"a", "ui":{"accent-hover-fill":"#e07d22"}})).unwrap();
+        let result =
+            validate_design(&json!({"name":"a", "ui":{"accent-hover-fill":"#e07d22"}})).unwrap();
         assert_eq!(result["ui"], json!({"accent-hover-fill":"#e07d22"}));
     }
 
