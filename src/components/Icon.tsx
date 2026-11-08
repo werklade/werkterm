@@ -49,7 +49,7 @@ export const standardIcons = {
   help: inline('<circle class="wl-fill" stroke="none" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 3h.01"/>'),
   split: inline('<path class="wl-fill" stroke="none" d="M5 4h7v16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
   view: inline('<path class="wl-fill" stroke="none" d="M8 9h13v9a2 2 0 0 1-2 2H8z"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11"/>'),
-  power: inline('<circle class="wl-fill" stroke="none" cx="12" cy="12" r="9"/><path d="M12 2v10M6 5a9 9 0 1 0 12 0"/>'),
+  power: inline('<path class="wl-fill" stroke="none" d="M6 5a9 9 0 1 0 12 0z"/><path d="M12 2v10M6 5a9 9 0 1 0 12 0"/>'),
   "save": saveIcon,
   "undo": undoIcon,
   "redo": redoIcon,
