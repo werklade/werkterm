@@ -2,11 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { MergeView, goToNextChunk, goToPreviousChunk } from "@codemirror/merge";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
-import { LanguageDescription, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
+import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { selectedTheme, type Settings } from "../lib/settings";
-import { luminance, parseColor } from "../lib/colorCodes";
+import { designEditorExtensions } from "../lib/designEditorTheme";
+import { type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
 import { languageFromKnownFile, languageFromShebang } from "../lib/editorLanguage";
 import { diffConfig, diffError, loadDiffPair, sourceLabel, whitespaceAvailable, type DiffPair, type DiffSource } from "../lib/diff";
@@ -19,17 +18,10 @@ export default function DiffView({ pair: initial, settings, onOpen }: { pair: Di
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     if (!host.current) return;
-    const theme = selectedTheme(settings), light = luminance(parseColor(theme.background)!) > 140;
     const extensions: Extension[] = [lineNumbers(), EditorState.readOnly.of(true), EditorView.editable.of(false), EditorView.contentAttributes.of({ tabindex: "0", "aria-readonly": "true" }),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }), light ? [] : oneDark,
+      ...designEditorExtensions(settings),
       EditorState.tabSize.of(settings.editorTabSize), keymap.of([{ key: "Alt-ArrowUp", run: goToPreviousChunk }, { key: "Alt-ArrowDown", run: goToNextChunk }]),
-      EditorView.theme({ "&": { backgroundColor: theme.background, color: theme.foreground },
-        ".cm-scroller": { fontFamily: settings.fontFamily + emojiFallback, fontSize: `${settings.editorFontSize}px` },
-        ".cm-gutters": { backgroundColor: theme.background, color: light ? "#666" : "#aaa" },
-        ".cm-deletedLine": { backgroundColor: light ? "#ffe0e0" : "#602c36" },
-        ".cm-insertedLine": { backgroundColor: light ? "#d9f4df" : "#254e37" },
-        ".cm-deletedText": { backgroundColor: light ? "#ffb9b9" : "#8a3d4b" },
-        ".cm-insertedText": { backgroundColor: light ? "#a4e4b3" : "#35724b" } }, { dark: !light })];
+      EditorView.theme({ ".cm-scroller": { fontFamily: settings.fontFamily + emojiFallback, fontSize: `${settings.editorFontSize}px` } })];
     const compartments = [new Compartment(), new Compartment()];
     const view = new MergeView({ parent: host.current,
       a: { doc: pair.documents[0].text, extensions: [...extensions, compartments[0].of([])] },

@@ -1,3 +1,4 @@
+import { applyDesign, getDesign, getUserDesigns, registerUserDesign, designsChangedEvent, type StoredDesign } from "./lib/designs";
 import { SerialPermissionDialog } from "./components/SerialPermissionDialog";
 import { serialFixCommands, type SerialPermission } from "./lib/serialPermission";
 import { FolderDiffView } from "./components/FolderDiffView";
@@ -22,13 +23,13 @@ import { Home } from "./components/Home";
 import { createMenus } from "./lib/actions";
 import { recentList, lastTabsList, terminalDescriptors, type Recent, type LastTab } from "./lib/history";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { HelpDialog } from "./components/HelpDialog";
 import { chooseSessionExport } from "./lib/sessionExport";
 import { WerktermImportDialog } from "./components/WerktermImportDialog";
 import { ImportDialog } from "./components/ImportDialog";
-import { normalizeSettings, selectedTheme } from "./lib/settings";
+import { normalizeSettings } from "./lib/settings";
 import { MenuBar } from "./components/MenuBar";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar, type BrowserTab } from "./components/Sidebar";
@@ -177,6 +178,15 @@ export default function App() {
   const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
   useEffect(reloadSessions, [reloadSessions]);
   const [settings, setSettings] = useState(loadSettings);
+  const [designRevision, setDesignRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => { setDesignRevision(value => value + 1); setSettings(value => ({ ...value })); };
+    window.addEventListener(designsChangedEvent, changed);
+    void invoke<StoredDesign[]>("designs_list").then(rows => rows.forEach(row => {
+      if (!getUserDesigns().some(stored => stored.id === row.id)) registerUserDesign(row.id, row.design);
+    })).catch(() => setStatus("Eigene Designs konnten nicht geladen werden."));
+    return () => window.removeEventListener(designsChangedEvent, changed);
+  }, []);
   useEffect(() => {
     void defaultLogFolder().then(logFolder => {
       if (!settingsRef.current.logFolder) changeSettings({ ...settingsRef.current, logFolder });
@@ -221,7 +231,7 @@ export default function App() {
   const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
   const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | "werkterm" | null>(null);
   const fullscreenPending = useRef(false);
-  useEffect(() => { document.documentElement.style.setProperty("--bg-content", selectedTheme(settings).background); }, [settings]);
+  useLayoutEffect(() => { applyDesign(getDesign(settings.design)); }, [settings, designRevision]);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
   const promptQueue = useRef<QueuedPrompt[]>([]);
   const liveTabs = useRef(new Set<number>());

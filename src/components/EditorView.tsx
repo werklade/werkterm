@@ -4,14 +4,13 @@ import { basicSetup } from "codemirror";
 import { Compartment, EditorState, Facet, Prec, type Range } from "@codemirror/state";
 import { Decoration, EditorView as CodeMirrorView, ViewPlugin, keymap, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { indentWithTab, undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
-import { LanguageDescription, HighlightStyle, foldNodeProp, foldService, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { LanguageDescription, foldNodeProp, foldService, syntaxTree } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { openSearchPanel } from "@codemirror/search";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { tags } from "@lezer/highlight";
+import { designEditorExtensions } from "../lib/designEditorTheme";
 import { Icon, type IconName } from "./Icon";
 import { useModal } from "./useModal";
-import { colorCodeMatches, mixColor, parseColor, textColor, luminance } from "../lib/colorCodes";
+import { colorCodeMatches, mixColor, parseColor, textColor } from "../lib/colorCodes";
 import { initialEol, eolChanged, mostFrequentEol } from "../lib/editorEol";
 import { braceFold, indentationFold } from "../lib/editorFolding";
 import { languageFromKnownFile, languageFromShebang } from "../lib/editorLanguage";
@@ -104,15 +103,6 @@ const fallbackFolding = foldService.of((state, start, end) => {
   return braceFold(text, start) ?? indentationFold(text, start);
 });
 
-const appTheme = CodeMirrorView.theme({
-  "&": { height: "100%", backgroundColor: "var(--bg-content)", color: "#d4d4d4" },
-  ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono)", fontSize: "14px" },
-  ".cm-gutters": { backgroundColor: "var(--bg-content)", borderRight: "1px solid #3c3c3c", color: "#7a7a7a" },
-  ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "#181818" },
-  ".cm-line": { padding: "0 6px" },
-  ".cm-content": { caretColor: "#d4d4d4" },
-});
-const comments = syntaxHighlighting(HighlightStyle.define([{ tag: tags.comment, color: "#829b7a", fontStyle: "italic" }]));
 const eolLabels: Record<EditorEol, string> = { lf: "LF", crLf: "CRLF", cr: "CR" };
 
 const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView(props, ref) {
@@ -251,14 +241,9 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
 
   function preferenceExtensions(settings: Settings) {
     const theme = selectedTheme(settings);
-    const light = luminance(parseColor(theme.background)!) > 140;
-    return [editorBackground.of(theme.background), light ? [] : oneDark, Prec.high(appTheme), Prec.highest(CodeMirrorView.theme({
-      "&": { backgroundColor: theme.background, color: theme.foreground },
+    return [editorBackground.of(theme.background), ...designEditorExtensions(settings), CodeMirrorView.theme({
       ".cm-scroller": { fontSize: `${settings.editorFontSize}px`, fontFamily: settings.fontFamily + emojiFallback },
-      ".cm-content": { caretColor: theme.cursor },
-      ".cm-gutters": { backgroundColor: theme.background, color: light ? "#666666" : "#999999" },
-      ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: light ? "#0000000b" : "#ffffff0b" },
-    }, { dark: !light })), EditorState.tabSize.of(settings.editorTabSize)];
+    }), EditorState.tabSize.of(settings.editorTabSize)];
   }
   useEffect(() => {
     view.current?.dispatch({ effects: preferencesCompartment.current.reconfigure(preferenceExtensions(props.settings)) });
@@ -270,7 +255,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
 
   function editorExtensions(readonly: boolean) {
     return [
-      basicSetup, preferencesCompartment.current.of(preferenceExtensions(props.settings)), Prec.highest(comments), colorPlugin, indentationPlugin, fallbackFolding,
+      basicSetup, preferencesCompartment.current.of(preferenceExtensions(props.settings)), colorPlugin, indentationPlugin, fallbackFolding,
       readonlyCompartment.current.of([EditorState.readOnly.of(readonly || locks.current > 0), CodeMirrorView.editable.of(!readonly && !locks.current)]),
       EditorState.transactionFilter.of(transaction => locks.current && transaction.docChanged ? [] : transaction),
       languageCompartment.current.of([]), wrapCompartment.current.of(wrap ? CodeMirrorView.lineWrapping : []),

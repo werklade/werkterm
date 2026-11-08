@@ -1,5 +1,19 @@
 :root {
   color-scheme: dark;
+  --on-accent: #ffffff;
+  --monitor-ok: #00b452;
+  --monitor-warn: #e3961a;
+  --monitor-critical: #f44747;
+  --selection: #3c3c3c;
+  --backdrop: #00000099;
+  --shadow: #00000088;
+  --warning-bg: #e3961a20;
+  --error-bg: #591c1c;
+  --indent-guide: #7a7a7a40;
+  --diff-added: #254e37;
+  --diff-deleted: #602c36;
+  --diff-added-text: #35724b;
+  --diff-deleted-text: #8a3d4b;
   --bg-content: #000000;
   --bg-app: #1e1e1e;
   --bg-panel: #252526;

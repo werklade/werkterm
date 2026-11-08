@@ -1,5 +1,7 @@
+import { getDesign } from "./designs";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 export interface Settings {
+  design: string;
   tuxEnabled: boolean; tuxIdleMinutes: number; tuxCount: number;
   logFolder: string; logAllSessions: boolean; logStripAnsi: boolean; pasteConfirm: import("./paste").PasteConfirm;
   copyOnSelect: boolean; rightClick: "menu" | "paste";
@@ -13,6 +15,7 @@ export interface Settings {
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
 }
 export const defaultSettings: Settings = {
+  design: "Werklade Dunkel",
   tuxEnabled: true, tuxIdleMinutes: 10, tuxCount: 4,
   logFolder: "", logAllSessions: false, logStripAnsi: true, pasteConfirm: "multiline",
   copyOnSelect: true, rightClick: "menu",
@@ -21,13 +24,17 @@ export const defaultSettings: Settings = {
   bars: "both", toolbarSize: "labels", compact: false, sidebarVisible: true, sidebarRight: false, tabNumbers: false, tabClose: true,
   followTerminalFolder: true, shellIntegration: true, sshPromptCommand: true, monitoring: true,
   fontFamily: '"Cascadia Mono", "DejaVu Sans Mono", monospace', fontSize: 14, lineHeight: 1,
-  cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: "Werkterm Dunkel",
+  cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: "design",
   editorFontSize: 14, editorWrap: false, editorTabSize: 4,
 };
 const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
-  const v = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const v = input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
   const result = { ...defaultSettings };
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    result.design = typeof v.design === "string" ? v.design.slice(0,60) : "Werkterm Dunkel";
+    if (!("theme" in v)) result.theme = "Werkterm Dunkel";
+  }
   for (const key of ["tuxEnabled", "copyOnSelect", "logAllSessions", "logStripAnsi", "confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
   for (const [key, min, max] of [["tuxIdleMinutes", 1, 120], ["tuxCount", 1, 8], ["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
     const value = v[key]; if (typeof value === "number" && Number.isFinite(value)) result[key] = Math.max(min, Math.min(max, key === "lineHeight" ? value : Math.round(value)));
@@ -47,10 +54,10 @@ export function normalizeSettings(input: unknown): Settings {
     result.importedTheme = { ...base };
     for (const key of [...ansiKeys, "background", "foreground", "cursor", "selectionBackground"] as const) if (typeof colors[key] === "string" && /^#[0-9a-f]{6}$/i.test(colors[key])) result.importedTheme[key] = colors[key];
   }
-  if (typeof v.theme === "string" && (Object.prototype.hasOwnProperty.call(terminalThemes, v.theme) || (v.theme === "MobaXterm (importiert)" && result.importedTheme))) result.theme = v.theme;
+  if (typeof v.theme === "string" && (v.theme === "design" || Object.prototype.hasOwnProperty.call(terminalThemes, v.theme) || (v.theme === "MobaXterm (importiert)" && result.importedTheme))) result.theme = v.theme;
   return result;
 }
-export function selectedTheme(settings: Settings): TerminalTheme { return settings.theme === "MobaXterm (importiert)" && settings.importedTheme ? settings.importedTheme : terminalThemes[settings.theme] ?? terminalThemes["Werkterm Dunkel"]; }
+export function selectedTheme(settings: Settings): TerminalTheme { return settings.theme === "design" ? getDesign(settings.design).terminal : settings.theme === "MobaXterm (importiert)" && settings.importedTheme ? settings.importedTheme : terminalThemes[settings.theme] ?? terminalThemes["Werkterm Dunkel"]; }
 export function loadSettings(): Settings {
   try { return normalizeSettings(JSON.parse(localStorage.getItem(storageKey) ?? localStorage.getItem("linmoba.settings") ?? "null")); } catch { return { ...defaultSettings }; }
 }

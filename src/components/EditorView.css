@@ -39,15 +39,15 @@
 .editor-toolbar-separator { align-self: stretch; width: 1px; margin: 2px 5px; background: var(--border-strong); }
 .editor-code { flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
 .editor-code .cm-editor { height: 100%; }
-.editor-code .cm-indent-guide { background-image: repeating-linear-gradient(to right, #7a7a7a40 0, #7a7a7a40 1px, transparent 1px, transparent 4ch); }
+.editor-code .cm-indent-guide { background-image: repeating-linear-gradient(to right, var(--indent-guide) 0, var(--indent-guide) 1px, transparent 1px, transparent 4ch); }
 .editor-code .cm-color-code, .editor-code .cm-color-code * { color: var(--color-code-text) !important; }
 .editor-code .cm-search { font-family: var(--font-ui); }
-.editor-notice { flex: 0 0 auto; padding: 7px 10px; background: #e3961a20; border-bottom: 1px solid var(--warning); }
+.editor-notice { flex: 0 0 auto; padding: 7px 10px; background: var(--warning-bg); border-bottom: 1px solid var(--warning); }
 .editor-notice button { margin-left: 8px; }
 .editor-dialog { max-width: min(520px, calc(100vw - 40px)); padding: 20px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-panel); color: var(--fg-primary); font-family: var(--font-ui); }
-.editor-dialog::backdrop { background: #0009; }
+.editor-dialog::backdrop { background: var(--backdrop); }
 .editor-dialog > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .editor-dialog button, .editor-notice button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-toolbar); color: var(--fg-primary); cursor: pointer; }
 .editor-dialog button:focus-visible, .editor-notice button:focus-visible { outline: 2px solid var(--focus-ring); }
 
-.editor-error { background: #591c1c; color: #ffffff; border: 2px solid var(--danger); overflow-wrap: anywhere; }
+.editor-error { background: var(--error-bg); color: var(--fg-primary); border: 2px solid var(--danger); overflow-wrap: anywhere; }

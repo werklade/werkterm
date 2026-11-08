@@ -1,4 +1,5 @@
 mod commands;
+mod designs;
 pub mod editor;
 mod folder_diff;
 mod keygen;
@@ -35,6 +36,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
+            designs::designs_list,
+            designs::designs_save,
+            designs::designs_delete,
+            designs::designs_export,
+            designs::designs_import,
             folder_diff::folder_diff_compare,
             folder_diff::folder_diff_cancel,
             folder_diff::folder_diff_kind,

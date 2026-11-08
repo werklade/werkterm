@@ -1,13 +1,23 @@
  .monitor-bar.monitor-bar { flex-wrap: nowrap; overflow-x: auto; align-items: center; }
 .monitor-field { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; }
-.monitor-field:focus-visible { outline: 1px solid var(--border, #777); outline-offset: 2px; }
-.monitor-tooltip { position: fixed; z-index: 10000; box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; background: var(--bg-hover, #3a3a3a); border: 1px solid var(--border-strong, #777); color: var(--fg-primary, #eee); padding: 9px 12px; font-size: 12px; box-shadow: 0 3px 12px #0006; overflow-wrap: anywhere; }
+.monitor-field:focus-visible { outline: 1px solid var(--border); outline-offset: 2px; }
+.monitor-tooltip { position: fixed; z-index: 10000; box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; background: var(--bg-hover); border: 1px solid var(--border-strong); color: var(--fg-primary); padding: 9px 12px; font-size: 12px; box-shadow: 0 3px 12px var(--shadow); overflow-wrap: anywhere; }
 .monitor-tooltip pre { font: 12px monospace; margin: 4px 0; white-space: pre; }
 .monitor-tooltip table { font: 12px monospace; border-spacing: 12px 3px; }
 .monitor-tooltip td:last-child { text-align: right; }
-.monitor-distro { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; color: white; font-weight: bold; font-size: 10px; flex: none; }
+.monitor-distro { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; justify-content: center; align-items: center; color: var(--on-accent); /* Distribution badge brand colours intentionally remain independent of designs. */ font-weight: bold; font-size: 10px; flex: none; }
 .monitor-tux { width: 16px; height: 16px; object-fit: contain; flex: none; }
-.monitor-history { width: 56px; height: 16px; fill: #50b95b; background: #000; border: 1px solid var(--border, #555); box-sizing: border-box; }
+.monitor-history { width: 56px; height: 16px; fill: var(--monitor-ok); background: var(--bg-content); border: 1px solid var(--border); box-sizing: border-box; }
 .monitor-disks { display: flex; flex: none; align-items: center; gap: 12px; white-space: nowrap; }
 .monitor-disk { display: inline-flex; }
-.monitor-critical { color: #ff5f5f; font-weight: bold; }
+.monitor-critical { color: var(--monitor-critical); font-weight: bold; }
+
+.monitor-bar meter { accent-color: var(--monitor-ok); }
+.monitor-bar meter.warn { accent-color: var(--monitor-warn); }
+.monitor-bar meter.critical { accent-color: var(--monitor-critical); }
+.monitor-bar meter::-webkit-meter-optimum-value { background: var(--monitor-ok); }
+.monitor-bar meter.warn::-webkit-meter-optimum-value { background: var(--monitor-warn); }
+.monitor-bar meter.critical::-webkit-meter-optimum-value { background: var(--monitor-critical); }
+.monitor-bar meter::-moz-meter-bar { background: var(--monitor-ok); }
+.monitor-bar meter.warn::-moz-meter-bar { background: var(--monitor-warn); }
+.monitor-bar meter.critical::-moz-meter-bar { background: var(--monitor-critical); }

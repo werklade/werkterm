@@ -6,7 +6,7 @@
 .sessions-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 0; }
 .session-row { display: flex; gap: 4px; align-items: center; padding: 6px 4px; cursor: default; }
 .session-row:hover { background: var(--bg-hover); }
-.session-row[aria-selected="true"] { background: var(--bg-active); }
+.session-row[aria-selected="true"] { background: var(--selection); }
 .session-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .session-row .icon { width: 16px; height: 16px; }
 .session-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

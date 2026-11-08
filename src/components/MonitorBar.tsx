@@ -7,7 +7,7 @@ import { decimal, rate, size, uptime, users, distro, distroBadges, history, dfTa
 import "./MonitorBar.css";
 interface Network { name: string; rx: number; tx: number; rxErrors: number; txErrors: number; rxDrop: number; txDrop: number }
 interface Sample { host: string; version: string | null; osName: string | null; osId: string | null; osIdLike: string | null; cpuCores: number | null; load: number[]; cpuParts: number[]; cpuPercent: number | null; memUsed: number; memTotal: number; memAvailable: number | null; cached: number | null; buffers: number | null; swapTotal: number | null; swapUsed: number | null; netRx: number | null; netTx: number | null; interfaces: Network[]; uptimeSecs: number; who: string[]; disks: Disk[]; dfAll: Disk[]; unsupported: boolean }
-function Meter({ value }: { value: number }) { return <meter min={0} max={100} value={value} className={value >= 90 ? "critical" : ""} />; }
+function Meter({ value }: { value: number }) { return <meter min={0} max={100} value={value} className={value >= 90 ? "critical" : value >= 75 ? "warn" : "ok"} />; }
 function Table({ rows }: { rows: [string, string][] }) { return <table><tbody>{rows.map(([name, value]) => <tr key={name}><td>{name}</td><td>{value}</td></tr>)}</tbody></table>; }
 let monitorQueue: Promise<unknown> = Promise.resolve();
 export function MonitorBar({ sessionId }: { sessionId: number }) {
