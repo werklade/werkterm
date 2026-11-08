@@ -73,7 +73,17 @@ input::placeholder { color: var(--fg-muted); }
 }
 .ssh-dialog::backdrop { background: var(--bg-app); opacity: 0.75; }
 .ssh-dialog h2 { margin-top: 0; font-size: 18px; overflow-wrap: anywhere; }
-.ssh-dialog input { width: 100%; }
+.ssh-dialog input:not([type="checkbox"]):not([type="radio"]) { width: 100%; }
+/* Checkboxes and radios sit left of their text on the same line. */
+.ssh-dialog label:has(> input[type="checkbox"]), .ssh-dialog label:has(> input[type="radio"]) { display: flex; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer; }
+.ssh-dialog label > input[type="checkbox"], .ssh-dialog label > input[type="radio"] { flex: none; width: 16px; height: 16px; margin: 0; }
+.dialog-button { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 6px 10px; background: var(--bg-toolbar); white-space: nowrap; }
+.dialog-button:hover:not(:disabled) { background: var(--bg-hover); }
+.diff-source { margin-bottom: 12px; }
+.diff-source > span { display: block; margin-bottom: 4px; }
+.diff-source-row { display: flex; gap: 6px; align-items: center; }
+.diff-source-row input { flex: 1; min-width: 0; }
+.diff-swap { display: flex; justify-content: center; margin: -4px 0 8px; }
 .hostkey-fingerprint { display: block; font-family: var(--font-mono); user-select: text; overflow-wrap: anywhere; padding: 10px; background: var(--bg-input); }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .dialog-actions button { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 12px; background: var(--bg-toolbar); }
