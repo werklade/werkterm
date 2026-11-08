@@ -887,7 +887,7 @@ mod tests {
     }
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StartCommand {
     Root,
