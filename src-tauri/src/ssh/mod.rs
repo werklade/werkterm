@@ -1308,6 +1308,38 @@ impl SshManager {
         let _ = registered.send(true);
         Ok(SshConnection { id, mode })
     }
+    /// A bounded readdir cursor on the existing authenticated SSH connection.
+    /// The high-level read_dir helper collects entire directories before returning.
+    pub(crate) async fn folder_diff_sftp(
+        &self,
+        id: u32,
+    ) -> Result<russh_sftp::client::RawSftpSession, String> {
+        self.editor_sftp(id, false).await.map_err(|e| {
+            if e == "Nur mit SFTP verfügbar" {
+                "Ordnervergleich benötigt SFTP".into()
+            } else {
+                e
+            }
+        })?;
+        let session = self.session(id).await?;
+        tokio::time::timeout(PHASE_TIMEOUT, async {
+            let mut channel = session
+                .handle
+                .channel_open_session()
+                .await
+                .map_err(ssh_error)?;
+            channel
+                .request_subsystem(true, "sftp")
+                .await
+                .map_err(ssh_error)?;
+            reply(&mut channel).await?;
+            let raw = russh_sftp::client::RawSftpSession::new(channel.into_stream());
+            raw.init().await.map_err(ssh_error)?;
+            Ok(raw)
+        })
+        .await
+        .map_err(|_| "Zeitüberschreitung beim Öffnen des SFTP-Kanals".to_owned())?
+    }
     pub(crate) async fn editor_sftp(
         &self,
         id: u32,

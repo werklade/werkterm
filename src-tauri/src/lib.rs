@@ -1,5 +1,6 @@
 mod commands;
 pub mod editor;
+mod folder_diff;
 mod keygen;
 pub mod local_fs;
 mod local_ports;
@@ -33,6 +34,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            folder_diff::folder_diff_compare,
+            folder_diff::folder_diff_cancel,
+            folder_diff::folder_diff_kind,
             macros::macros_list,
             macros::macro_save,
             macros::macro_delete,

@@ -14,7 +14,7 @@ export function searchSessions(items: SavedSession[], query: string): SavedSessi
 export function terminalDescriptors(tabs: readonly BrowserTab[]): LastTab[] {
   return tabs.flatMap((tab): LastTab[] => {
     switch (tab.kind) {
-      case "editor": case "diff": return [];
+      case "editor": case "diff": case "folderDiff": return [];
       case "local": case "wsl": return [{ type: tab.kind }];
       case "telnet": case "serial": case "ssh": return tab.savedSessionId ? [{ type: "saved", sessionId: tab.savedSessionId }] : [{ type: "quick", target: tab.target ?? "" }];
     }

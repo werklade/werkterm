@@ -1,3 +1,6 @@
+import { FolderDiffView } from "./components/FolderDiffView";
+import { backendSource, type FolderPair, type FolderOptions } from "./lib/folderDiff";
+import { clampPanel, DEFAULT_PANEL_WIDTH, loadWidth, storeWidth } from "./lib/browserWidths";
 import { useMacros } from "./components/Macros";
 import { DiffDialog } from "./components/DiffDialog";
 import { comparisonSources, rememberedSource, diffTitle, diffError, loadDiffPair, type DiffSource, type DiffPair } from "./lib/diff";
@@ -100,6 +103,7 @@ export default function App() {
     return () => { void subscription.then(stop => stop()); };
   }, [onLog]);
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
+  const [folderDiffs, setFolderDiffs] = useState<Record<number, FolderPair>>({});
   const [diffs, setDiffs] = useState<Record<number, DiffPair>>({});
   const [diffDialog, setDiffDialog] = useState(false);
   const [marked, setMarked] = useState<DiffSource | null>(null);
@@ -198,6 +202,9 @@ export default function App() {
     document.addEventListener("pointerdown", outside, true);
     return () => { document.removeEventListener("keydown", show, true); document.removeEventListener("pointerdown", outside, true); };
   }, []);
+  const [sidebarWidth, setSidebarWidth] = useState(() => clampPanel(loadWidth("werkterm.sidebar.width", DEFAULT_PANEL_WIDTH), window.innerWidth));
+  const resizeSidebar = (width: number) => { const next = clampPanel(width, window.innerWidth); setSidebarWidth(next); storeWidth("werkterm.sidebar.width", next); };
+  useEffect(() => { const resize = () => setSidebarWidth(width => clampPanel(width, window.innerWidth)); window.addEventListener("resize", resize); return () => window.removeEventListener("resize", resize); }, []);
   const [sidebarPanel, setSidebarPanel] = useState(3);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => { try { return localStorage.getItem("werkterm.sidebar.collapsed") === "1"; } catch { return false; } });
   const collapseSidebar = (value: boolean) => { setSidebarCollapsed(value); try { localStorage.setItem("werkterm.sidebar.collapsed", value ? "1" : "0"); } catch { /* storage unavailable */ } };
@@ -321,6 +328,7 @@ export default function App() {
     if (id !== null) setEditors(current => !current[id] ? current : { ...current, [id]: { ...current[id], status: message } });
   };
   const removeTab = (id: number) => {
+    setFolderDiffs(current => { const next = { ...current }; delete next[id]; return next; });
     setDiffs(current => { const next = { ...current }; delete next[id]; return next; });
     cancelTabTransfers(id);
     liveTabs.current.delete(id);
@@ -408,7 +416,7 @@ export default function App() {
       if (approved) {
         const restore = terminalDescriptors(tabsRef.current);
         await invoke("last_tabs_save", { tabs: restore });
-        await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff").map(tab => stopLog(tab.id)));
+        await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => stopLog(tab.id)));
         await getCurrentWindow().destroy();
       }
     } catch (reason) { reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason)); }
@@ -438,8 +446,18 @@ export default function App() {
     })();
     pendingOpens.current.set(sourceKey, pending);
   };
-  const compareFiles = async (sources: [DiffSource, DiffSource]) => {
+  const compareFiles = async (sources: [DiffSource, DiffSource], options: FolderOptions = { recursive: true, contents: false }) => {
     try {
+      const kinds = await Promise.all(sources.map(source => invoke<string>("folder_diff_kind", { source: backendSource(source) })));
+      if (kinds[0] !== kinds[1]) throw new Error("Bitte zwei Dateien oder zwei Ordner auswählen. Gemischte Typen sind nicht möglich.");
+      if (kinds[0] === "dir") {
+        if (windowClosing.current) return;
+        const id = nextId.current++;
+        setFolderDiffs(current => ({ ...current, [id]: { sources, options } }));
+        setTabs(current => [...current, { id, kind: "folderDiff", title: `Ordnervergleich: ${sources[0].path.split(/[\\/]/).pop()} ↔ ${sources[1].path.split(/[\\/]/).pop()}`, browserPath: "", exited: false }]);
+        setActiveId(id); return;
+      }
+      if (kinds[0] !== "file") throw new Error("Nur reguläre Dateien und Ordner können verglichen werden. Symlinks werden nicht verfolgt.");
       const pair = await loadDiffPair(sources);
       for (const source of sources) if (!rememberedSource(source, tabsRef.current)) throw "SESSION_CLOSED:";
       if (windowClosing.current) return;
@@ -538,7 +556,7 @@ export default function App() {
   const currentPrompt = prompts[0];
   const activeTab = tabs.find(tab => tab.id === activeId) ?? null;
   const activeEditor = activeId === null ? undefined : editors[activeId];
-  const browserTab = activeTab?.kind === "diff" ? null : activeEditor && activeTab ? browserForEditor(activeTab, activeEditor.source, tabs) : activeTab;
+  const browserTab = (activeTab?.kind === "diff" || activeTab?.kind === "folderDiff") ? null : activeEditor && activeTab ? browserForEditor(activeTab, activeEditor.source, tabs) : activeTab;
   const quickTarget = activeTab?.kind === "ssh" && activeTab.sessionId !== undefined && !activeTab.exited && !activeTab.savedSessionId && !activeTab.saveDismissed ? parseQuickConnect(activeTab.target ?? "") : null;
   const offerSave = quickTarget && sessionsLoaded && !savedSessions.some(session => session.host.toLowerCase() === quickTarget.host.toLowerCase() && session.port === quickTarget.port && session.user === quickTarget.user);
   const dismissSave = (tabId: number) => setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, saveDismissed: true } : tab));
@@ -572,7 +590,7 @@ export default function App() {
       const mode = name.slice(6) as SplitMode;
       if (!["columns", "rows", "quad"].includes(mode)) return;
       changeSettings({ ...settings, splitMode: mode });
-      const initialPanes = seedPanes(tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff").map(tab => tab.id), activeId, paneCount(mode));
+      const initialPanes = seedPanes(tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => tab.id), activeId, paneCount(mode));
       setPanes(initialPanes);
       if (activeId === null) setActiveId(initialPanes[0]);
       setFocusedPane(0); setRatios({ x: 50, y: 50 }); return;
@@ -622,8 +640,8 @@ export default function App() {
       case "about": setHelp("about"); break;
     }
   };
-  const terminals = tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff");
-  const splitVisible = !multiExec && settings.splitMode !== "single" && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff";
+  const terminals = tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff");
+  const splitVisible = !multiExec && settings.splitMode !== "single" && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff" && activeTab?.kind !== "folderDiff";
   const terminalIds = terminals.map(tab => tab.id).join(",");
   useEffect(() => {
     if (settings.splitMode === "single") return;
@@ -640,7 +658,7 @@ export default function App() {
     setPanes(current => assignPane(current, index, id));
     setActiveId(id);
   };
-  const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff";
+  const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff" && activeTab?.kind !== "folderDiff";
   const macroRecipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
   const macros = useMacros({ activeId, recipients: macroRecipients, multiExec: gridVisible, report: setStatus, showPanel: () => { showPanel(2); collapseSidebar(false); } });
   const pendingPasteSource = useRef<number | null>(null);
@@ -652,20 +670,22 @@ export default function App() {
     macros.capture(focused, pasted ? data.replace(/\r\n|\n/g, "\r") : data);
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
-      {sidebarVisible && <Sidebar macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} onConnect={connect} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
+      <div className="workspace-body">
+      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
-        <div className={`tab-row ${settings.sidebarRight ? "reverse" : ""}`}>{sidebarVisible && sidebarCollapsed && <QuickConnect className="in-tabbar" onConnect={connect} onStatus={reportStatus} />}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
+
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => <TerminalView logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
@@ -673,6 +693,7 @@ export default function App() {
           {splitVisible && <SplitLayout mode={settings.splitMode} panes={panes} terminals={terminals} focusedIndex={activeId !== null && panes.includes(activeId) ? panes.indexOf(activeId) : focusedPane} ratios={ratios} onRatios={setRatios} onAssign={assignSplit}
             onFocus={index => { setFocusedPane(index); setActiveId(panes[index] ?? null); }}
             onNew={index => { setFocusedPane(index); const id = nextId.current; openTab("local"); setPanes(current => assignPane(current, index, id)); }} />}
+          {Object.entries(folderDiffs).map(([key, pair]) => <div key={key} id={`folderDiff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><FolderDiffView initial={pair} onOpen={compareFiles} onTitle={sources => setTabs(current => current.map(tab => tab.id === Number(key) ? { ...tab, title: `Ordnervergleich: ${sources[0].path.split(/[\\/]/).pop()} ↔ ${sources[1].path.split(/[\\/]/).pop()}` } : tab))} /></div>)}
           <Suspense fallback={null}>{Object.entries(diffs).map(([key, pair]) => <div key={key} id={`diff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><DiffView pair={pair} settings={settings} onOpen={source => openEditor(source.tab, source.path)} /></div>)}</Suspense>
           <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
@@ -683,6 +704,7 @@ export default function App() {
           })}</Suspense>
         </div>
       </main>
+      </div>
     </div>
     <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>Makro abbrechen</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
     {macros.dialogs}

@@ -6,7 +6,7 @@ export function BrowserContextMenu({ entry, x, y, onAnswer, markedName }: { mark
   const file = entry.kind === "file" || (entry.kind === "symlink" && !entry.targetIsDir);
   const items: { action: ContextAction; label: string; disabled?: boolean }[] = [
     ...(file ? [{ action: "edit" as const, label: "Öffnen im Editor" }] : []),
-    ...(file ? [{ action: "remember" as const, label: "Zum Vergleich merken" }, ...(markedName ? [{ action: "compare" as const, label: `Mit ${markedName} vergleichen` }] : [])] : []),
+    ...(entry.kind === "file" || entry.kind === "dir" ? [{ action: "remember" as const, label: "Zum Vergleich merken" }, ...(markedName ? [{ action: "compare" as const, label: `Mit ${markedName} vergleichen` }] : [])] : []),
     { action: "download", label: "Herunterladen", disabled: !file },
     { action: "chmod", label: "Berechtigungen…", disabled: entry.kind === "symlink" },
     { action: "delete", label: "Löschen" },

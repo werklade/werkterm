@@ -22,7 +22,7 @@ import "./FileBrowser.css";
 
 export interface BrowserTab {
   id: number;
-  kind: "local" | "wsl" | "ssh" | "telnet" | "serial" | "editor" | "diff";
+  kind: "local" | "wsl" | "ssh" | "telnet" | "serial" | "editor" | "diff" | "folderDiff";
   title: string;
   serial?: import("../lib/sessions").SerialConfig | null;
   target?: string;
