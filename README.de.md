@@ -2,10 +2,10 @@
 
 English version: [README.md](README.md)
 
-Werkterm ist eine Desktop-Anwendung mit Tauri 2, Rust und React. Sie bietet lokale Terminals, SSH mit einem SFTP-Browser, der dem Terminal-Verzeichnis folgt, und einen integrierten Editor. Zielplattform ist Linux; Windows dient ausschließlich Entwicklung und Tests.
+Werkterm ist eine Desktop-Anwendung mit Tauri 2, Rust und React. Sie bietet lokale Terminals, SSH mit einem SFTP-Browser, der dem Terminal-Verzeichnis folgt, und einen integrierten Editor. Zielplattformen sind Linux (vorrangig) und Windows 10/11 x64.
 
 > [!NOTE]
-> Version 0.1.0 ist eine Vorabversion für eingeladene Tester. Bitte Rückmeldungen über Issues einreichen.
+> Werkterm ist eine Vorabversion (aktuell 0.1.6) für eingeladene Tester. Bitte Rückmeldungen über Issues einreichen.
 
 ## Unabhängigkeit und Marken
 
@@ -42,7 +42,7 @@ Fertige Pakete (`.deb`, AppImage, `SHA256SUMS`) hängen am GitHub-Release, sicht
 Debian-basierte Systeme, Bash (installiert ein Systempaket):
 
 ```bash
-sudo apt install ./Werkterm_0.1.3_amd64.deb
+sudo apt install ./Werkterm_0.1.6_amd64.deb
 ```
 
 Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`.
@@ -50,13 +50,13 @@ Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`.
 AppImage, Bash (`libfuse2` erforderlich; der Paketname kann je Distribution abweichen):
 
 ```bash
-chmod +x ./Werkterm_0.1.3_amd64.AppImage
-./Werkterm_0.1.3_amd64.AppImage
+chmod +x ./Werkterm_0.1.6_amd64.AppImage
+./Werkterm_0.1.6_amd64.AppImage
 ```
 
 Zur Prüfung muss sich das Anwendungsfenster öffnen.
 
-Windows: `Werkterm_0.1.3_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_0.1.3_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`.
+Windows: `Werkterm_0.1.6_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_0.1.6_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`. Zeigt die Taskleiste nach einem Update noch das alte Symbol, liegt das am Symbol-Cache von Windows: `ie4uinit.exe -show` ausführen oder ab- und wieder anmelden.
 
 Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum -c SHA256SUMS`, Windows-PowerShell: `Get-FileHash <Datei>`).
 
