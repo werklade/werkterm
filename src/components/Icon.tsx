@@ -33,8 +33,13 @@ import windowsIcon from "../assets/icons/windows.svg?raw";
 import appleIcon from "../assets/icons/apple.svg?raw";
 import sessionNewIcon from "../assets/icons/session-new.svg?raw";
 import settingsIcon from "../assets/icons/settings.svg?raw";
+import homeIcon from "../assets/icons/home.svg?raw";
+import multiexecIcon from "../assets/icons/multiexec.svg?raw";
+import helpIcon from "../assets/icons/help.svg?raw";
+import splitIcon from "../assets/icons/split.svg?raw";
+import viewIcon from "../assets/icons/view.svg?raw";
+import powerIcon from "../assets/icons/power.svg?raw";
 
-const inline = (paths: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 export const standardIcons = {
   debian: debianIcon,
   telnet: telnetIcon,
@@ -42,14 +47,14 @@ export const standardIcons = {
   powershell: powershellIcon,
   jump: jumpIcon,
 
-  home: inline('<path class="wl-fill" stroke="none" d="m3 10 9-7 9 7v10H3z"/><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>'),
+  home: homeIcon,
   settings: settingsIcon,
   "session-new": sessionNewIcon,
-  multiexec: inline('<rect class="wl-fill" stroke="none" x="8" y="3" width="13" height="11" rx="2"/><rect x="8" y="3" width="13" height="11" rx="2"/><path d="M5 7v8a2 2 0 0 0 2 2h9"/><path d="M2 11v8a2 2 0 0 0 2 2h9"/><path d="m11 7 2 2-2 2"/><path d="M15 11h3"/>'),
-  help: inline('<circle class="wl-fill" stroke="none" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 3h.01"/>'),
-  split: inline('<path class="wl-fill" stroke="none" d="M5 4h7v16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
-  view: inline('<path class="wl-fill" stroke="none" d="M8 9h13v9a2 2 0 0 1-2 2H8z"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11"/>'),
-  power: inline('<path class="wl-fill" stroke="none" d="M6 5a9 9 0 1 0 12 0z"/><path d="M12 2v10M6 5a9 9 0 1 0 12 0"/>'),
+  multiexec: multiexecIcon,
+  help: helpIcon,
+  split: splitIcon,
+  view: viewIcon,
+  power: powerIcon,
   "save": saveIcon,
   "undo": undoIcon,
   "redo": redoIcon,

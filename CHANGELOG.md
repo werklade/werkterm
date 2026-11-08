@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Werklade Dunkel and Werklade Hell are built directly from the shared Werklade design tokens; `npm run sync-design` also copies the shared icons, `npm run check-design` reports differences without changing files.
+- The home, MultiExec, help, split, view and quit icons now come from the shared Werklade icon set.
 
 ### Fixed
 
