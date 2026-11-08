@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Werklade icons: the quit icon's accent fill stays inside its ring instead of covering a full disc.
+- Werklade icons: the quit icon sits in a tinted ring like the refresh and undo icons instead of an open, filled power symbol.
 
 ## [0.1.3] – 2026-11-08
 

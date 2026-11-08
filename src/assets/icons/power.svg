@@ -5,11 +5,15 @@
   viewBox="0 0 24 24"
   fill="none"
   stroke="currentColor"
-  stroke-width="1.75"
+  stroke-width="2"
   stroke-linecap="round"
   stroke-linejoin="round"
   class="icon icon-werklade-power"
 >
-  <path class="wl-fill" stroke="none" d="M6 5a9 9 0 1 0 12 0z" />
-  <path d="M12 2v10M6 5a9 9 0 1 0 12 0" />
+  <circle class="wl-fill" stroke="none" cx="12" cy="12" r="9.5" />
+  <circle cx="12" cy="12" r="9.5" />
+  <g transform="translate(12 12) scale(0.6) translate(-12 -12)" stroke-width="3.333333" fill="none">
+    <path d="M7 6a7.75 7.75 0 1 0 10 0" />
+    <path d="M12 4l0 8" />
+  </g>
 </svg>
