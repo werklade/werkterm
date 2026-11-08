@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Monitor bar: RAM is now shown in binary units (GiB, tooltip MiB) and matches what Proxmox and `free -h` report. Before, 93.46 GiB appeared as 100.35 GB.
+
 ## [0.1.7] – 2026-11-08
 
 ### Fixed
