@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- New Werkterm logo and app icon in the Werklade style (slate tile, orange drawer with a prompt, grey drawer), taken from the shared Werklade design set; replaces the blue terminal icon with Tux.
+
 ## [0.1.4] – 2026-11-08
 
 ### Changed

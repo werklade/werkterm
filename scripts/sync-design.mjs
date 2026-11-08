@@ -23,6 +23,7 @@ try {
     .map(entry => entry.name).sort();
   const files = [
     [join(source, "tokens", "werklade.json"), join("src", "brand", "werklade.tokens.json")],
+    [join(source, "logo", "werkterm-logo.svg"), join("src", "brand", "werkterm-logo.svg")],
     ...[...names, "LICENSE-tabler-icons.txt"].map(name => [join(icons, name), join("src", "assets", "icons", name)]),
   ];
   // Validate all sources before copying so a missing license cannot cause a partial sync.

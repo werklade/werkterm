@@ -1,5 +1,5 @@
 import { useState } from "react";
-import appIcon from "../assets/app-icon.svg";
+import appIcon from "../brand/werkterm-logo.svg";
 import { KindIcon } from "./KindIcon";
 import { searchSessions, type Recent } from "../lib/history";
 import { parseQuickConnect } from "../lib/quickConnect";
