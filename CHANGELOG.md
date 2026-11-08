@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] – 2026-11-08
+
+### Fixed
+
+- The hardware overview keeps the shell open instead of ending the session.
+- WindTerm import explains `profiles.config` problems (Windows paths, missing `user.sessions`) and falls back to other `default.v*` profiles.
+- Shell dotfiles (`.bashrc`, `.profile`, …) and env/config files without extensions are syntax-highlighted.
+- In MultiExec, clicking a terminal makes it active, so the monitoring bar and SSH browser follow it.
+
 ## [0.1.0] – 2026-11-08
 
 ### Added
