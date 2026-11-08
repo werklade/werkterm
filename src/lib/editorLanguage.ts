@@ -13,3 +13,16 @@ export function languageFromShebang(text: string): string | null {
   if (executable === "php") return "php";
   return null;
 }
+
+/**
+ * Language names for well-known configuration files that have no matching extension
+ * (e.g. ".bashrc"). Checked after CodeMirror's own filename matching, before the shebang.
+ */
+export function languageFromKnownFile(fileName: string): string | null {
+  const name = fileName.split(/[\/]/).pop()?.toLowerCase() ?? "";
+  if (/^\.?(bashrc|bash_profile|bash_login|bash_logout|bash_aliases|profile|zshrc|zprofile|zshenv|zlogin|zlogout|kshrc|mkshrc|shrc|xprofile|xsessionrc)$/.test(name)) return "shell";
+  if (/^(bashrc|profile|environment|crontab)$/.test(name) || /\.(bashrc|zshrc|profile)$/.test(name)) return "shell";
+  if (/^\.env(\..+)?$/.test(name) || /\.env(\.example|\.sample|\.local)?$/.test(name)) return "properties files";
+  if (/^\.(gitconfig|editorconfig|npmrc|wgetrc|curlrc)$/.test(name) || name === "gitconfig") return "properties files";
+  return null;
+}

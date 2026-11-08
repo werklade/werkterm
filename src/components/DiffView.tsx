@@ -8,7 +8,7 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import { selectedTheme, type Settings } from "../lib/settings";
 import { luminance, parseColor } from "../lib/colorCodes";
 import { emojiFallback } from "../lib/terminalThemes";
-import { languageFromShebang } from "../lib/editorLanguage";
+import { languageFromKnownFile, languageFromShebang } from "../lib/editorLanguage";
 import { diffConfig, diffError, loadDiffPair, sourceLabel, whitespaceAvailable, type DiffPair, type DiffSource } from "../lib/diff";
 import "./DiffView.css";
 export default function DiffView({ pair: initial, settings, onOpen }: { pair: DiffPair; settings: Settings; onOpen(source: DiffSource): void }) {
@@ -38,7 +38,7 @@ export default function DiffView({ pair: initial, settings, onOpen }: { pair: Di
     merge.current = view; setCount(view.chunks.length);
     let disposed = false;
     pair.documents.forEach((document, index) => {
-      const language = LanguageDescription.matchFilename(languages, document.name) ?? languages.find(l => l.name.toLowerCase() === languageFromShebang(document.text));
+      const language = LanguageDescription.matchFilename(languages, document.name) ?? languages.find(l => l.name.toLowerCase() === (languageFromKnownFile(document.name) ?? languageFromShebang(document.text)));
       if (language) void language.load().then(extension => {
         if (!disposed) (index ? view.b : view.a).dispatch({ effects: compartments[index].reconfigure(extension) });
       }).catch(() => { /* Plain text remains usable if optional highlighting cannot load. */ });

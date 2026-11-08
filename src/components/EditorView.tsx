@@ -14,7 +14,7 @@ import { useModal } from "./useModal";
 import { colorCodeMatches, mixColor, parseColor, textColor, luminance } from "../lib/colorCodes";
 import { initialEol, eolChanged, mostFrequentEol } from "../lib/editorEol";
 import { braceFold, indentationFold } from "../lib/editorFolding";
-import { languageFromShebang } from "../lib/editorLanguage";
+import { languageFromKnownFile, languageFromShebang } from "../lib/editorLanguage";
 import type { EditorDocument, EditorEol } from "../lib/editorTypes";
 import "./EditorView.css";
 
@@ -239,7 +239,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     const editor = view.current;
     if (!editor) return;
     const request = ++languageRequest.current;
-    const shebang = languageFromShebang(document.text);
+    const shebang = languageFromKnownFile(document.name) ?? languageFromShebang(document.text);
     const description = LanguageDescription.matchFilename(languages, document.name) ?? (shebang ? LanguageDescription.matchLanguageName(languages, shebang, true) : null);
     language.current = description?.name ?? "Text";
     editor.dispatch({ effects: languageCompartment.current.reconfigure([]) });
