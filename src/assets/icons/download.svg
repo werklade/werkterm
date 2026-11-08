@@ -11,6 +11,7 @@
   class="icon icon-tabler icons-tabler-outline icon-tabler-download"
 >
   <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+  <path class="wl-fill" stroke="none" d="M4 17h16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
   <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
   <path d="M7 11l5 5l5 -5" />
   <path d="M12 4l0 12" />

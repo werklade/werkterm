@@ -43,7 +43,7 @@ export function IconSetEditor({ value, onChange }: { value: string; onChange(val
       await refresh(); onChange(result.id); setFolder(null); setMessages(["Icon-Set importiert.", ...result.warnings]);
     }); }}><label>Name des Icon-Sets<input autoFocus maxLength={60} value={name} disabled={busy} onChange={event => setName(event.target.value)} /></label>
       <button disabled={busy || !name.trim()}>Importieren</button><button type="button" disabled={busy} onClick={() => setFolder(null)}>Abbrechen</button></form>}
-    <p>Dateinamen müssen den Icon-Namen entsprechen (z. B. folder.svg). Fehlende Icons verwenden Standard. Der Export enthält alle Namen und überschreibt keine Dateien.</p>
+    <p>Dateinamen müssen den Icon-Namen entsprechen (z. B. folder.svg). Fehlende Icons verwenden Standard. Die Klasse class="wl-fill" markiert Flächen, die im Set Werklade die Akzenttönung erhalten. Der Export enthält alle Namen und überschreibt keine Dateien.</p>
     {error && <p role="alert">{error}</p>}{messages.length > 0 && <div role="status">{messages.map((message, index) => <p key={index}>{message}</p>)}</div>}
   </section>;
 }

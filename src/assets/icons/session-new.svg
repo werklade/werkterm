@@ -11,9 +11,12 @@
   class="icon icon-tabler icons-tabler-outline icon-tabler-device-desktop-plus"
 >
   <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-  <path d="M13.5 16h-9.5a1 1 0 0 1 -1 -1v-10a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v7.5" />
-  <path d="M7 20h5" />
+  <path class="wl-fill" stroke="none" d="M13.61 16H4a1 1 0 0 1 -1 -1V5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v8.65A4.5 4.5 0 0 0 13.61 16z" />
+  <circle class="wl-fill" stroke="none" cx="18" cy="17" r="4.5" />
+  <path d="M13.61 16h-9.61a1 1 0 0 1 -1 -1v-10a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v8.65" />
+  <circle cx="18" cy="17" r="4.5" />
+  <path d="M6.5 20h5" />
   <path d="M9 16v4" />
-  <path d="M16 19h6" />
-  <path d="M19 16v6" />
+  <path d="M18 15v4" />
+  <path d="M16 17h4" />
 </svg>

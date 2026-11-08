@@ -11,6 +11,7 @@
   class="icon icon-tabler icons-tabler-outline icon-tabler-arrow-forward-up"
 >
   <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+  <circle class="wl-fill" stroke="none" cx="12" cy="12" r="8" />
   <path d="M15 14l4 -4l-4 -4" />
   <path d="M19 10h-11a4 4 0 1 0 0 8h1" />
 </svg>

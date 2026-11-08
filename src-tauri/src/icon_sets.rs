@@ -568,6 +568,12 @@ mod tests {
             let source = fs::read_to_string(&path).unwrap();
             let clean = sanitize_svg(&source).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             assert_eq!(sanitize_svg(&clean).unwrap(), clean);
+            assert_eq!(
+                clean.matches("class=\"wl-fill\"").count(),
+                source.matches("class=\"wl-fill\"").count(),
+                "{}",
+                path.display()
+            );
             if source.contains("<path") {
                 assert!(clean.contains("<path"), "{}", path.display());
             }
@@ -575,6 +581,11 @@ mod tests {
                 assert!(clean.contains(" d="), "{}", path.display());
             }
         }
+    }
+    #[test]
+    fn sanitizer_preserves_duotone_class() {
+        let source = r#"<svg><path class="wl-fill" d="M3 3h18v18H3z"/><rect class="wl-fill" x="4" y="4" width="8" height="8"/></svg>"#;
+        assert_eq!(sanitize_svg(source).unwrap(), source);
     }
     #[test]
     fn sanitizer_removes_active_content() {
