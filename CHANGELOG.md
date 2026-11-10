@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Paste confirmation dialog: the new list "Remember choice?" offers "Don't remember", "Remember for this tab", "Remember for the profile" (saved session) and "Remember permanently". The remembered choice is the action (paste / paste as one line) including "Remove last line break". Content with control characters always asks. With MultiExec only "Remember permanently" applies. Settings show the current state and offer "Reset remembered choice".
 - `npm run check-paths` checks release binaries for user paths of the build machine.
+- Selectable data folder: on first start Werkterm asks "Choose data folder" (default folder or a folder of your own, for example one synchronized by a cloud client and shared by several devices). Changeable later under Settings > Data folder; Werkterm restarts on change, running tunnels are stopped and open connections are closed after confirmation.
+  - The data folder holds `sessions.json`, `tunnels.json`, `macros.json`, `settings.json`, `designs/` and `icon-sets/`. Per device stay: passwords (OS keyring), recent list, last open tabs, editor cache, logs and the log folder path, window and column widths.
+  - If the chosen folder already contains Werkterm data, it is used; otherwise the existing data can be copied there (nothing is overwritten, the source stays unchanged).
+  - If the folder is unreachable (for example a cloud drive that is not mounted), a dialog offers "Try again", "Choose another folder" and "Use default folder". Nothing is written until then; there is no silent fallback.
+  - Changes from outside (sync client) are detected when the window regains focus and reloaded. Before saving, settings are compared with the last version read; if they differ, only your own changes are applied on top of the new version.
+  - Settings now live in `settings.json` instead of the webview storage; existing settings are taken over once.
+  - Known limit: if two devices edit the same session at the same time, the last saved version wins or the sync client creates a conflict copy. The files are not encrypted and contain host names and user names, but no passwords.
 
 ### Changed
 
@@ -17,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Linux/GNOME: the running window showed a gear instead of the Werkterm icon in the panel, and a pinned launcher was not recognized as running. The desktop entry now names the window class (`StartupWMClass`).
+- Windows: saving sessions, tunnels, macros and settings repeats the last step briefly if a sync client currently holds the file locked.
 - Linux: black window on systems with NVIDIA graphics and the proprietary driver. At startup Werkterm sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`, under Wayland also `__NV_DISABLE_EXPLICIT_SYNC=1`, only if such a graphics card is detected and none of these variables (including `WEBKIT_DISABLE_COMPOSITING_MODE`) is set by the user. The variables are not passed on to local terminals. Disable with `WERKTERM_NO_WEBKIT_WORKAROUND=1`; force on affected systems without a detected NVIDIA card with `WERKTERM_WEBKIT_WORKAROUND=1`.
 - Release packages no longer contain directory paths of the build machine (source paths in the executable are rewritten).
 - Paste: control characters in the range U+0080–U+009F are recognized as control characters.

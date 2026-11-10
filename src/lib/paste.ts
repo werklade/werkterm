@@ -86,6 +86,11 @@ export function pruneRemembered(remember: PasteRemember, existingIds: Iterable<s
   for (const key of keys) if (keep.has(key)) sessions[key] = remember.sessions[key];
   return { global: remember.global, sessions };
 }
+/** Removes only the entries of the given (just deleted) sessions; every other entry, orphaned or not, stays. */
+export function pruneDeleted(remember: PasteRemember, deletedIds: Iterable<string>): PasteRemember {
+  const gone = new Set(deletedIds);
+  return pruneRemembered(remember, Object.keys(remember.sessions).filter(id => !gone.has(id)));
+}
 export function hasRemembered(remember: PasteRemember, tabCount = 0): boolean { return remember.global !== null || Object.keys(remember.sessions).length > 0 || tabCount > 0; }
 export function describeRemembered(remember: PasteRemember, tabCount = 0): string {
   const parts: string[] = [];

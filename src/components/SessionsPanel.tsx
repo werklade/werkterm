@@ -15,6 +15,8 @@ interface Props {
   onEdit: (session?: SavedSession) => void;
   onReload: () => void;
   onStatus: (message: string) => void;
+  /** Called with the ids that were really deleted (after a successful delete). */
+  onDeleted?: (ids: string[]) => void;
 }
 type Row = { key: string; depth: number; folder?: SessionFolder; session?: SavedSession; parent?: string };
 function loadExpanded(): Record<string, boolean> {
@@ -24,7 +26,7 @@ function loadExpanded(): Record<string, boolean> {
   } catch { /* Storage may be unavailable. */ }
   return {};
 }
-export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus }: Props) {
+export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus, onDeleted }: Props) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(loadExpanded);
   const [selected, setSelected] = useState("");
@@ -120,6 +122,7 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus 
       const targets = deleting; setDeleting(null);
       if (accepted) void deleteSessions(targets.map(session => session.id)).then(result => {
         onReload();
+        if (result.deleted.length) onDeleted?.(result.deleted);
         setSelection(previous => ({ ...previous, ids: previous.ids.filter(id => !result.deleted.includes(id)) }));
         onStatus([`${result.deleted.length}${result.blocked.length ? ` gelöscht, ${result.blocked.length} nicht gelöscht: ${result.blocked.map(item => `${item.name} (${item.reason})`).join(", ")}` : " Sitzungen gelöscht"}`, ...result.warnings.map(keyringErrorText)].join("; "));
       }).catch(reason => { onReload(); onStatus(keyringErrorText(reason)); });

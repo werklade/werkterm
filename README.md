@@ -25,7 +25,7 @@ Werkterm is a private, independent project with no affiliation to Mobatek. It ha
 - **Terminals:** local Bash/configured shell on Linux; PowerShell, cmd and WSL on Windows. Hardware overview on Linux and Windows, root terminal and processes on Linux; SSH, Telnet and serial sessions. Tabs, split views, MultiExec, font/cursor/scrollback/color settings. Context menu: copy, copy all, clear, save as TXT/HTML/RTF. Editable paste confirmation that can remember the choice per tab, per saved session or permanently, session logging and close confirmation. Session-end menu: Return closes, R reconnects in the same tab, S saves output.
 - **SSH:** one connection with shell and SFTP channels, exec listing fallback, host-key verification against `known_hosts`, agent/key (including `.ppk`)/password authentication, keepalive and jump-host chains. Tunnel manager for `-L`, `-R` and SOCKS5, with separate background connections, autostart, reconnect and status. Monitoring bar with tooltips for host, CPU, RAM, network, uptime, users and filesystems.
 - **SFTP browser:** Follow Terminal Folder via OSC 7, navigation, sorting, queued file transfers with progress/cancellation and drag and drop. Create files/directories, confirmed recursive deletion, recursive chmod with separate file/directory settings, sudo mode and “remember for comparison”. Local and WSL directory browsing is also available.
-- **Sessions:** folders, search, quick connect, recent sessions and last-tab restoration. Session import from MobaXterm and WindTerm; color import from MobaXterm. Saved passwords use the system keyring. Encrypted imported passwords are not recovered.
+- **Sessions:** folders, search, quick connect, recent sessions and last-tab restoration. Selectable data folder, for example for several devices through a cloud client. Session import from MobaXterm and WindTerm; color import from MobaXterm. Saved passwords use the system keyring. Encrypted imported passwords are not recovered.
 - **Editor:** syntax highlighting, folding, search/replace and live color-code backgrounds with BT.601 contrast selection. CRLF/LF/CR detection and conversion, mixed-line-ending warning, UTF-8 with/without BOM, conflict checks and in-place saving with permissions preserved.
 - **Tools:** read-only file comparison (local/remote/mixed), recursive folder comparison with optional content comparison, macros with recording, text/wait/prompt steps and shortcuts, SSH key generation, open local ports, ASCII table and Tux wanderer idle animation. Linux serial-permission assistance identifies device groups such as dialout/uucp and offers a confirmed command in a local terminal.
 
@@ -83,6 +83,18 @@ AppImage: if the window stays black or rendering crashes even so, starting with 
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
 ```
 
+## Data folder
+
+On first start Werkterm asks for the data folder: the default folder or a folder of your own, for example one that a cloud client synchronizes between several devices. Change it later under Settings > Data folder. Werkterm restarts on change; running tunnels are stopped and open connections are closed after confirmation. On Windows the default folder is `%APPDATA%\de.werklade.werkterm`.
+
+- **In the data folder:** `sessions.json`, `tunnels.json`, `macros.json`, `settings.json`, `designs/`, `icon-sets/`.
+- **Stays local per device:** passwords (OS keyring), recent list, last open tabs, editor cache, logs and the log folder path, window and column widths.
+- **Existing data:** if the chosen folder already contains Werkterm data, it is used. Otherwise the existing data can be copied there; nothing is overwritten and the source stays unchanged.
+- **Several devices:** changes from outside are detected when the window regains focus and reloaded. Before saving, settings are compared with the last version read; if they differ, only your own changes are applied on top of the new version. See "Known limitations" for simultaneous edits.
+- **Unreachable folder:** for example a cloud drive that is not mounted. Werkterm shows a dialog (Try again / Choose another folder / Use default folder) and writes nothing until then; there is no silent fallback.
+
+The files are not encrypted and contain host names and user names, but no passwords. Implemented and covered by automated tests; not yet verified by hand in the running program.
+
 ## Building
 
 Use Linux x86_64, Rust stable with Edition 2024 support, Node.js with npm and the [official Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/). Windows packages are built on Windows. The frontend uses TypeScript `~6.0.3`; manifests and lockfiles define dependencies. The project declares no minimum Node.js version.
@@ -138,6 +150,7 @@ The Rust backend uses Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyring` 
 - Remote editor conflict checks use file size and second-resolution modification time: same-size changes within one second can go undetected. Local files also have identity and finer timestamp checks.
 - The editor supports UTF-8 text only, up to 10 MiB. Mixed line endings require explicit normalization before saving.
 - A host with only another key type in `known_hosts` is rejected as changed. Review the entry before replacing it.
+- Data folder: if two devices edit the same session at the same time, the last saved version wins or the sync client creates a conflict copy. Designs are not reloaded on external changes.
 - Exec listing requires GNU-compatible tools and does not provide SFTP writes/transfers.
 - Secret Service or session D-Bus may be unavailable, especially under WSL; saved-password operations then report an error.
 - Windows/WSL development: WSL tabs use the default distribution; PowerShell UNC directory listing is not confirmed.

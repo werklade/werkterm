@@ -308,7 +308,7 @@ fn write_atomic(path: &Path, sessions: Vec<SavedSession>) -> Result<(), String> 
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temp, path)
+        crate::data_dir::rename_retrying(&temp, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -355,11 +355,8 @@ fn migrate_config_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_config_dir()
-        .map(|dir| dir.join("sessions.json"))
-        .map_err(|_| "Konfigurationsordner konnte nicht ermittelt werden".into())
+pub(crate) fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    crate::data_dir::resolve(app).map(|dir| dir.join("sessions.json"))
 }
 
 async fn read_file(path: PathBuf) -> Result<Vec<SavedSession>, String> {

@@ -25,7 +25,7 @@ Werkterm ist ein privates, unabhängiges Projekt ohne Verbindung zu Mobatek. Es 
 - **Terminals:** lokal Bash/konfigurierte Shell unter Linux; PowerShell, cmd und WSL unter Windows. Hardware-Übersicht unter Linux und Windows, Root-Terminal und Prozesse unter Linux; SSH-, Telnet- und serielle Sitzungen. Tabs, Split-Ansichten, MultiExec, Einstellungen für Schrift/Cursor/Scrollback/Farben. Kontextmenü: Kopieren, Alles kopieren, Leeren, Speichern als TXT/HTML/RTF. Bearbeitbare Einfüge-Rückfrage mit merkbarer Auswahl (pro Tab, pro gespeicherter Sitzung oder dauerhaft), Sitzungs-Logging und Schließen-Rückfrage. Ende-Menü: Return schließt, R verbindet im selben Tab erneut, S speichert die Ausgabe.
 - **SSH:** eine Verbindung mit Shell- und SFTP-Kanälen, exec-Listing-Fallback, Hostkey-Prüfung gegen `known_hosts`, Agent-/Schlüssel- (einschließlich `.ppk`)/Passwortanmeldung, Keepalive und Jump-host-Ketten. Tunnel-Manager für `-L`, `-R` und SOCKS5 mit eigenen Hintergrundverbindungen, Autostart, Reconnect und Status. Monitoring-Leiste mit Tooltips für Host, CPU, RAM, Netzwerk, Laufzeit, Benutzer und Dateisysteme.
 - **SFTP-Browser:** Follow Terminal Folder über OSC 7, Navigation, Sortierung, Dateitransfers mit Warteschlange, Fortschritt/Abbruch und Drag & Drop. Dateien/Ordner anlegen, rekursiv mit Bestätigung löschen, rekursives chmod mit getrennten Einstellungen für Dateien/Ordner, sudo-Modus und „Zum Vergleich merken“. Auch lokale und WSL-Verzeichnisse lassen sich anzeigen.
-- **Sitzungen:** Ordner, Suche, Quick connect, zuletzt verwendete Sitzungen und Wiederherstellen letzter Tabs. Sitzungsimport aus MobaXterm und WindTerm; Farbimport aus MobaXterm. Gespeicherte Passwörter liegen im System-Schlüsselbund. Verschlüsselte importierte Passwörter werden nicht wiederhergestellt.
+- **Sitzungen:** Ordner, Suche, Quick connect, zuletzt verwendete Sitzungen und Wiederherstellen letzter Tabs. Wählbarer Datenordner, etwa für mehrere Geräte über einen Cloud-Client. Sitzungsimport aus MobaXterm und WindTerm; Farbimport aus MobaXterm. Gespeicherte Passwörter liegen im System-Schlüsselbund. Verschlüsselte importierte Passwörter werden nicht wiederhergestellt.
 - **Editor:** Syntaxfarben, Faltung, Suchen/Ersetzen und direkte Farbcode-Hinterlegung mit Kontrastwahl nach BT.601. CRLF-/LF-/CR-Erkennung und Umwandlung, Warnung bei gemischten Zeilenenden, UTF-8 mit/ohne BOM, Konfliktschutz und Speichern in-place unter Erhalt der Rechte.
 - **Werkzeuge:** schreibgeschützter Dateivergleich (lokal/remote/gemischt), rekursiver Ordnervergleich mit optionalem Inhaltsvergleich, Makros mit Aufnahme, Text-/Warte-/Rückfrage-Schritten und Tastenkürzeln, SSH-Schlüssel erzeugen, offene lokale Ports, ASCII-Tabelle und Tux-Wanderer als Leerlauf-Animation. Die Linux-Seriell-Berechtigungshilfe ermittelt Gerätegruppen wie dialout/uucp und bietet nach Bestätigung einen Befehl im lokalen Terminal an.
 
@@ -83,6 +83,18 @@ AppImage: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, h
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
 ```
 
+## Datenordner
+
+Beim ersten Start fragt Werkterm nach dem Datenordner: Standardordner oder ein eigener Ordner, z. B. ein von einem Cloud-Client zwischen mehreren Geräten synchronisierter. Später änderbar unter Einstellungen > Datenordner. Werkterm startet beim Wechsel neu; laufende Tunnel werden gestoppt, offene Verbindungen nach Rückfrage getrennt. Unter Windows ist der Standardordner `%APPDATA%\de.werklade.werkterm`.
+
+- **Im Datenordner:** `sessions.json`, `tunnels.json`, `macros.json`, `settings.json`, `designs/`, `icon-sets/`.
+- **Lokal pro Gerät:** Passwörter (OS-Schlüsselbund), Zuletzt-verwendet-Liste, zuletzt offene Tabs, Editor-Cache, Logs und der Log-Ordner-Pfad, Fenster- und Spaltenbreiten.
+- **Vorhandene Daten:** Enthält der gewählte Ordner schon Werkterm-Daten, werden sie verwendet. Sonst lassen sich die bisherigen Daten dorthin kopieren; nichts wird überschrieben, die Quelle bleibt unverändert.
+- **Mehrere Geräte:** Änderungen von außen werden beim Wechsel zurück ins Fenster erkannt und neu geladen. Einstellungen werden vor dem Speichern gegen die zuletzt gelesene Fassung geprüft; bei Abweichung werden nur die eigenen Änderungen über die neue Fassung gelegt. Zu gleichzeitigen Änderungen siehe „Bekannte Einschränkungen“.
+- **Ordner nicht erreichbar:** z. B. ein nicht eingehängtes Cloud-Laufwerk. Werkterm zeigt einen Dialog (Erneut versuchen / Anderen Ordner wählen / Standardordner verwenden) und schreibt bis dahin nichts; es gibt keinen stillen Rückfall.
+
+Die Dateien sind nicht verschlüsselt und enthalten Hostnamen und Benutzernamen, aber keine Passwörter. Umgesetzt und automatisch getestet; im laufenden Programm noch nicht von Hand geprüft.
+
 ## Selbst bauen
 
 Benötigt werden Linux x86_64, Rust stable mit Unterstützung für Edition 2024, Node.js mit npm und die [offiziellen Tauri-Linux-Abhängigkeiten](https://v2.tauri.app/start/prerequisites/). Windows-Pakete werden unter Windows gebaut. Das Frontend verwendet TypeScript `~6.0.3`; Manifeste und Lockdateien legen Abhängigkeiten fest. Das Projekt nennt keine minimale Node.js-Version.
@@ -138,6 +150,7 @@ Das Rust-Backend verwendet Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyr
 - Der Remote-Konfliktschutz im Editor nutzt Dateigröße und sekundengenaue Änderungszeit: Gleich große Änderungen innerhalb einer Sekunde können unbemerkt bleiben. Lokale Dateien werden zusätzlich anhand ihrer Identität und genauerer Zeitstempel geprüft.
 - Der Editor unterstützt ausschließlich UTF-8-Text bis 10 MiB. Gemischte Zeilenenden müssen vor dem Speichern ausdrücklich vereinheitlicht werden.
 - Ein Host, für den `known_hosts` nur einen anderen Schlüsseltyp enthält, wird als geändert abgelehnt. Den Eintrag vor einem Ersetzen prüfen.
+- Datenordner: Bearbeiten zwei Geräte gleichzeitig dieselbe Sitzung, gewinnt die zuletzt gespeicherte Fassung, oder der Sync-Client legt eine Konfliktkopie an. Designs werden bei externen Änderungen nicht neu geladen.
 - Exec-Listing benötigt GNU-kompatible Werkzeuge und bietet keine SFTP-Schreibaktionen/Transfers.
 - Secret Service oder Sitzungs-D-Bus können insbesondere unter WSL fehlen; gespeicherte Passwortoperationen melden dann einen Fehler.
 - Windows-/WSL-Entwicklung: WSL-Tabs nutzen die Standarddistribution; PowerShell-UNC-Verzeichnislisting ist nicht bestätigt.

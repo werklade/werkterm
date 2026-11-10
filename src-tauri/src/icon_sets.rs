@@ -4,7 +4,6 @@ use std::fs::{self, OpenOptions};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tauri::Manager;
 
 const MAX_SIZE: usize = 64 * 1024;
 const MAX_FILES: usize = 200;
@@ -308,10 +307,7 @@ pub struct ExportResult {
 }
 
 fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_config_dir()
-        .map(|p| p.join("icon-sets"))
-        .map_err(|e| e.to_string())
+    crate::data_dir::resolve(app).map(|p| p.join("icon-sets"))
 }
 fn set_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     if !safe_name(id, 64) {

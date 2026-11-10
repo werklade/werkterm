@@ -6,9 +6,8 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
-use tauri::Manager;
 
-static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,7 +131,7 @@ fn write_atomic(path: &Path, macros: Vec<Macro>) -> Result<(), String> {
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&temp, path)
+        crate::data_dir::rename_retrying(&temp, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -141,10 +140,7 @@ fn write_atomic(path: &Path, macros: Vec<Macro>) -> Result<(), String> {
 }
 
 fn path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_config_dir()
-        .map(|dir| dir.join("macros.json"))
-        .map_err(|_| "Konfigurationsordner nicht verfügbar".into())
+    crate::data_dir::resolve(app).map(|dir| dir.join("macros.json"))
 }
 
 #[tauri::command]

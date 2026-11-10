@@ -9,6 +9,8 @@ import { useModal } from "./useModal";
 import { describeRemembered, hasRemembered, resetRemembered } from "../lib/paste";
 import { defaultSettings, normalizeSettings, selectedTheme, type Settings } from "../lib/settings";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "../lib/terminalThemes";
+import { dataDirStatus, type DataDirStatus } from "../lib/dataDir";
+import { DataDirSection } from "./DataDirForm";
 function NumberSetting({ label, value, min, max, step, onValue }: { label: string; value: number; min: number; max: number; step: number; onValue(value: number): void }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);
@@ -22,10 +24,13 @@ function NumberSetting({ label, value, min, max, step, onValue }: { label: strin
     setDraft(String(next)); onValue(next);
   }} /></label>;
 }
-export function SettingsDialog({ settings, onChange, onClose, onClearRecents, tabPasteCount = 0, onResetTabPaste }: { settings: Settings; onChange(settings: Settings): void; onClose(): void; onClearRecents(): void; tabPasteCount?: number; onResetTabPaste?(): void }) {
+export function SettingsDialog({ settings, onChange, onClose, onClearRecents, tabPasteCount = 0, onResetTabPaste, onChangeDataDir, onDefaultDataDir }: { settings: Settings; onChange(settings: Settings): void; onClose(): void; onClearRecents(): void; tabPasteCount?: number; onResetTabPaste?(): void; onChangeDataDir?(status: DataDirStatus): void; onDefaultDataDir?(status: DataDirStatus): void }) {
   const dialog = useModal();
   const [tab, setTab] = useState("Terminal");
   const [error, setError] = useState("");
+  const [dataDir, setDataDir] = useState<DataDirStatus | null>(null);
+  const [dataDirError, setDataDirError] = useState("");
+  useEffect(() => { void dataDirStatus().then(setDataDir).catch(reason => setDataDirError(String(reason))); }, []);
   const [busy, setBusy] = useState(false);
   const current = useRef(settings); current.current = settings;
   const change = (patch: Partial<Settings>) => onChange(normalizeSettings({ ...current.current, ...patch }));
@@ -46,7 +51,7 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents, ta
   };
   useEffect(() => { if (!current.current.logFolder) void defaultLogFolder().then(logFolder => { if (!current.current.logFolder) change({ logFolder }); }).catch(reason => setError(String(reason))); }, []);
   const theme = selectedTheme(settings);
-  const tabNames = ["Terminal", "Editor", "Protokoll", "Design"];
+  const tabNames = ["Terminal", "Editor", "Protokoll", "Design", "Datenordner"];
   return <dialog ref={dialog} className="ssh-dialog settings-dialog" aria-label="Einstellungen" onCancel={e => { e.preventDefault(); onClose(); }}>
     <h2>Einstellungen</h2><div role="tablist" aria-label="Einstellungsbereiche">{tabNames.map(name => <button id={`settings-tab-${name}`} role="tab" aria-selected={tab === name} aria-controls="settings-panel" tabIndex={tab === name ? 0 : -1} key={name} onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); const next = tabNames[(tabNames.indexOf(name) + (e.key === "ArrowRight" ? 1 : tabNames.length - 1)) % tabNames.length]; setTab(next); document.getElementById(`settings-tab-${next}`)?.focus(); } }} onClick={() => setTab(name)}>{name}</button>)}</div>
     <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="settings-fields">{tab === "Terminal" ? <>
@@ -62,8 +67,8 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents, ta
       <label>Farbschema<select value={settings.theme} onChange={e => change({ theme: e.target.value })}><option value="design">Aus Design</option>{[...Object.keys(terminalThemes), ...(settings.importedTheme ? ["MobaXterm (importiert)"] : [])].map(name => <option key={name}>{name}</option>)}</select></label>
       <div className="theme-preview" style={{ background: theme.background, color: theme.foreground }}><p>Werkterm · Textvorschau 0123456789</p><div>{ansiKeys.map(key => <span key={key} title={`${key}: ${theme[key]}`} style={{ background: theme[key] }} />)}</div></div>
       <button disabled={busy} onClick={() => void importColors()}>Farben aus MobaXterm importieren…</button>
-    </> : tab === "Protokoll" ? <><label>Protokollordner<input value={settings.logFolder} onChange={e => change({ logFolder: e.target.value })} /></label><button onClick={() => { void open({ directory: true, multiple: false, title: "Protokollordner wählen" }).then(path => { if (typeof path === "string") change({ logFolder: path }); }).catch(reason => setError(String(reason))); }}>Ordner wählen…</button>{check("Alle Sitzungen protokollieren", "logAllSessions")}{check("Farb- und Steuercodes entfernen", "logStripAnsi")}<p>Vom Server angezeigte Eingaben (Echo) erscheinen im Protokoll. Verdeckte Passworteingaben nicht.</p></> : tab === "Design" ? null : <>{number("Schriftgröße", "editorFontSize", 8, 32)}{check("Zeilenumbruch standardmäßig an", "editorWrap")}<label>Tabbreite<select value={settings.editorTabSize} onChange={e => change({ editorTabSize: Number(e.target.value) as 2 | 4 | 8 })}>{[2, 4, 8].map(n => <option key={n}>{n}</option>)}</select></label></>}<div hidden={tab !== "Design"}><DesignEditor name={settings.design} onChange={design => change({ design })} /><IconSetEditor value={settings.iconSet} onChange={iconSet => change({ iconSet })} /></div></div>
+    </> : tab === "Protokoll" ? <><label>Protokollordner<input value={settings.logFolder} onChange={e => change({ logFolder: e.target.value })} /></label><button onClick={() => { void open({ directory: true, multiple: false, title: "Protokollordner wählen" }).then(path => { if (typeof path === "string") change({ logFolder: path }); }).catch(reason => setError(String(reason))); }}>Ordner wählen…</button>{check("Alle Sitzungen protokollieren", "logAllSessions")}{check("Farb- und Steuercodes entfernen", "logStripAnsi")}<p>Vom Server angezeigte Eingaben (Echo) erscheinen im Protokoll. Verdeckte Passworteingaben nicht.</p></> : tab === "Datenordner" ? <DataDirSection status={dataDir} error={dataDirError} onChange={() => { if (dataDir) onChangeDataDir?.(dataDir); }} onDefault={() => { if (dataDir) onDefaultDataDir?.(dataDir); }} /> : tab === "Design" ? null : <>{number("Schriftgröße", "editorFontSize", 8, 32)}{check("Zeilenumbruch standardmäßig an", "editorWrap")}<label>Tabbreite<select value={settings.editorTabSize} onChange={e => change({ editorTabSize: Number(e.target.value) as 2 | 4 | 8 })}>{[2, 4, 8].map(n => <option key={n}>{n}</option>)}</select></label></>}<div hidden={tab !== "Design"}><DesignEditor name={settings.design} onChange={design => change({ design })} /><IconSetEditor value={settings.iconSet} onChange={iconSet => change({ iconSet })} /></div></div>
     <button type="button" onClick={onClearRecents}>Zuletzt verwendet leeren</button>
-    {error && <p role="alert">{error}</p>}<p>Änderungen gelten sofort.</p><div className="dialog-actions"><button hidden={tab === "Design"} onClick={() => change(tab === "Terminal" ? { tuxEnabled: true, tuxIdleMinutes: 10, tuxCount: 4, copyOnSelect: true, rightClick: "menu", pasteConfirm: defaultSettings.pasteConfirm, fontFamily: defaultSettings.fontFamily, fontSize: 14, lineHeight: 1, cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: defaultSettings.theme } : tab === "Protokoll" ? { logFolder: "", logAllSessions: false, logStripAnsi: true } : { editorFontSize: 14, editorWrap: false, editorTabSize: 4 })}>Zurücksetzen</button><button autoFocus onClick={onClose}>Schließen</button></div>
+    {error && <p role="alert">{error}</p>}<p>Änderungen gelten sofort.</p><div className="dialog-actions"><button hidden={tab === "Design" || tab === "Datenordner"} onClick={() => change(tab === "Terminal" ? { tuxEnabled: true, tuxIdleMinutes: 10, tuxCount: 4, copyOnSelect: true, rightClick: "menu", pasteConfirm: defaultSettings.pasteConfirm, fontFamily: defaultSettings.fontFamily, fontSize: 14, lineHeight: 1, cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: defaultSettings.theme } : tab === "Protokoll" ? { logFolder: "", logAllSessions: false, logStripAnsi: true } : { editorFontSize: 14, editorWrap: false, editorTabSize: 4 })}>Zurücksetzen</button><button autoFocus onClick={onClose}>Schließen</button></div>
   </dialog>;
 }

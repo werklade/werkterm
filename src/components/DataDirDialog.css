@@ -1,0 +1,10 @@
+.datadir-path { display: block; margin: 4px 0 8px; padding: 8px 10px; font-family: var(--font-mono); background: var(--bg-input); border-radius: var(--radius); user-select: text; overflow-wrap: anywhere; word-break: break-all; }
+.datadir-error { color: var(--danger); overflow-wrap: anywhere; }
+.datadir-note { color: var(--fg-secondary); overflow-wrap: anywhere; }
+.datadir-hint { display: block; margin-top: 4px; color: var(--fg-secondary); font-family: var(--font-mono); overflow-wrap: anywhere; word-break: break-all; user-select: text; }
+.datadir-hint-text { display: block; margin-top: 4px; color: var(--fg-secondary); overflow-wrap: anywhere; }
+.datadir-choices { display: grid; gap: 12px; margin: 12px 0; }
+.datadir-choices button, .datadir-section-actions button { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 12px; background: var(--bg-toolbar); }
+.datadir-choices button:hover:not(:disabled), .datadir-section-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.datadir-section-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.datadir-dialog .dialog-actions button:disabled { opacity: .5; cursor: default; }

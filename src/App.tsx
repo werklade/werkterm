@@ -44,6 +44,11 @@ import { jumpHostHint, listSessions, sessionTarget, type SavedSession } from "./
 import { availableShells, type ShellKind } from "./lib/pty";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+import { SettingsSync, fileSettingsIo, setMigrateFlag, takeMigrateFlag } from "./lib/settingsSync";
+import { appRestart, dataDirFingerprint, dataDirResetPointer, dataDirSet, dataDirStatus, mergeEntry, planReload, shouldCheck, type DataDirChoice, type DataDirStatus, type FileFingerprint } from "./lib/dataDir";
+import { runSwitch } from "./lib/dataDirSwitch";
+import { DataDirDialog, pickDataDir } from "./components/DataDirDialog";
+import { DataDirErrorDialog, RestartDialog, resetPointerNotice } from "./components/DataDirForm";
 import { parseQuickConnect } from "./lib/quickConnect";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { beginClose, advanceClose, type CloseAnswer } from "./lib/editorClose";
@@ -59,7 +64,7 @@ import { useModal } from "./components/useModal";
 import "./styles/theme.css";
 import "./App.css";
 import { PasteDialog } from "./components/PasteDialog";
-import { applyPasteChoice, pruneRemembered, rememberChoice, resolveRemembered, shouldConfirmPaste, type PasteChoice } from "./lib/paste";
+import { applyPasteChoice, pruneDeleted, rememberChoice, resolveRemembered, shouldConfirmPaste, type PasteChoice } from "./lib/paste";
 import { defaultLogFolder, openLogFolder, startLog, stopLog, terminalPasteRequests } from "./lib/sessionLog";
 import { gridColumns, inputTargets, terminalWriters } from "./lib/multiExec";
 
@@ -90,7 +95,22 @@ function declinePrompt(prompt: SshPrompt) {
   return prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null);
 }
 
+type DataPhase = "checking" | "setup" | "unreachable" | "error" | "ready";
+interface RestartPlan { path: string | null; copy: boolean }
 export default function App() {
+  // Start order: data_dir_status -> (setup | unreachable dialog) -> settings_load -> "ready" (sessions, macros, tunnels, designs load).
+  const [dataPhase, setDataPhase] = useState<DataPhase>("checking");
+  const dataReady = dataPhase === "ready";
+  const dataReadyRef = useRef(false);
+  dataReadyRef.current = dataReady;
+  const [dataStatus, setDataStatus] = useState<DataDirStatus | null>(null);
+  const [dataError, setDataError] = useState("");
+  const [setupNotice, setSetupNotice] = useState("");
+  // After data_dir_set every write path stays blocked; only the restart is offered (RestartDialog).
+  const [restartRequired, setRestartRequired] = useState(false);
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [restartError, setRestartError] = useState("");
+  const [dataDirChange, setDataDirChange] = useState<{ status: DataDirStatus; choice: DataDirChoice } | null>(null);
   const [serialPermission, setSerialPermission] = useState<{ id: number; info: SerialPermission } | null>(null);
   const [tool, setTool] = useState<"ascii" | "ports" | "keygen" | null>(null);
   const [panes, setPanes] = useState<(number | null)[]>([]);
@@ -124,7 +144,8 @@ export default function App() {
   const closing = useRef(new Set<number>());
   const windowClosing = useRef(false);
   const closeAnswer = useRef<((answer: CloseAnswer) => void) | null>(null);
-  const closeRequest = useRef<() => Promise<void>>(async () => {});
+  /** Resolves true once the window was destroyed or the app restarted, false when the user cancelled a prompt. */
+  const closeRequest = useRef<(restart?: RestartPlan) => Promise<boolean>>(async () => false);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -161,6 +182,7 @@ export default function App() {
     await invoke("tunnel_start", { id: t.id, allowPublic, onPrompt: tunnelPromptChannel() });
   };
   useEffect(() => {
+    if (!dataReady) return;
     let disposed = false;
     const subscription = listen<TunnelStatus>("tunnel-status", event => { if (!disposed) setTunnelStatuses(current => [...current.filter(s => s.id !== event.payload.id), event.payload]); });
     void subscription.then(async () => {
@@ -169,7 +191,7 @@ export default function App() {
       if (!tunnelAutostart.current) { tunnelAutostart.current = true; await invoke("tunnel_autostart", { onPrompt: tunnelPromptChannel() }); }
     }).catch(reason => setStatus(String(reason)));
     return () => { disposed = true; void subscription.then(unlisten => unlisten()); };
-  }, []);
+  }, [dataReady]);
   const [status, setStatus] = useState("Bereit");
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [sessionDialog, setSessionDialog] = useState<{ session?: SavedSession; tabId?: number; preferPassword?: boolean } | null>(null);
@@ -177,22 +199,92 @@ export default function App() {
   const [quickUserTarget, setQuickUserTarget] = useState<string | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
-  useEffect(reloadSessions, [reloadSessions]);
+  useEffect(() => { if (dataReady) reloadSessions(); }, [dataReady, reloadSessions]);
+  // localStorage only seeds the first render; settings.json replaces it once loaded (see bootstrapData).
   const [settings, setSettings] = useState(loadSettings);
+  const fingerprint = useRef<FileFingerprint[] | null>(null);
+  const [settingsSync] = useState(() => new SettingsSync(fileSettingsIo, message => setStatus(message), {
+    // Own write: the stamp returned by settings_save becomes the baseline, so it does not count as an external change.
+    onSaved: stamp => { fingerprint.current = mergeEntry(fingerprint.current, [{ name: "settings.json", ...stamp }], "settings.json"); },
+    // Conflict resolved by merging: show the merged result.
+    onMerged: merged => { settingsRef.current = merged; setSettings(merged); setStatus("Einstellungen mit Änderungen eines anderen Geräts zusammengeführt"); },
+  }));
   const [designRevision, setDesignRevision] = useState(0);
   useEffect(() => {
     const changed = () => { setDesignRevision(value => value + 1); setSettings(value => ({ ...value })); };
     window.addEventListener(designsChangedEvent, changed);
-    void invoke<StoredDesign[]>("designs_list").then(rows => rows.forEach(row => {
+    if (dataReady) void invoke<StoredDesign[]>("designs_list").then(rows => rows.forEach(row => {
       if (!getUserDesigns().some(stored => stored.id === row.id)) registerUserDesign(row.id, row.design);
     })).catch(() => setStatus("Eigene Designs konnten nicht geladen werden."));
     return () => window.removeEventListener(designsChangedEvent, changed);
-  }, []);
+  }, [dataReady]);
   useEffect(() => {
+    if (!dataReady) return;
+    // Derived value, device-local: updates state and cache only and never writes settings.json.
     void defaultLogFolder().then(logFolder => {
-      if (!settingsRef.current.logFolder) changeSettings({ ...settingsRef.current, logFolder });
+      if (!settingsRef.current.logFolder) { const next = normalizeSettings({ ...settingsRef.current, logFolder }); settingsRef.current = next; setSettings(next); saveSettings(next); }
     }).catch(reason => setStatus(`Protokollordner: ${String(reason)}`));
-  }, []);
+  }, [dataReady]);
+  const applyLoadedSettings = (loaded: Settings) => { settingsRef.current = loaded; setSettings(loaded); };
+  const refreshFingerprint = async () => { try { fingerprint.current = await dataDirFingerprint(); } catch { fingerprint.current = null; } };
+  /** Status -> dialog (setup / unreachable) -> settings_load -> ready. Re-entered after a dialog choice. */
+  const bootstrapData = async (firstSetup = false): Promise<boolean> => {
+    let next: DataDirStatus;
+    try { next = await dataDirStatus(); }
+    catch (reason) { settingsSync.block(); setDataError(String(reason)); setDataPhase("error"); return false; }
+    setDataError("");
+    setDataStatus(next);
+    if (!next.configured) { settingsSync.block(); setDataPhase("setup"); return false; }
+    if (!next.reachable) { settingsSync.block(); setDataPhase("unreachable"); return false; }
+    // localStorage is migrated into a missing settings.json only on first setup with the default folder or after
+    // the user chose to copy the old data (marker set before the restart). Otherwise defaults apply.
+    const migrate = takeMigrateFlag() || firstSetup;
+    const loaded = await settingsSync.load({ migrate });
+    if (loaded) applyLoadedSettings(loaded);
+    await refreshFingerprint();
+    setDataPhase("ready");
+    return true;
+  };
+  const bootstrapped = useRef(false);
+  useEffect(() => { if (bootstrapped.current) return; bootstrapped.current = true; void bootstrapData(); }, []);
+  /** Folder switched: block every write path, remember the copy choice for the next start, then restart. */
+  const lockForSwitch = (copy: boolean) => {
+    settingsSync.lock();
+    setMigrateFlag(copy);
+    setRestartRequired(true);
+  };
+  const finishSwitch = async (copy: boolean) => {
+    lockForSwitch(copy);
+    try { await appRestart(); } catch (reason) { setRestartError(String(reason)); }
+  };
+  const retryRestart = async () => {
+    setRestartBusy(true); setRestartError("");
+    try { await appRestart(); } catch (reason) { setRestartError(String(reason)); }
+    finally { setRestartBusy(false); }
+  };
+  /** Startup dialogs: the default folder continues in place, any other folder needs a restart. */
+  const applyStartupChoice = (firstSetup: boolean) => async (path: string | null, copy: boolean) => {
+    await dataDirSet(path, copy);
+    if (path === null) { setSetupNotice(""); setDataPhase("checking"); await bootstrapData(firstSetup); } else await finishSwitch(copy);
+  };
+  const retryDataDir = (): Promise<boolean> => bootstrapData();
+  const [dataErrorBusy, setDataErrorBusy] = useState(false);
+  const [dataErrorAction, setDataErrorAction] = useState("");
+  const runDataErrorAction = async (action: () => Promise<void>) => {
+    setDataErrorBusy(true); setDataErrorAction("");
+    try { await action(); } catch (reason) { setDataErrorAction(String(reason)); }
+    finally { setDataErrorBusy(false); }
+  };
+  const resetPointer = async () => {
+    await dataDirResetPointer();
+    setSetupNotice(resetPointerNotice);
+    await bootstrapData();
+  };
+  const changeDataDirFrom = (current: DataDirStatus, choice: DataDirChoice) => setDataDirChange({ status: current, choice });
+  const pickForChange = async (current: DataDirStatus) => {
+    try { const path = await pickDataDir(); if (path !== null) changeDataDirFrom(current, { kind: "folder", path }); }
+    catch (reason) { setStatus(`Ordnerauswahl: ${String(reason)}`); }
+  };
   const sidebarVisible = settings.sidebarVisible;
   const setSidebarVisible = (value: boolean | ((current: boolean) => boolean)) => changeSettings({ ...settingsRef.current, sidebarVisible: typeof value === "function" ? value(settingsRef.current.sidebarVisible) : value });
   const [temporaryMenu, setTemporaryMenu] = useState(false);
@@ -201,10 +293,13 @@ export default function App() {
   const [lastTabs, setLastTabs] = useState<LastTab[]>([]);
   const [restoreQueue, setRestoreQueue] = useState<LastTab[] | null>(null);
   useEffect(() => {
-    void recentList().then(setRecents).catch(reason => setStatus(String(reason)));
-    void lastTabsList().then(setLastTabs).catch(reason => setStatus(String(reason)));
     void invoke<string>("local_shell_name").then(setShellName).catch(reason => setStatus(String(reason)));
   }, []);
+  useEffect(() => {
+    if (!dataReady) return;
+    void recentList().then(setRecents).catch(reason => setStatus(String(reason)));
+    void lastTabsList().then(setLastTabs).catch(reason => setStatus(String(reason)));
+  }, [dataReady]);
   useEffect(() => {
     const show = (event: KeyboardEvent) => {
       if (shouldFocusMenu(event, !!(document.activeElement?.closest(".terminal-panel, .xterm, .editor-view, .cm-editor"))) && !document.querySelector("dialog[open]")) {
@@ -419,10 +514,12 @@ export default function App() {
     closeAnswer.current = null;
     resolve?.(answer);
   };
-  closeRequest.current = async () => {
-    if (windowClosing.current || closing.current.size) return;
+  // Quit and data folder switch share one sequence: SSH prompt, editor prompts, then destroy or (restart) switch + relaunch.
+  closeRequest.current = async (restart?: RestartPlan) => {
+    if (windowClosing.current || closing.current.size) return false;
     windowClosing.current = true;
     const locked: EditorHandle[] = [];
+    let done = false;
     try {
       const approved = await closeAfterSsh(() => askSshClose(), async () => {
         await Promise.all(pendingOpens.current.values());
@@ -431,13 +528,37 @@ export default function App() {
         return closeEditors(Object.keys(editorsRef.current).map(Number), false);
       });
       if (approved) {
-        const restore = terminalDescriptors(tabsRef.current);
-        await invoke("last_tabs_save", { tabs: restore });
-        await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => stopLog(tab.id)));
-        await getCurrentWindow().destroy();
+        // Without a usable data folder (setup, unreachable) there is nowhere to store the last tabs; closing must still work.
+        const saveLastTabs = async () => { if (dataReadyRef.current) await invoke("last_tabs_save", { tabs: terminalDescriptors(tabsRef.current) }); };
+        const stopLogs = async () => { await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => stopLog(tab.id))); };
+        if (restart) {
+          await runSwitch({
+            flushSettings: () => settingsSync.flush(),
+            // Approved closing also stops tunnels; the backend refuses a folder switch while any runs.
+            stopTunnels: async () => {
+              const running = (await invoke<TunnelStatus[]>("tunnel_list_status")).filter(s => ["running", "connecting", "reconnecting"].includes(s.state));
+              await Promise.all(running.map(s => invoke("tunnel_stop", { id: s.id })));
+            },
+            saveLastTabs, stopLogs,
+            setDataDir: async () => { await dataDirSet(restart.path, restart.copy); },
+            lock: () => lockForSwitch(restart.copy),
+            restart: () => appRestart(),
+            onRestartFailed: setRestartError,
+          });
+        } else {
+          await settingsSync.flush();
+          await saveLastTabs();
+          await stopLogs();
+          await getCurrentWindow().destroy();
+        }
+        done = true;
       }
-    } catch (reason) { reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason)); }
+    } catch (reason) {
+      if (restart) throw new Error(`Wechsel des Datenordners fehlgeschlagen: ${String(reason)}`);
+      reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason));
+    }
     finally { for (const handle of locked) handle.unlock(); windowClosing.current = false; }
+    return done;
   };
   const openEditor = (browserSource: BrowserTab, path: string) => {
     if (windowClosing.current) return;
@@ -540,7 +661,7 @@ export default function App() {
     const next = normalizeSettings(input);
     settingsRef.current = next;
     setSettings(next);
-    saveSettings(next);
+    settingsSync.schedule(next);
     if (next.followTerminalFolder && !settings.followTerminalFolder) {
       setTabs(current => current.map(tab => tab.cwd ? { ...tab, browserPath: tab.cwd.path } : tab));
     }
@@ -678,18 +799,52 @@ export default function App() {
   };
   const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff" && activeTab?.kind !== "folderDiff";
   const macroRecipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
-  const macros = useMacros({ activeId, recipients: macroRecipients, multiExec: gridVisible, report: setStatus, showPanel: () => { showPanel(2); collapseSidebar(false); } });
+  const macros = useMacros({ activeId, recipients: macroRecipients, multiExec: gridVisible, report: setStatus, enabled: dataReady, showPanel: () => { showPanel(2); collapseSidebar(false); } });
+  // Changes made outside (another device via the cloud folder): compare file fingerprints when the window gets focus.
+  const lastFingerprintCheck = useRef(0);
+  const checkingFingerprint = useRef(false);
+  const checkExternal = async () => {
+    if (!dataReadyRef.current || checkingFingerprint.current || settingsSync.isLocked) return;
+    const now = Date.now();
+    if (!shouldCheck(now, lastFingerprintCheck.current)) return;
+    lastFingerprintCheck.current = now;
+    checkingFingerprint.current = true;
+    try {
+      const fresh = await dataDirFingerprint();
+      const plan = planReload(fingerprint.current, fresh, settingsSync.hasPending());
+      fingerprint.current = plan.baseline;
+      let reloaded = false;
+      if (plan.reload.includes("sessions.json")) { reloadSessions(); reloaded = true; }
+      if (plan.reload.includes("tunnels.json")) { await reloadTunnels(); reloaded = true; }
+      if (plan.reload.includes("macros.json")) { await macros.reload(); reloaded = true; }
+      if (plan.reload.includes("settings.json")) {
+        const loaded = await settingsSync.reloadExternal();
+        if (loaded) { applyLoadedSettings(loaded); reloaded = true; }
+      }
+      if (reloaded) setStatus("Daten neu geladen");
+    } catch (reason) { setStatus(`Datenordner nicht lesbar: ${String(reason)}`); }
+    finally { checkingFingerprint.current = false; }
+  };
+  const checkExternalRef = useRef(checkExternal);
+  checkExternalRef.current = checkExternal;
+  useEffect(() => {
+    const onFocus = () => { void checkExternalRef.current(); };
+    const onVisible = () => { if (document.visibilityState === "visible") onFocus(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
   const tabPasteChoices = useRef(new Map<number, PasteChoice>());
   const [tabPasteCount, setTabPasteCount] = useState(0);
   useEffect(() => {
     for (const id of [...tabPasteChoices.current.keys()]) if (!tabs.some(t => t.id === id)) tabPasteChoices.current.delete(id);
     setTabPasteCount(tabPasteChoices.current.size);
   }, [tabs]);
-  useEffect(() => {
-    if (!sessionsLoaded) return;
-    const pruned = pruneRemembered(settingsRef.current.pasteRemember, savedSessions.map(s => s.id));
+  /** Only sessions deleted in this instance are pruned; orphaned entries from other devices are harmless. */
+  const sessionsDeleted = (ids: string[]) => {
+    const pruned = pruneDeleted(settingsRef.current.pasteRemember, ids);
     if (pruned !== settingsRef.current.pasteRemember) changeSettings({ ...settingsRef.current, pasteRemember: pruned });
-  }, [savedSessions, sessionsLoaded]);
+  };
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
     const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
@@ -704,13 +859,15 @@ export default function App() {
   };
   const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
+  /** Switch from the settings dialog: same prompts as "Beenden", then data_dir_set and restart. Rejects with the error shown in the dialog. */
+  const restartWithDataDir = async (path: string | null, copy: boolean) => { await closeRequest.current({ path, copy }); };
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
       <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
       <div className="workspace-body">
-      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
 
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
@@ -760,7 +917,14 @@ export default function App() {
     {tunnelConfirmation && <TunnelConfirmDialog onAnswer={accepted => { setTunnelConfirmation(null); tunnelConfirmation(accepted); }} />}
     {diffDialog && <DiffDialog onCompare={compareFiles} onClose={() => setDiffDialog(false)} />}
     {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
-    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} tabPasteCount={tabPasteCount} onResetTabPaste={() => { tabPasteChoices.current.clear(); setTabPasteCount(0); }} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} tabPasteCount={tabPasteCount} onResetTabPaste={() => { tabPasteChoices.current.clear(); setTabPasteCount(0); }} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)}
+      onChangeDataDir={current => { void pickForChange(current); }} onDefaultDataDir={current => changeDataDirFrom(current, { kind: "default", path: current.defaultPath })} />}
+    {dataDirChange && <DataDirDialog mode="change" status={dataDirChange.status} initialChoice={dataDirChange.choice} onApply={restartWithDataDir} onCancel={() => setDataDirChange(null)} />}
+    {dataPhase === "setup" && dataStatus && <DataDirDialog mode="setup" status={dataStatus} notice={setupNotice} onApply={applyStartupChoice(true)} />}
+    {dataPhase === "unreachable" && dataStatus && <DataDirDialog mode="unreachable" status={dataStatus} onApply={applyStartupChoice(false)} onRetry={retryDataDir} />}
+    {dataPhase === "error" && <DataDirErrorDialog message={dataError} busy={dataErrorBusy} error={dataErrorAction}
+      onRetry={() => void runDataErrorAction(async () => { await bootstrapData(); })} onReset={() => void runDataErrorAction(resetPointer)} />}
+    {restartRequired && <RestartDialog busy={restartBusy} error={restartError} onRestart={() => void retryRestart()} />}
     {serialPermission && <SerialPermissionDialog key={serialPermission.id} info={serialPermission.info}
       onClose={() => setSerialPermission(null)}
       onRetry={() => { setActiveId(serialPermission.id); restartTab(serialPermission.id); setSerialPermission(null); }}

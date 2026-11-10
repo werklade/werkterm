@@ -5,7 +5,6 @@ use std::fs::{self, OpenOptions};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tauri::Manager;
 
 const MAX_SIZE: u64 = 256 * 1024;
 const UI_KEYS: &str = "bg-content bg-app bg-panel bg-panel-alt bg-toolbar bg-menubar bg-input bg-hover bg-active bg-tab bg-tab-active fg-primary fg-secondary fg-muted fg-inverse accent accent-hover accent-hover-fill border border-strong focus-ring danger warning success on-accent monitor-ok monitor-warn monitor-critical selection backdrop shadow warning-bg error-bg indent-guide diff-added diff-deleted diff-added-text diff-deleted-text";
@@ -144,10 +143,7 @@ fn atomic_write(path: &Path, value: &Value) -> Result<(), String> {
 }
 
 fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_config_dir()
-        .map(|path| path.join("designs"))
-        .map_err(|e| e.to_string())
+    crate::data_dir::resolve(app).map(|path| path.join("designs"))
 }
 
 fn design_path(directory: &Path, id: &str) -> Result<PathBuf, String> {

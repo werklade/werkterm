@@ -63,7 +63,77 @@ export function normalizeSettings(input: unknown): Settings {
   return result;
 }
 export function selectedTheme(settings: Settings): TerminalTheme { return settings.theme === "design" ? getDesign(settings.design).terminal : settings.theme === "MobaXterm (importiert)" && settings.importedTheme ? settings.importedTheme : terminalThemes[settings.theme] ?? terminalThemes["Werkterm Dunkel"]; }
-export function loadSettings(): Settings {
-  try { return normalizeSettings(JSON.parse(localStorage.getItem(storageKey) ?? localStorage.getItem("linmoba.settings") ?? "null")); } catch { return { ...defaultSettings }; }
+/** Raw localStorage text (current key, then the legacy key). Only a cache: settings.json is the source of truth. */
+export function cachedSettingsText(): string | null {
+  try { return localStorage.getItem(storageKey) ?? localStorage.getItem("linmoba.settings"); } catch { return null; }
 }
+/** Synchronous cache read for the very first render (no design flicker). */
+export function loadSettings(): Settings {
+  try { return normalizeSettings(JSON.parse(cachedSettingsText() ?? "null")); } catch { return { ...defaultSettings }; }
+}
+/** Writes the localStorage cache only; the file write is done by SettingsSync. */
 export function saveSettings(settings: Settings): void { try { localStorage.setItem(storageKey, JSON.stringify(normalizeSettings(settings))); } catch { /* Session settings remain usable. */ } }
+/** Settings that describe this device (local paths). They live in localStorage only, never in settings.json. */
+export const localOnlyKeys = ["logFolder"] as const;
+const isLocalKey = (key: string): boolean => (localOnlyKeys as readonly string[]).includes(key);
+/** JSON text of the shared settings file: normalized, without device-local keys. */
+export function serializeSettings(settings: Settings): string {
+  const shared: Record<string, unknown> = { ...normalizeSettings(settings) };
+  for (const key of localOnlyKeys) delete shared[key];
+  return JSON.stringify(shared, null, 2);
+}
+const localValues = (cacheText: string | null): Pick<Settings, "logFolder"> => {
+  try { return { logFolder: normalizeSettings(JSON.parse(cacheText ?? "null")).logFolder }; } catch { return { logFolder: "" }; }
+};
+
+const isPlainObject = (value: unknown): boolean => !!value && typeof value === "object" && !Array.isArray(value);
+export type LoadOutcome = { ok: true; settings: Settings; migrated: boolean } | { ok: false; error: string };
+/**
+ * Merges the settings file with the localStorage cache.
+ * File present: it wins (except device-local keys, which come from the cache); an unreadable file is an error
+ * (never overwritten with defaults).
+ * File absent: only with `allowMigrate` the cache values are adopted once (`migrated`, to be written to the file);
+ * otherwise defaults apply and nothing is migrated.
+ */
+export function interpretLoaded(fileText: string | null, cacheText: string | null, allowMigrate = true): LoadOutcome {
+  const local = localValues(cacheText);
+  if (fileText !== null) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(fileText); } catch { return { ok: false, error: "settings.json ist kein gültiges JSON" }; }
+    if (!isPlainObject(parsed)) return { ok: false, error: "settings.json enthält kein JSON-Objekt" };
+    return { ok: true, settings: { ...normalizeSettings(parsed), ...local }, migrated: false };
+  }
+  if (cacheText === null || !allowMigrate) return { ok: true, settings: { ...normalizeSettings(null), ...local }, migrated: false };
+  try {
+    const parsed: unknown = JSON.parse(cacheText);
+    return { ok: true, settings: normalizeSettings(parsed), migrated: isPlainObject(parsed) };
+  } catch { return { ok: true, settings: normalizeSettings(null), migrated: false }; }
+}
+
+/**
+ * Three-way merge after a write conflict: keys the user changed here (mine vs. base, top level; pasteRemember
+ * per session entry) win, everything else is taken from the file as it is now (theirs). Without a known base
+ * every key that differs from theirs counts as changed here.
+ */
+export function mergeSettings(base: Settings | null, mine: Settings, theirs: Settings): Settings {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const reference = (base ?? theirs) as unknown as Record<string, unknown>;
+  const own = mine as unknown as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...theirs };
+  for (const key of new Set([...Object.keys(own), ...Object.keys(reference)])) {
+    if (key === "pasteRemember") continue;
+    if (isLocalKey(key)) { result[key] = own[key]; continue; }
+    if (same(own[key], reference[key])) continue;
+    if (own[key] === undefined) delete result[key]; else result[key] = own[key];
+  }
+  const before = (base ?? theirs).pasteRemember;
+  const global = same(mine.pasteRemember.global, before.global) ? theirs.pasteRemember.global : mine.pasteRemember.global;
+  const sessions = { ...theirs.pasteRemember.sessions };
+  for (const id of new Set([...Object.keys(mine.pasteRemember.sessions), ...Object.keys(before.sessions)])) {
+    const mineEntry = mine.pasteRemember.sessions[id];
+    if (same(mineEntry, before.sessions[id])) continue;
+    if (mineEntry === undefined) delete sessions[id]; else sessions[id] = mineEntry;
+  }
+  result.pasteRemember = { global, sessions };
+  return { ...normalizeSettings(result), logFolder: mine.logFolder };
+}

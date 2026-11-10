@@ -1,5 +1,6 @@
 mod child_env;
 mod commands;
+mod data_dir;
 mod designs;
 pub mod editor;
 mod folder_diff;
@@ -40,6 +41,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
+            data_dir::data_dir_status,
+            data_dir::data_dir_inspect,
+            data_dir::data_dir_set,
+            data_dir::data_dir_reset_pointer,
+            data_dir::settings_load,
+            data_dir::settings_save,
+            data_dir::data_dir_fingerprint,
+            data_dir::app_restart,
             designs::designs_list,
             designs::designs_save,
             designs::designs_delete,

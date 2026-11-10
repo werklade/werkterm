@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { builtInDesigns, normalizeDesign, registerUserDesign, unregisterUserDesign } from "./designs";
-import { defaultSettings, loadSettings, normalizeSettings, saveSettings, selectedTheme } from "./settings";
+import { defaultSettings, interpretLoaded, loadSettings, mergeSettings, normalizeSettings, saveSettings, selectedTheme, serializeSettings, type Settings } from "./settings";
 it("normalizes Tux settings with defaults and finite minute bounds", () => {
   expect(normalizeSettings({})).toMatchObject({ tuxEnabled: true, tuxIdleMinutes: 10 });
   expect(normalizeSettings({ tuxEnabled: false, tuxIdleMinutes: 121 })).toMatchObject({ tuxEnabled: false, tuxIdleMinutes: 120 });
@@ -81,6 +81,87 @@ describe("design settings migration", () => {
     expect(selectedTheme({ ...settings, design: user.name }).background).toBe("#123456");
     unregisterUserDesign("user-colors");
     expect(selectedTheme({ ...settings, design: "unknown" })).toEqual(builtInDesigns["Werklade Dunkel"].terminal);
+  });
+});
+
+describe("merging the settings file with the localStorage cache", () => {
+  it("prefers the file and ignores the cache", () => {
+    const outcome = interpretLoaded('{"fontSize":20}', '{"fontSize":9}');
+    expect(outcome).toMatchObject({ ok: true, migrated: false });
+    expect(outcome.ok && outcome.settings.fontSize).toBe(20);
+  });
+  it("adopts the cache once when the file is absent (migration)", () => {
+    const outcome = interpretLoaded(null, '{"shellIntegration":false,"fontSize":18}');
+    expect(outcome).toMatchObject({ ok: true, migrated: true });
+    expect(outcome.ok && outcome.settings).toMatchObject({ shellIntegration: false, fontSize: 18 });
+  });
+  it("starts with defaults and does not migrate without any cache or with a damaged cache", () => {
+    for (const cache of [null, "{broken", "null", "[]"]) {
+      const outcome = interpretLoaded(null, cache);
+      expect(outcome).toEqual({ ok: true, settings: defaultSettings, migrated: false });
+    }
+  });
+  it("never replaces an unreadable file with defaults", () => {
+    for (const text of ["", "{broken", "[]", "42", "null"]) expect(interpretLoaded(text, '{"fontSize":18}').ok).toBe(false);
+  });
+  it("validates file content like any other input", () => {
+    const outcome = interpretLoaded('{"fontSize":99,"cursorStyle":"x"}', null);
+    expect(outcome.ok && outcome.settings).toMatchObject({ fontSize: 32, cursorStyle: "block" });
+  });
+  it("serializes normalized settings as a JSON object", () => {
+    const text = serializeSettings({ ...defaultSettings, fontSize: 500 });
+    expect(JSON.parse(text)).toMatchObject({ fontSize: 32, design: "Werklade Dunkel" });
+  });
+});
+
+describe("device-local settings and migration permission", () => {
+  it("keeps logFolder out of the file text and takes it from the cache when loading", () => {
+    expect(JSON.parse(serializeSettings({ ...defaultSettings, logFolder: "D:/Logs" }))).not.toHaveProperty("logFolder");
+    const outcome = interpretLoaded('{"logFolder":"/from/other/device","fontSize":20}', '{"logFolder":"/mine"}');
+    expect(outcome.ok && outcome.settings).toMatchObject({ logFolder: "/mine", fontSize: 20 });
+    const without = interpretLoaded('{"logFolder":"/from/other/device"}', null);
+    expect(without.ok && without.settings.logFolder).toBe("");
+  });
+  it("does not migrate the cache into a missing file unless allowed", () => {
+    const cache = '{"fontSize":18,"logFolder":"/mine"}';
+    const denied = interpretLoaded(null, cache, false);
+    expect(denied).toMatchObject({ ok: true, migrated: false });
+    expect(denied.ok && denied.settings).toMatchObject({ fontSize: defaultSettings.fontSize, logFolder: "/mine" });
+    expect(interpretLoaded(null, cache, true)).toMatchObject({ ok: true, migrated: true });
+  });
+});
+
+describe("mergeSettings (write conflict)", () => {
+  const choice = { action: "paste", trim: true } as const;
+  const base: Settings = { ...defaultSettings, pasteRemember: { global: null, sessions: { a: choice } } };
+  it("keeps keys changed here and takes everything else from the current file", () => {
+    const mine = { ...base, fontSize: 16 };
+    const theirs = { ...base, tuxCount: 7, cursorStyle: "bar" as const };
+    expect(mergeSettings(base, mine, theirs)).toMatchObject({ fontSize: 16, tuxCount: 7, cursorStyle: "bar" });
+  });
+  it("lets the local change win when both sides changed the same key", () => {
+    expect(mergeSettings(base, { ...base, fontSize: 16 }, { ...base, fontSize: 22 }).fontSize).toBe(16);
+  });
+  it("adopts the file unchanged when nothing was changed here", () => {
+    const theirs = { ...base, fontSize: 22, tuxCount: 3 };
+    expect(mergeSettings(base, base, theirs)).toEqual(normalizeSettings(theirs));
+  });
+  it("merges pasteRemember per session entry", () => {
+    const mine: Settings = { ...base, pasteRemember: { global: null, sessions: { b: choice } } };
+    const theirs: Settings = { ...base, pasteRemember: { global: choice, sessions: { a: choice, c: choice } } };
+    const merged = mergeSettings(base, mine, theirs).pasteRemember;
+    expect(merged.global).toEqual(choice);
+    expect(Object.keys(merged.sessions).sort()).toEqual(["b", "c"]);
+  });
+  it("lets a local global choice win and clamps through normalization", () => {
+    const mine: Settings = { ...base, pasteRemember: { global: { action: "single-line", trim: false }, sessions: base.pasteRemember.sessions } };
+    expect(mergeSettings(base, mine, base).pasteRemember.global).toEqual({ action: "single-line", trim: false });
+  });
+  it("treats every key that differs from the file as changed here when the base is unknown", () => {
+    expect(mergeSettings(null, { ...defaultSettings, fontSize: 16 }, { ...defaultSettings, fontSize: 22, tuxCount: 7 })).toMatchObject({ fontSize: 16, tuxCount: defaultSettings.tuxCount });
+  });
+  it("always keeps the local logFolder", () => {
+    expect(mergeSettings(base, { ...base, logFolder: "/mine" }, { ...base, logFolder: "/theirs" }).logFolder).toBe("/mine");
   });
 });
 

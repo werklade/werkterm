@@ -10,7 +10,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, State};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -94,11 +94,7 @@ fn validate(t: &Tunnel, sessions: &[crate::sessions::SavedSession]) -> Result<()
     Ok(())
 }
 pub(crate) fn path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_config_dir()
-        .map_err(|_| "Konfigurationsordner fehlt")?
-        .join("tunnels.json"))
+    crate::data_dir::resolve(app).map(|dir| dir.join("tunnels.json"))
 }
 fn load(path: &Path) -> Result<Vec<Tunnel>, String> {
     let bytes = match std::fs::read(path) {
@@ -142,7 +138,7 @@ fn write_atomic(path: &Path, tunnels: Vec<Tunnel>) -> Result<(), String> {
         f.write_all(&bytes)?;
         f.sync_all()?;
         drop(f);
-        std::fs::rename(&temp, path)
+        crate::data_dir::rename_retrying(&temp, path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(temp);
@@ -751,6 +747,20 @@ impl TunnelManager {
                 .emit("tunnel-status", r.status.lock().unwrap().clone());
         }
     }
+    /// Holds the operation lock so no tunnel can start while the caller works.
+    pub(crate) async fn idle_guard(&self) -> Result<tokio::sync::MutexGuard<'_, ()>, String> {
+        let operation = self.operations.lock().await;
+        if self
+            .running
+            .lock()
+            .await
+            .values()
+            .any(|r| !r.done.is_finished())
+        {
+            return Err("Tunnel vor dem Wechsel stoppen".into());
+        }
+        Ok(operation)
+    }
     pub async fn stop_all(&self) {
         let _operation = self.operations.lock().await;
         let ids: Vec<_> = self.running.lock().await.keys().cloned().collect();
@@ -785,12 +795,7 @@ pub async fn tunnel_save(
         return Err("Tunnel vor dem Bearbeiten stoppen".into());
     }
     let _guard = crate::sessions::STORAGE_LOCK.lock().await;
-    let sessions = crate::sessions::load(
-        &app.path()
-            .app_config_dir()
-            .map_err(|_| "Konfigurationsordner fehlt")?
-            .join("sessions.json"),
-    )?;
+    let sessions = crate::sessions::load(&crate::sessions::config_path(&app)?)?;
     validate(&tunnel, &sessions)?;
     if !is_loopback(&tunnel.bind_address) && (!public_confirmed || !tunnel.allow_public) {
         return Err("Öffentliche Bind-Adresse muss bestätigt werden".into());
