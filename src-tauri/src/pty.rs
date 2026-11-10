@@ -291,6 +291,7 @@ impl PtyManager {
         let waiter_control = Arc::clone(&control);
         let writer = pair.master.take_writer().map_err(operation)?;
         let mut command = CommandBuilder::new(&spec.program);
+        crate::child_env::strip_inherited(&mut command);
         command.args(&spec.args);
         for (name, value) in &spec.env {
             command.env(name, value);

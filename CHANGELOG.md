@@ -5,8 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Paste confirmation dialog: the new list "Remember choice?" offers "Don't remember", "Remember for this tab", "Remember for the profile" (saved session) and "Remember permanently". The remembered choice is the action (paste / paste as one line) including "Remove last line break". Content with control characters always asks. With MultiExec only "Remember permanently" applies. Settings show the current state and offer "Reset remembered choice".
+- `npm run check-paths` checks release binaries for user paths of the build machine.
+
+### Changed
+
+- .deb: `libdbus-1-3` is now a dependency, `xdg-utils` a recommendation.
+- Linux packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives). The .deb now declares `libc6 (>= 2.39)`, so older systems such as Debian 12 refuse the installation instead of failing at startup.
+
 ### Fixed
 
+- Linux: black window on systems with NVIDIA graphics and the proprietary driver. At startup Werkterm sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`, under Wayland also `__NV_DISABLE_EXPLICIT_SYNC=1`, only if such a graphics card is detected and none of these variables (including `WEBKIT_DISABLE_COMPOSITING_MODE`) is set by the user. The variables are not passed on to local terminals. Disable with `WERKTERM_NO_WEBKIT_WORKAROUND=1`; force on affected systems without a detected NVIDIA card with `WERKTERM_WEBKIT_WORKAROUND=1`.
+- Release packages no longer contain directory paths of the build machine (source paths in the executable are rewritten).
+- Paste: control characters in the range U+0080–U+009F are recognized as control characters.
 - Monitor bar: RAM is now shown in binary units (GiB, tooltip MiB) and matches what Proxmox and `free -h` report. Before, 93.46 GiB appeared as 100.35 GB.
 
 ## [0.1.7] – 2026-11-08

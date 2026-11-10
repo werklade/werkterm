@@ -22,7 +22,7 @@ Werkterm ist ein privates, unabhängiges Projekt ohne Verbindung zu Mobatek. Es 
 
 ## Funktionen
 
-- **Terminals:** lokal Bash/konfigurierte Shell unter Linux; PowerShell, cmd und WSL unter Windows. Hardware-Übersicht unter Linux und Windows, Root-Terminal und Prozesse unter Linux; SSH-, Telnet- und serielle Sitzungen. Tabs, Split-Ansichten, MultiExec, Einstellungen für Schrift/Cursor/Scrollback/Farben. Kontextmenü: Kopieren, Alles kopieren, Leeren, Speichern als TXT/HTML/RTF. Bearbeitbare Einfüge-Rückfrage, Sitzungs-Logging und Schließen-Rückfrage. Ende-Menü: Return schließt, R verbindet im selben Tab erneut, S speichert die Ausgabe.
+- **Terminals:** lokal Bash/konfigurierte Shell unter Linux; PowerShell, cmd und WSL unter Windows. Hardware-Übersicht unter Linux und Windows, Root-Terminal und Prozesse unter Linux; SSH-, Telnet- und serielle Sitzungen. Tabs, Split-Ansichten, MultiExec, Einstellungen für Schrift/Cursor/Scrollback/Farben. Kontextmenü: Kopieren, Alles kopieren, Leeren, Speichern als TXT/HTML/RTF. Bearbeitbare Einfüge-Rückfrage mit merkbarer Auswahl (pro Tab, pro gespeicherter Sitzung oder dauerhaft), Sitzungs-Logging und Schließen-Rückfrage. Ende-Menü: Return schließt, R verbindet im selben Tab erneut, S speichert die Ausgabe.
 - **SSH:** eine Verbindung mit Shell- und SFTP-Kanälen, exec-Listing-Fallback, Hostkey-Prüfung gegen `known_hosts`, Agent-/Schlüssel- (einschließlich `.ppk`)/Passwortanmeldung, Keepalive und Jump-host-Ketten. Tunnel-Manager für `-L`, `-R` und SOCKS5 mit eigenen Hintergrundverbindungen, Autostart, Reconnect und Status. Monitoring-Leiste mit Tooltips für Host, CPU, RAM, Netzwerk, Laufzeit, Benutzer und Dateisysteme.
 - **SFTP-Browser:** Follow Terminal Folder über OSC 7, Navigation, Sortierung, Dateitransfers mit Warteschlange, Fortschritt/Abbruch und Drag & Drop. Dateien/Ordner anlegen, rekursiv mit Bestätigung löschen, rekursives chmod mit getrennten Einstellungen für Dateien/Ordner, sudo-Modus und „Zum Vergleich merken“. Auch lokale und WSL-Verzeichnisse lassen sich anzeigen.
 - **Sitzungen:** Ordner, Suche, Quick connect, zuletzt verwendete Sitzungen und Wiederherstellen letzter Tabs. Sitzungsimport aus MobaXterm und WindTerm; Farbimport aus MobaXterm. Gespeicherte Passwörter liegen im System-Schlüsselbund. Verschlüsselte importierte Passwörter werden nicht wiederhergestellt.
@@ -37,7 +37,7 @@ Linux x86_64 mit WebKitGTK 4.1 und GTK 3: Laufzeitpakete auf Debian-basierten Sy
 
 ## Installation
 
-Fertige Pakete (`.deb`, AppImage, `SHA256SUMS`) hängen am GitHub-Release, sichtbar für eingeladene Tester; alternativ lassen sie sich wie unten beschrieben selbst bauen. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung.
+Fertige Pakete (`.deb`, AppImage, `SHA256SUMS`) hängen am GitHub-Release, sichtbar für eingeladene Tester; alternativ lassen sie sich wie unten beschrieben selbst bauen. Die Pakete setzen glibc 2.39 oder neuer voraus (Debian 13, Ubuntu 24.04 und Abkömmlinge); Debian 12 und Ubuntu 22.04 werden nicht unterstützt. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung.
 
 Debian-basierte Systeme, Bash (installiert ein Systempaket):
 
@@ -60,6 +60,29 @@ Windows: `Werkterm_0.1.7_x64-setup.exe` ausführen (installiert für den aktuell
 
 Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum -c SHA256SUMS`, Windows-PowerShell: `Get-FileHash <Datei>`).
 
+### Linux: Darstellungsprobleme / schwarzes Fenster
+
+Auf Systemen mit NVIDIA-Grafik und proprietärem Treiber kann das Fenster schwarz bleiben. Erkennt Werkterm eine solche Grafikkarte, setzt es beim Start `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unter Wayland zusätzlich `__NV_DISABLE_EXPLICIT_SYNC=1`. Das geschieht nicht, wenn eine dieser Variablen oder `WEBKIT_DISABLE_COMPOSITING_MODE` vom Nutzer gesetzt ist. Die Variablen werden nicht an lokale Terminals weitergegeben. Programme, die über die Desktop-Umgebung geöffnet werden (etwa der Dateimanager für den Log-Ordner), erben sie weiterhin.
+
+| Variable | Wirkung |
+| --- | --- |
+| `WERKTERM_NO_WEBKIT_WORKAROUND=1` | Schaltet die automatische Umgehung ab. |
+| `WERKTERM_WEBKIT_WORKAROUND=1` | Erzwingt die Umgehung, für betroffene Systeme ohne erkannte NVIDIA-Karte. |
+
+Beispiel, Bash:
+
+```bash
+WERKTERM_WEBKIT_WORKAROUND=1 werkterm
+```
+
+Auf echter NVIDIA-Hardware noch nicht bestätigt.
+
+AppImage: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, half bei einem Test der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0`. Das ist der Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade. Übergangslösung: Das AppImage liefert derzeit keine GStreamer-Plugins mit.
+
+```bash
+GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
+```
+
 ## Selbst bauen
 
 Benötigt werden Linux x86_64, Rust stable mit Unterstützung für Edition 2024, Node.js mit npm und die [offiziellen Tauri-Linux-Abhängigkeiten](https://v2.tauri.app/start/prerequisites/). Windows-Pakete werden unter Windows gebaut. Das Frontend verwendet TypeScript `~6.0.3`; Manifeste und Lockdateien legen Abhängigkeiten fest. Das Projekt nennt keine minimale Node.js-Version.
@@ -78,6 +101,14 @@ npm run tauri build
 ```
 
 Ausgabe: `src-tauri/target/release/bundle/{deb,appimage}` unter Linux, `src-tauri/target/release/bundle/{nsis,msi}` unter Windows (laufende Dev-Instanz vorher beenden). Zur Prüfung die erzeugten Dateien kontrollieren und installiertes Paket oder AppImage starten.
+
+Nach dem Release-Build die Programmdatei auf Benutzerpfade des Build-Rechners prüfen (Bash oder PowerShell, Projektverzeichnis):
+
+```bash
+npm run check-paths
+```
+
+Ohne Argumente wird `src-tauri/target/release/werkterm` geprüft (unter Windows `werkterm.exe`); andere Dateien oder Verzeichnisse, etwa ein entpacktes AppImage, lassen sich nach `--` angeben. Pakete (`.deb`, AppImage, `.msi`) sind komprimierte Container und werden nicht direkt durchsucht. Erfolg: Ausgabe `check-paths: 0 user paths in <n> file(s)`, Exit-Code 0; bei Funden ist der Exit-Code 1.
 
 Tests, Bash:
 
@@ -110,6 +141,7 @@ Das Rust-Backend verwendet Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyr
 - Exec-Listing benötigt GNU-kompatible Werkzeuge und bietet keine SFTP-Schreibaktionen/Transfers.
 - Secret Service oder Sitzungs-D-Bus können insbesondere unter WSL fehlen; gespeicherte Passwortoperationen melden dann einen Fehler.
 - Windows-/WSL-Entwicklung: WSL-Tabs nutzen die Standarddistribution; PowerShell-UNC-Verzeichnislisting ist nicht bestätigt.
+- AppImage ohne GStreamer-Plugins: siehe „Linux: Darstellungsprobleme / schwarzes Fenster“.
 - Die Linux-Seriell-Berechtigungshilfe benötigt noch einen Gerätetest in der paketierten Anwendung. STATUS.md nennt außerdem die SSH-Schließen-Rückfrage auf Fensterebene als manuell zu prüfen.
 
 ## Ausblick

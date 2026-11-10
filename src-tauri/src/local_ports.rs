@@ -201,7 +201,12 @@ fn inventory() -> Result<Vec<LocalPort>, String> {
 #[cfg(target_os = "windows")]
 fn inventory() -> Result<Vec<LocalPort>, String> {
     use std::{os::windows::process::CommandExt, process::Command};
-    let output = Command::new("netstat")
+    let command = |program: &str| {
+        let mut command = Command::new(program);
+        crate::child_env::strip_inherited(&mut command);
+        command
+    };
+    let output = command("netstat")
         .arg("-ano")
         .creation_flags(0x08000000)
         .output()
@@ -210,7 +215,7 @@ fn inventory() -> Result<Vec<LocalPort>, String> {
         return Err("netstat ist fehlgeschlagen.".into());
     }
     let mut ports = parse_netstat(&String::from_utf8_lossy(&output.stdout));
-    let names = Command::new("tasklist")
+    let names = command("tasklist")
         .args(["/FO", "CSV", "/NH"])
         .creation_flags(0x08000000)
         .output()

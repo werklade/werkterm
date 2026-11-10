@@ -1,9 +1,12 @@
+mod child_env;
 mod commands;
 mod designs;
 pub mod editor;
 mod folder_diff;
 mod icon_sets;
 mod keygen;
+#[cfg(any(target_os = "linux", test))]
+pub mod linux_graphics;
 pub mod local_fs;
 mod local_ports;
 mod macros;

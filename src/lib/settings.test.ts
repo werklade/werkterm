@@ -13,6 +13,13 @@ it("normalizes Tux settings with defaults and finite minute bounds", () => {
 });
 describe("settings validation and migration", () => {
   afterEach(() => vi.unstubAllGlobals());
+  it("validates remembered paste choices", () => {
+    expect(normalizeSettings({}).pasteRemember).toEqual({ global: null, sessions: {} });
+    expect(normalizeSettings({ pasteRemember: "x" }).pasteRemember).toEqual({ global: null, sessions: {} });
+    const valid = { global: { action: "paste", trim: true }, sessions: { a: { action: "single-line", trim: false }, b: { action: "bad", trim: false } } };
+    expect(normalizeSettings({ pasteRemember: valid }).pasteRemember).toEqual({ global: { action: "paste", trim: true }, sessions: { a: { action: "single-line", trim: false } } });
+    expect(normalizeSettings(normalizeSettings({ pasteRemember: valid }))).toEqual(normalizeSettings({ pasteRemember: valid }));
+  });
   it("defaults invalid and old settings without losing existing booleans", () => {
     for (const input of [null, [], "invalid", 42]) expect(normalizeSettings(input)).toEqual(defaultSettings);
     expect(normalizeSettings({ followTerminalFolder: false, sshPromptCommand: false })).toEqual({ ...defaultSettings, design: "Werkterm Dunkel", iconSet: "Standard", theme: "Werkterm Dunkel", followTerminalFolder: false, sshPromptCommand: false });

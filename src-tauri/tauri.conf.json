@@ -47,9 +47,14 @@
     "linux": {
       "deb": {
         "section": "net",
+        "depends": [
+          "libdbus-1-3",
+          "libc6 (>= 2.39)"
+        ],
         "recommends": [
           "gnome-keyring",
-          "fonts-noto-color-emoji"
+          "fonts-noto-color-emoji",
+          "xdg-utils"
         ],
         "desktopTemplate": "linux/werkterm.desktop.hbs"
       }

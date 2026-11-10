@@ -208,6 +208,11 @@ input::placeholder { color: var(--fg-muted); }
 .kind-icon { position: relative; display: inline-flex; width: 14px; height: 14px; flex-shrink: 0; margin-right: 5px; }
 .kind-icon .icon, .kind-icon svg { width: 14px; height: 14px; }
 .paste-dialog { width: min(680px, 90vw); }
+.settings-remembered { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; color: var(--fg-secondary); }
+.paste-actions { align-items: center; }
+.paste-remember { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-right: auto; color: var(--fg-secondary); }
+.paste-remember-hint { flex-basis: 100%; order: -1; color: var(--fg-secondary); }
+.paste-remember select { padding: 6px; border: 1px solid var(--border-strong); border-radius: var(--radius); }
 .paste-dialog textarea { width: 100%; min-height: 220px; font-family: monospace; resize: vertical; }
 .log-indicator { color: var(--danger); margin-left: 5px; }
 .workspace-header, .workspace-body { display: flex; min-width: 0; }

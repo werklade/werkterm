@@ -146,16 +146,16 @@ mod tests {
 
     #[test]
     fn display_path_drops_verbatim_prefix() {
-        assert_eq!(display_local_path(r"\\?\C:\Users\marck"), r"C:\Users\marck");
+        assert_eq!(display_local_path(r"\\?\C:\Users\alice"), r"C:\Users\alice");
         assert_eq!(display_local_path(r"\\?\UNC\srv\share"), r"\\srv\share");
-        assert_eq!(display_local_path("/home/marck"), "/home/marck");
+        assert_eq!(display_local_path("/home/alice"), "/home/alice");
     }
 
     #[test]
     fn converts_wsl_paths_without_escaping_share() {
         assert_eq!(
-            wsl_unc_path("Ubuntu", "/home/marck").unwrap(),
-            PathBuf::from(r"\\wsl.localhost\Ubuntu\home\marck")
+            wsl_unc_path("Ubuntu", "/home/alice").unwrap(),
+            PathBuf::from(r"\\wsl.localhost\Ubuntu\home\alice")
         );
         assert_eq!(
             wsl_unc_path("Ubuntu-24.04", "/").unwrap(),

@@ -59,7 +59,7 @@ import { useModal } from "./components/useModal";
 import "./styles/theme.css";
 import "./App.css";
 import { PasteDialog } from "./components/PasteDialog";
-import { shouldConfirmPaste } from "./lib/paste";
+import { applyPasteChoice, pruneRemembered, rememberChoice, resolveRemembered, shouldConfirmPaste, type PasteChoice } from "./lib/paste";
 import { defaultLogFolder, openLogFolder, startLog, stopLog, terminalPasteRequests } from "./lib/sessionLog";
 import { gridColumns, inputTargets, terminalWriters } from "./lib/multiExec";
 
@@ -99,7 +99,7 @@ export default function App() {
   const [multiExec, setMultiExec] = useState(false);
   const beforeMultiExec = useRef<number | null>(null);
   const [unchecked, setUnchecked] = useState<Set<number>>(() => new Set());
-  const [pasteRequest, setPasteRequest] = useState<{ targets: number[]; data: string; multiExec: boolean } | null>(null);
+  const [pasteRequest, setPasteRequest] = useState<{ targets: number[]; data: string; multiExec: boolean; source: number } | null>(null);
   const [logPaths, setLogPaths] = useState<Record<number, string>>({});
   const logBusy = useRef(new Set<number>());
   const onLog = useCallback((id: number, path: string | null) => setLogPaths(current => { const next = { ...current }; if (path) next[id] = path; else delete next[id]; return next; }), []);
@@ -679,12 +679,26 @@ export default function App() {
   const gridVisible = multiExec && activeId !== 0 && activeTab?.kind !== "editor" && activeTab?.kind !== "diff" && activeTab?.kind !== "folderDiff";
   const macroRecipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
   const macros = useMacros({ activeId, recipients: macroRecipients, multiExec: gridVisible, report: setStatus, showPanel: () => { showPanel(2); collapseSidebar(false); } });
-  const pendingPasteSource = useRef<number | null>(null);
+  const tabPasteChoices = useRef(new Map<number, PasteChoice>());
+  const [tabPasteCount, setTabPasteCount] = useState(0);
+  useEffect(() => {
+    for (const id of [...tabPasteChoices.current.keys()]) if (!tabs.some(t => t.id === id)) tabPasteChoices.current.delete(id);
+    setTabPasteCount(tabPasteChoices.current.size);
+  }, [tabs]);
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    const pruned = pruneRemembered(settingsRef.current.pasteRemember, savedSessions.map(s => s.id));
+    if (pruned !== settingsRef.current.pasteRemember) changeSettings({ ...settingsRef.current, pasteRemember: pruned });
+  }, [savedSessions, sessionsLoaded]);
   const receiveInput = (focused: number, data: string, pasted: boolean) => {
     const recipients = terminals.map(tab => ({ id: tab.id, exited: tab.exited || !terminalWriters.has(tab.id), checked: !unchecked.has(tab.id) }));
     const targets = gridVisible ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);
     if (!targets.length) return;
-    if (pasted && shouldConfirmPaste(data, settings.pasteConfirm)) { if (!pasteRequest) pendingPasteSource.current = focused; setPasteRequest(current => current ?? { targets, data, multiExec: gridVisible }); return; }
+    if (pasted && shouldConfirmPaste(data, settings.pasteConfirm)) {
+      const remembered = resolveRemembered({ text: data, multiExec: gridVisible, tabChoice: tabPasteChoices.current.get(focused), sessionId: tabs.find(t => t.id === focused)?.savedSessionId, remember: settings.pasteRemember });
+      if (remembered) data = applyPasteChoice(data, remembered);
+      else { setPasteRequest(current => current ?? { targets, data, multiExec: gridVisible, source: focused }); return; }
+    }
     macros.capture(focused, pasted ? data.replace(/\r\n|\n/g, "\r") : data);
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
@@ -726,9 +740,18 @@ export default function App() {
     </div>
     <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>Makro abbrechen</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
     {macros.dialogs}
-    {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} onAnswer={text => {
-      if (text !== null && pendingPasteSource.current !== null && tabsRef.current.some(t => t.id === pendingPasteSource.current && !t.exited)) macros.capture(pendingPasteSource.current, text.replace(/\r\n|\n/g, "\r"));
-      pendingPasteSource.current = null;
+    {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} hasProfile={!pasteRequest.multiExec && !!tabs.find(t => t.id === pasteRequest.source)?.savedSessionId} onAnswer={(text, remember) => {
+      if (text !== null && remember && (remember.scope === "global" || !pasteRequest.multiExec)) {
+        const source = pasteRequest.source;
+        if (remember.scope === "tab") {
+          if (tabsRef.current.some(t => t.id === source)) { tabPasteChoices.current.set(source, remember.choice); setTabPasteCount(tabPasteChoices.current.size); } else setStatus("Auswahl nicht gemerkt");
+        } else {
+          const before = settingsRef.current.pasteRemember;
+          const after = rememberChoice(before, remember.scope, tabsRef.current.find(t => t.id === source)?.savedSessionId, remember.choice);
+          if (after === before) setStatus("Auswahl nicht gemerkt"); else changeSettings({ ...settingsRef.current, pasteRemember: after });
+        }
+      }
+      if (text !== null && tabsRef.current.some(t => t.id === pasteRequest.source && !t.exited)) macros.capture(pasteRequest.source, text.replace(/\r\n|\n/g, "\r"));
       if (text !== null) pasteRequest.targets.forEach(id => { if (tabsRef.current.some(t => t.id === id && !t.exited)) terminalWriters.get(id)?.(text, true); });
       setPasteRequest(null);
       requestAnimationFrame(() => document.querySelector<HTMLElement>(`#terminal-${activeId} .xterm-helper-textarea`)?.focus());
@@ -737,7 +760,7 @@ export default function App() {
     {tunnelConfirmation && <TunnelConfirmDialog onAnswer={accepted => { setTunnelConfirmation(null); tunnelConfirmation(accepted); }} />}
     {diffDialog && <DiffDialog onCompare={compareFiles} onClose={() => setDiffDialog(false)} />}
     {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
-    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} tabPasteCount={tabPasteCount} onResetTabPaste={() => { tabPasteChoices.current.clear(); setTabPasteCount(0); }} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)} />}
     {serialPermission && <SerialPermissionDialog key={serialPermission.id} info={serialPermission.info}
       onClose={() => setSerialPermission(null)}
       onRetry={() => { setActiveId(serialPermission.id); restartTab(serialPermission.id); setSerialPermission(null); }}

@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { defaultLogFolder } from "../lib/sessionLog";
 import { useModal } from "./useModal";
+import { describeRemembered, hasRemembered, resetRemembered } from "../lib/paste";
 import { defaultSettings, normalizeSettings, selectedTheme, type Settings } from "../lib/settings";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "../lib/terminalThemes";
 function NumberSetting({ label, value, min, max, step, onValue }: { label: string; value: number; min: number; max: number; step: number; onValue(value: number): void }) {
@@ -21,7 +22,7 @@ function NumberSetting({ label, value, min, max, step, onValue }: { label: strin
     setDraft(String(next)); onValue(next);
   }} /></label>;
 }
-export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: { settings: Settings; onChange(settings: Settings): void; onClose(): void; onClearRecents(): void }) {
+export function SettingsDialog({ settings, onChange, onClose, onClearRecents, tabPasteCount = 0, onResetTabPaste }: { settings: Settings; onChange(settings: Settings): void; onClose(): void; onClearRecents(): void; tabPasteCount?: number; onResetTabPaste?(): void }) {
   const dialog = useModal();
   const [tab, setTab] = useState("Terminal");
   const [error, setError] = useState("");
@@ -51,6 +52,7 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents }: 
     <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="settings-fields">{tab === "Terminal" ? <>
       <h3>Tux-Wanderer</h3>{check("Tux-Wanderer aktivieren", "tuxEnabled")}{number("Inaktivität (Minuten)", "tuxIdleMinutes", 1, 120)}{number("Anzahl Tuxe", "tuxCount", 1, 8)}<button onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event(tuxTestEvent)), 100); }}>Jetzt testen</button>
       <label>Einfügen bestätigen<select value={settings.pasteConfirm} onChange={e => change({ pasteConfirm: e.target.value as Settings["pasteConfirm"] })}><option value="multiline">Bei mehreren Zeilen</option><option value="always">Immer</option><option value="never">Nie</option></select></label>
+      <div className="settings-remembered"><span role="status">{describeRemembered(settings.pasteRemember, tabPasteCount)}</span><button type="button" disabled={!hasRemembered(settings.pasteRemember, tabPasteCount)} onClick={() => { change({ pasteRemember: resetRemembered() }); onResetTabPaste?.(); }}>Gemerkte Auswahl zurücksetzen</button></div>
       <label>Schriftart<input list="mono-fonts" value={settings.fontFamily} onChange={e => change({ fontFamily: e.target.value })} /></label><datalist id="mono-fonts">{["Cascadia Mono", "DejaVu Sans Mono", "Consolas", "Liberation Mono", "Ubuntu Mono", "monospace"].map(font => <option key={font} value={font} />)}</datalist>
       {number("Schriftgröße", "fontSize", 8, 32)}{number("Zeilenhöhe", "lineHeight", 1, 2, .1)}
       <label>Cursorform<select value={settings.cursorStyle} onChange={e => change({ cursorStyle: e.target.value as Settings["cursorStyle"] })}><option value="block">Block</option><option value="bar">Strich</option><option value="underline">Unterstrich</option></select></label>

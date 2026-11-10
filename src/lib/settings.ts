@@ -1,10 +1,12 @@
 import { getDesign } from "./designs";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
+import { emptyPasteRemember, normalizePasteRemember, type PasteRemember } from "./paste";
 export interface Settings {
   design: string;
   iconSet: string;
   tuxEnabled: boolean; tuxIdleMinutes: number; tuxCount: number;
   logFolder: string; logAllSessions: boolean; logStripAnsi: boolean; pasteConfirm: import("./paste").PasteConfirm;
+  pasteRemember: PasteRemember;
   copyOnSelect: boolean; rightClick: "menu" | "paste";
   confirmCloseSsh: boolean;
   splitMode: "single" | "columns" | "rows" | "quad";
@@ -19,7 +21,7 @@ export const defaultSettings: Settings = {
   design: "Werklade Dunkel",
   iconSet: "Werklade",
   tuxEnabled: true, tuxIdleMinutes: 10, tuxCount: 4,
-  logFolder: "", logAllSessions: false, logStripAnsi: true, pasteConfirm: "multiline",
+  logFolder: "", logAllSessions: false, logStripAnsi: true, pasteConfirm: "multiline", pasteRemember: emptyPasteRemember(),
   copyOnSelect: true, rightClick: "menu",
   confirmCloseSsh: true,
   splitMode: "single",
@@ -32,7 +34,7 @@ export const defaultSettings: Settings = {
 const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
   const v = input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
-  const result = { ...defaultSettings };
+  const result = { ...defaultSettings, pasteRemember: normalizePasteRemember(v.pasteRemember) };
   if (input && typeof input === "object" && !Array.isArray(input)) {
     result.iconSet = typeof v.iconSet === "string" && v.iconSet.trim() ? v.iconSet.slice(0,64) : "Standard";
     result.design = typeof v.design === "string" ? v.design.slice(0,60) : "Werkterm Dunkel";

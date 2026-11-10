@@ -22,7 +22,7 @@ Werkterm is a private, independent project with no affiliation to Mobatek. It ha
 
 ## Features
 
-- **Terminals:** local Bash/configured shell on Linux; PowerShell, cmd and WSL on Windows. Hardware overview on Linux and Windows, root terminal and processes on Linux; SSH, Telnet and serial sessions. Tabs, split views, MultiExec, font/cursor/scrollback/color settings. Context menu: copy, copy all, clear, save as TXT/HTML/RTF. Editable paste confirmation, session logging and close confirmation. Session-end menu: Return closes, R reconnects in the same tab, S saves output.
+- **Terminals:** local Bash/configured shell on Linux; PowerShell, cmd and WSL on Windows. Hardware overview on Linux and Windows, root terminal and processes on Linux; SSH, Telnet and serial sessions. Tabs, split views, MultiExec, font/cursor/scrollback/color settings. Context menu: copy, copy all, clear, save as TXT/HTML/RTF. Editable paste confirmation that can remember the choice per tab, per saved session or permanently, session logging and close confirmation. Session-end menu: Return closes, R reconnects in the same tab, S saves output.
 - **SSH:** one connection with shell and SFTP channels, exec listing fallback, host-key verification against `known_hosts`, agent/key (including `.ppk`)/password authentication, keepalive and jump-host chains. Tunnel manager for `-L`, `-R` and SOCKS5, with separate background connections, autostart, reconnect and status. Monitoring bar with tooltips for host, CPU, RAM, network, uptime, users and filesystems.
 - **SFTP browser:** Follow Terminal Folder via OSC 7, navigation, sorting, queued file transfers with progress/cancellation and drag and drop. Create files/directories, confirmed recursive deletion, recursive chmod with separate file/directory settings, sudo mode and “remember for comparison”. Local and WSL directory browsing is also available.
 - **Sessions:** folders, search, quick connect, recent sessions and last-tab restoration. Session import from MobaXterm and WindTerm; color import from MobaXterm. Saved passwords use the system keyring. Encrypted imported passwords are not recovered.
@@ -37,7 +37,7 @@ Linux x86_64 with WebKitGTK 4.1 and GTK 3: Debian-family runtime packages includ
 
 ## Installing
 
-Prebuilt packages (`.deb`, AppImage, `SHA256SUMS`) are attached to the GitHub release, visible to invited testers; alternatively build them as described below. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names.
+Prebuilt packages (`.deb`, AppImage, `SHA256SUMS`) are attached to the GitHub release, visible to invited testers; alternatively build them as described below. The packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives); Debian 12 and Ubuntu 22.04 are not supported. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names.
 
 Debian-family systems, Bash (installs a system package):
 
@@ -60,6 +60,29 @@ Windows: run `Werkterm_0.1.7_x64-setup.exe` (installs for the current user, no a
 
 Check downloads against `SHA256SUMS` (Linux: `sha256sum -c SHA256SUMS`, Windows PowerShell: `Get-FileHash <file>`).
 
+### Linux: display problems / black window
+
+On systems with NVIDIA graphics and the proprietary driver, the window can stay black. If it detects such a graphics card, Werkterm sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup, under Wayland also `__NV_DISABLE_EXPLICIT_SYNC=1`. This does not happen if you have set one of these variables or `WEBKIT_DISABLE_COMPOSITING_MODE` yourself. The variables are not passed on to local terminals. Programs opened through the desktop (for example the file manager for the log folder) still inherit them.
+
+| Variable | Effect |
+| --- | --- |
+| `WERKTERM_NO_WEBKIT_WORKAROUND=1` | Disables the automatic workaround. |
+| `WERKTERM_WEBKIT_WORKAROUND=1` | Forces the workaround, for affected systems without a detected NVIDIA card. |
+
+Example, Bash:
+
+```bash
+WERKTERM_WEBKIT_WORKAROUND=1 werkterm
+```
+
+Not yet confirmed on real NVIDIA hardware.
+
+AppImage: if the window stays black or rendering crashes even so, starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` helped in one test. This is the Debian/Ubuntu path; other distributions use different paths. Interim workaround: the AppImage currently ships no GStreamer plugins.
+
+```bash
+GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
+```
+
 ## Building
 
 Use Linux x86_64, Rust stable with Edition 2024 support, Node.js with npm and the [official Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/). Windows packages are built on Windows. The frontend uses TypeScript `~6.0.3`; manifests and lockfiles define dependencies. The project declares no minimum Node.js version.
@@ -78,6 +101,14 @@ npm run tauri build
 ```
 
 Output: `src-tauri/target/release/bundle/{deb,appimage}` on Linux, `src-tauri/target/release/bundle/{nsis,msi}` on Windows (stop a running dev instance first). Verify the generated artifacts and launch the installed package or AppImage.
+
+After the release build, check the binaries for user paths of the build machine (Bash or PowerShell, project root):
+
+```bash
+npm run check-paths
+```
+
+Without arguments it checks `src-tauri/target/release/werkterm` (`werkterm.exe` on Windows); other files or directories, for example an extracted AppImage, can be passed after `--`. Packages (`.deb`, AppImage, `.msi`) are compressed containers and are not scanned directly. Success: output `check-paths: 0 user paths in <n> file(s)`, exit code 0; with findings the exit code is 1.
 
 Tests, Bash:
 
@@ -110,6 +141,7 @@ The Rust backend uses Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyring` 
 - Exec listing requires GNU-compatible tools and does not provide SFTP writes/transfers.
 - Secret Service or session D-Bus may be unavailable, especially under WSL; saved-password operations then report an error.
 - Windows/WSL development: WSL tabs use the default distribution; PowerShell UNC directory listing is not confirmed.
+- AppImage without GStreamer plugins: see "Linux: display problems / black window".
 - Linux serial-permission assistance still needs a real-device test in the packaged application. STATUS.md also lists window-level SSH close confirmation as awaiting manual verification.
 
 ## Roadmap
