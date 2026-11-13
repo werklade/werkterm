@@ -645,9 +645,16 @@ mod tests {
                 .unwrap()
                 .contains_key(&cleanup.id)
         );
+        assert_exit_sender_dropped(&exit);
+    }
+
+    /// on_exit drops its sender only after `send` returns, so the receiver can
+    /// observe `Empty` briefly. Wait for the disconnect instead of polling once.
+    #[cfg(unix)]
+    fn assert_exit_sender_dropped(exit: &mpsc::Receiver<Option<u32>>) {
         assert!(matches!(
-            exit.try_recv(),
-            Err(mpsc::TryRecvError::Disconnected)
+            exit.recv_timeout(Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
         ));
     }
 
@@ -671,10 +678,7 @@ mod tests {
                 .unwrap()
                 .contains_key(&cleanup.id)
         );
-        assert!(matches!(
-            exit.try_recv(),
-            Err(mpsc::TryRecvError::Disconnected)
-        ));
+        assert_exit_sender_dropped(&exit);
     }
 
     #[test]
