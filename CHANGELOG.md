@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Ctrl+mouse wheel and the two-finger zoom gesture now change the font size of the terminal or editor tab under the pointer instead of scaling the whole window. The zoom applies to that tab only and is not saved; the terminal context menu and "Schrift Standard" reset it.
 - .deb: `libdbus-1-3` is now a dependency, `xdg-utils` a recommendation.
 - Linux packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives). The .deb now declares `libc6 (>= 2.39)`, so older systems such as Debian 12 refuse the installation instead of failing at startup.
 

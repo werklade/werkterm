@@ -17,12 +17,15 @@ import { languageFromKnownFile, languageFromShebang } from "../lib/editorLanguag
 import type { EditorDocument, EditorEol } from "../lib/editorTypes";
 import "./EditorView.css";
 
+import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
 import { selectedTheme, type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
 
 export interface EditorHandle { save(): Promise<boolean>; isDirty(): boolean; lock(): Promise<void>; unlock(): void }
 interface EditorViewProps {
   settings: Settings;
+  /** Changes whenever "Schrift Standard" is chosen; clears this tab's zoom offset. */
+  fontResetToken?: number;
   document: EditorDocument;
   onDirtyChange(dirty: boolean): void;
   onStatusChange(status: string): void;
@@ -125,6 +128,9 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   const preferencesCompartment = useRef(new Compartment());
   const readonlyCompartment = useRef(new Compartment());
   const languageRequest = useRef(0);
+  // Per-tab font size offset against settings.editorFontSize; memory only.
+  const zoomOffset = useRef(0);
+  const zoomBy = useRef<(steps: number) => void>(() => undefined);
   const [eol, setEol] = useState(target.current);
   const [wrap, setWrap] = useState(props.settings.editorWrap);
   const [notice, setNotice] = useState("");
@@ -242,12 +248,24 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   function preferenceExtensions(settings: Settings) {
     const theme = selectedTheme(settings);
     return [editorBackground.of(theme.background), ...designEditorExtensions(settings), CodeMirrorView.theme({
-      ".cm-scroller": { fontSize: `${settings.editorFontSize}px`, fontFamily: settings.fontFamily + emojiFallback },
+      ".cm-scroller": { fontSize: `${effectiveFontSize(settings.editorFontSize, zoomOffset.current)}px`, fontFamily: settings.fontFamily + emojiFallback },
     }), EditorState.tabSize.of(settings.editorTabSize)];
   }
+  zoomBy.current = steps => {
+    const settings = callbacks.current.settings;
+    zoomOffset.current = nextZoomOffset(settings.editorFontSize, zoomOffset.current, steps);
+    view.current?.dispatch({ effects: preferencesCompartment.current.reconfigure(preferenceExtensions(settings)) });
+    callbacks.current.onStatusChange(`Schriftgröße ${effectiveFontSize(settings.editorFontSize, zoomOffset.current)}`);
+  };
+  const seenResetToken = useRef(props.fontResetToken ?? 0);
+  useEffect(() => {
+    // Runs before the settings effect below, so a reset together with a settings change applies once.
+    const next = offsetAfterResetToken(seenResetToken.current, props.fontResetToken ?? 0, zoomOffset.current);
+    seenResetToken.current = next.seen; zoomOffset.current = next.offset;
+  }, [props.fontResetToken]);
   useEffect(() => {
     view.current?.dispatch({ effects: preferencesCompartment.current.reconfigure(preferenceExtensions(props.settings)) });
-  }, [props.settings]);
+  }, [props.settings, props.fontResetToken]);
   useEffect(() => {
     setWrap(props.settings.editorWrap);
     view.current?.dispatch({ effects: wrapCompartment.current.reconfigure(props.settings.editorWrap ? CodeMirrorView.lineWrapping : []) });
@@ -276,7 +294,17 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     const editor = new CodeMirrorView({ parent: host.current, state: EditorState.create({ doc: document.text, extensions: editorExtensions(document.readonly) }) });
     view.current = editor;
     loadLanguage(document);
-    return () => { languageRequest.current++; mounted.current = false; chooseRef.current?.resolve("Abbrechen"); chooseRef.current = null; editor.destroy(); view.current = null; };
+    const hostElement = host.current;
+    let zoomWheel = initialZoomWheel;
+    const zoom = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault(); event.stopPropagation();
+      const result = accumulateZoomWheel(zoomWheel, event.deltaY, event.deltaMode, event.timeStamp);
+      zoomWheel = result.state;
+      if (result.steps !== 0) zoomBy.current(result.steps);
+    };
+    hostElement.addEventListener("wheel", zoom, { capture: true, passive: false });
+    return () => { hostElement.removeEventListener("wheel", zoom, { capture: true }); languageRequest.current++; mounted.current = false; chooseRef.current?.resolve("Abbrechen"); chooseRef.current = null; editor.destroy(); view.current = null; };
   }, []);
 
   function toggleWrap() {

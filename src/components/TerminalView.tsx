@@ -15,6 +15,7 @@ import { answerHostKey, answerSecret, cancelSshConnect, closeSsh, connectSsh, re
 import { parseOsc7, type TerminalCwd } from "../lib/osc7";
 import { parseQuickConnect } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
+import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
 
 import { selectedTheme, type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
@@ -23,6 +24,8 @@ import { inputProvenance, terminalWriters } from "../lib/multiExec";
 import { MonitorBar } from "./MonitorBar";
 
 interface Props {
+  /** Changes whenever "Schrift Standard" is chosen; clears this tab's zoom offset. */
+  fontResetToken?: number;
   onSerialPermission(id: number, info: SerialPermission): void;
   logPath?: string;
   connected?: boolean;
@@ -59,7 +62,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ onSerialPermission, serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ fontResetToken, onSerialPermission, serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const [tuxTerminal, setTuxTerminal] = useState<Terminal | null>(null);
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
@@ -94,6 +97,31 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
   callbacks.current = { onSerialPermission, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts, saveOutput: () => { void saveContent("txt"); } };
   const settings = useRef({ shellIntegration, sshPromptCommand });
   settings.current = { shellIntegration, sshPromptCommand };
+  // Per-tab font size offset against the settings; memory only, ends with the tab.
+  const zoomRef = useRef(0);
+  const [zoomOffset, setZoomOffset] = useState(0);
+  const applyZoom = (offset: number) => {
+    zoomRef.current = offset; setZoomOffset(offset);
+    const current = runtime.current;
+    if (!current) return;
+    const size = effectiveFontSize(preferencesRef.current.fontSize, offset);
+    current.terminal.options.fontSize = size;
+    // Several steps within one frame lead to a single fit (and PTY resize).
+    if (fitFrame.current === undefined) fitFrame.current = requestAnimationFrame(() => {
+      fitFrame.current = undefined;
+      if (shownRef.current) runtime.current?.fit.fit();
+    });
+    callbacks.current.onStatus(`Schriftgröße ${size}`);
+  };
+  const applyZoomRef = useRef(applyZoom); applyZoomRef.current = applyZoom;
+  const fitFrame = useRef<number | undefined>(undefined);
+  useEffect(() => () => { if (fitFrame.current !== undefined) cancelAnimationFrame(fitFrame.current); fitFrame.current = undefined; }, []);
+  const seenResetToken = useRef(fontResetToken ?? 0);
+  useEffect(() => {
+    const next = offsetAfterResetToken(seenResetToken.current, fontResetToken ?? 0, zoomRef.current);
+    seenResetToken.current = next.seen;
+    if (next.offset !== zoomRef.current) applyZoomRef.current(next.offset);
+  }, [fontResetToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +131,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
       const element = container.current;
       if (cancelled || !element) return;
       const initial = preferencesRef.current;
-      const terminal = new Terminal({ fontFamily: initial.fontFamily + emojiFallback, fontSize: initial.fontSize, lineHeight: initial.lineHeight, cursorStyle: initial.cursorStyle, cursorBlink: initial.cursorBlink, scrollback: initial.scrollback, theme: selectedTheme(initial) });
+      const terminal = new Terminal({ fontFamily: initial.fontFamily + emojiFallback, fontSize: effectiveFontSize(initial.fontSize, zoomRef.current), lineHeight: initial.lineHeight, cursorStyle: initial.cursorStyle, cursorBlink: initial.cursorBlink, scrollback: initial.scrollback, theme: selectedTheme(initial) });
       const fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(element);
@@ -194,6 +222,17 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
         }
         keyboardInput = true; return true;
       });
+      // Ctrl+wheel / pinch (arrives as wheel with ctrlKey): zoom this terminal only. Capture phase plus
+      // stopPropagation keeps xterm from scrolling or sending mouse-wheel reports to the application.
+      let zoomWheel = initialZoomWheel;
+      const zoom = (event: WheelEvent) => {
+        if (!event.ctrlKey) return;
+        event.preventDefault(); event.stopPropagation();
+        const result = accumulateZoomWheel(zoomWheel, event.deltaY, event.deltaMode, event.timeStamp);
+        zoomWheel = result.state;
+        if (result.steps !== 0) applyZoomRef.current(nextZoomOffset(preferencesRef.current.fontSize, zoomRef.current, result.steps));
+      };
+      element.addEventListener("wheel", zoom, { capture: true, passive: false });
       const markTextInput = () => { keyboardInput = true; };
       const markOtherInput = () => { keyboardInput = false; };
       const textEvents = ["compositionstart", "compositionupdate", "compositionend", "beforeinput", "input"];
@@ -307,6 +346,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
         if (sessionId === undefined) void stopLog(id).catch(report);
         logRef.current.onLog(id, null);
         element.removeEventListener("paste", paste, true);
+        element.removeEventListener("wheel", zoom, { capture: true });
         textEvents.forEach(type => element.removeEventListener(type, markTextInput, true));
         otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
         terminalWriters.delete(id);
@@ -326,7 +366,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
   useEffect(() => {
     const current = runtime.current;
     if (!current) return;
-    Object.assign(current.terminal.options, { fontFamily: preferences.fontFamily + emojiFallback, fontSize: preferences.fontSize, lineHeight: preferences.lineHeight, cursorStyle: preferences.cursorStyle, cursorBlink: preferences.cursorBlink, scrollback: preferences.scrollback, theme: selectedTheme(preferences) });
+    Object.assign(current.terminal.options, { fontFamily: preferences.fontFamily + emojiFallback, fontSize: effectiveFontSize(preferences.fontSize, zoomRef.current), lineHeight: preferences.lineHeight, cursorStyle: preferences.cursorStyle, cursorBlink: preferences.cursorBlink, scrollback: preferences.scrollback, theme: selectedTheme(preferences) });
     if (shownRef.current) current.fit.fit();
   }, [preferences]);
 
@@ -384,6 +424,7 @@ export function TerminalView({ onSerialPermission, serial, logPath, connected, o
         <button role="menuitem" onClick={() => copy(true)}>Alles kopieren</button>
         <button role="menuitem" aria-haspopup="menu" onClick={() => setExportMenu(true)}>Terminalinhalt speichern…</button>
         <button role="menuitem" onClick={() => { runtime.current?.terminal.clear(); closeMenu(); }}>Terminal leeren</button>
+        {zoomOffset !== 0 && <button role="menuitem" onClick={() => { closeMenu(); applyZoom(0); }}>Schriftgröße zurücksetzen</button>}
         <button role="menuitem" disabled={processExited || !connected} onClick={() => { onLogToggle(id); closeMenu(); }}>{logPath ? "Protokoll stoppen" : "Protokoll starten"}</button>
       </>}
     </div>}
