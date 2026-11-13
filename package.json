@@ -12,7 +12,9 @@
     "test": "vitest run",
     "sync-design": "node scripts/sync-design.mjs",
     "check-design": "node scripts/sync-design.mjs --check",
-    "check-paths": "node scripts/check-binary-paths.mjs"
+    "check-paths": "node scripts/check-binary-paths.mjs",
+    "release-bundle": "node scripts/release-bundle.mjs",
+    "publish-pkg": "node scripts/publish-release.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",
