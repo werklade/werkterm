@@ -7,6 +7,26 @@ Werkterm is a desktop application built with Tauri 2, Rust and React. It provide
 > [!NOTE]
 > Werkterm is a prerelease (currently 0.1.8) for invited testers. Please submit feedback through Issues.
 
+## Contents
+
+- [Independence and trademarks](#independence-and-trademarks)
+- [Screens](#screens)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installing](#installing)
+  - [APT repository (Debian 13, Ubuntu 24.04 and newer, amd64)](#apt-repository-debian-13-ubuntu-2404-and-newer-amd64)
+  - [AppImage, Windows installers and `.deb` file](#appimage-windows-installers-and-deb-file)
+  - [Linux: display problems / black window](#linux-display-problems--black-window)
+- [Updates](#updates)
+- [Data folder](#data-folder)
+- [Building](#building)
+- [Security](#security)
+- [Technical overview](#technical-overview)
+- [Known limitations](#known-limitations)
+- [Roadmap](#roadmap)
+- [License](#license)
+- [Origin](#origin)
+
 ## Independence and trademarks
 
 Werkterm is a private, independent project with no affiliation to Mobatek. It has not been commissioned, reviewed or supported by Mobatek. MobaXterm is a trademark of Mobatek and is mentioned only to describe importing sessions and colors. WindTerm, Debian and other product names are trademarks of their respective owners. The software is supplied without warranty under the GPL; see [LICENSE](LICENSE).

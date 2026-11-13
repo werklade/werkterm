@@ -7,6 +7,26 @@ Werkterm ist eine Desktop-Anwendung mit Tauri 2, Rust und React. Sie bietet loka
 > [!NOTE]
 > Werkterm ist eine Vorabversion (aktuell 0.1.8) für eingeladene Tester. Bitte Rückmeldungen über Issues einreichen.
 
+## Inhalt
+
+- [Unabhängigkeit und Marken](#unabhängigkeit-und-marken)
+- [Bildschirmansichten](#bildschirmansichten)
+- [Funktionen](#funktionen)
+- [Voraussetzungen](#voraussetzungen)
+- [Installation](#installation)
+  - [APT-Repository (Debian 13, Ubuntu 24.04 und neuer, amd64)](#apt-repository-debian-13-ubuntu-2404-und-neuer-amd64)
+  - [AppImage, Windows-Installer und `.deb`-Datei](#appimage-windows-installer-und-deb-datei)
+  - [Linux: Darstellungsprobleme / schwarzes Fenster](#linux-darstellungsprobleme--schwarzes-fenster)
+- [Updates](#updates)
+- [Datenordner](#datenordner)
+- [Selbst bauen](#selbst-bauen)
+- [Sicherheit](#sicherheit)
+- [Technischer Überblick](#technischer-überblick)
+- [Bekannte Einschränkungen](#bekannte-einschränkungen)
+- [Ausblick](#ausblick)
+- [Lizenz](#lizenz)
+- [Herkunft](#herkunft)
+
 ## Unabhängigkeit und Marken
 
 Werkterm ist ein privates, unabhängiges Projekt ohne Verbindung zu Mobatek. Es wurde von Mobatek weder beauftragt noch geprüft oder unterstützt. MobaXterm ist eine Marke von Mobatek und wird ausschließlich zur Beschreibung des Imports von Sitzungen und Farben genannt. WindTerm, Debian und weitere Produktnamen sind Marken ihrer jeweiligen Inhaber. Die Software wird gemäß GPL ohne Gewährleistung bereitgestellt; siehe [LICENSE](LICENSE).
