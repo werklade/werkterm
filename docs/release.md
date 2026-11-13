@@ -58,6 +58,13 @@ und muss überall gleich sein:
 in `## [<version>] – <JJJJ-MM-TT>` umbenennen und darüber einen leeren `## [Unreleased]` anlegen. Dieser Abschnitt
 wird Text der Update-Meldung (`notes` in `latest.json`, höchstens 20000 Zeichen) und des GitHub-Release.
 
+In `src-tauri/linux/de.werklade.werkterm.metainfo.xml` (AppStream-Metadaten im .deb) oben in `<releases>` einen
+neuen Eintrag ergänzen; ältere Einträge bleiben stehen. Während der Entwicklung (nur `[Unreleased]` im
+CHANGELOG): `<release version="<version>" date="<JJJJ-MM-TT>" type="development"/>`. Beim Release, wenn der
+CHANGELOG-Abschnitt `## [<version>] – <JJJJ-MM-TT>` entsteht: `type` entfernen und dasselbe Datum setzen.
+`npm test` (`scripts/metainfo.test.mjs`) schlägt fehl, solange der oberste Eintrag nicht der Version entspricht,
+und ebenso, wenn Datum und `type` nicht zum CHANGELOG passen.
+
 ```bash
 # Git Bash, im Repo
 node scripts/release-bundle.mjs --print-version     # gibt die Version aus oder nennt die abweichende Datei
@@ -77,10 +84,12 @@ Der Tag `v<version>` startet den Workflow. Ohne Tag: Actions > `Release build` >
 dann aus den drei Dateien. Jobs:
 
 - `check`: Versionsgleichheit (bei Tag-Lauf auch mit dem Tag), `npm run build` (tsc und Vite), `npm test`,
-  `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`. `npm run check-design` läuft nicht, weil es das
-  private Nachbar-Repo `../design` braucht; vor dem Tag lokal ausführen.
+  `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `appstreamcli validate` für die Metainfo (die
+  Warnung `url-homepage-missing` ist auf Info herabgestuft, weil es keine öffentliche Seite gibt; jede andere
+  Warnung bricht ab). `npm run check-design` läuft nicht, weil es das private Nachbar-Repo `../design` braucht;
+  vor dem Tag lokal ausführen.
 - `linux` und `windows`: `npm run tauri build` mit Updater-Signaturen, `npm run check-paths`, Prüfung der
-  Dateinamen.
+  Dateinamen; `linux` prüft zusätzlich per `dpkg-deb -c`, dass das .deb die Metainfo enthält.
 - `bundle`: `scripts/release-bundle.mjs` erzeugt das Artefakt `werkterm-<version>` (30 Tage aufbewahrt). Bei einem
   Tag-Lauf muss `CHANGELOG.md` den Abschnitt `## [<version>]` enthalten (`--require-changelog-section`), sonst
   bricht der Job ab; ein manueller Lauf nimmt ersatzweise `## [Unreleased]`.

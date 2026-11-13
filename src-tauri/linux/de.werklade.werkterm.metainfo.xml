@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for the .deb (installed to /usr/share/metainfo/).
+  On a version change add a new <release> at the top of <releases> (scripts/metainfo.test.mjs checks it).
+  No <screenshots> and no <url type="homepage">: there is no public web page yet, and the
+  repository is private, so no <url type="vcs-browser"> either. CI therefore validates with
+  "override url-homepage-missing=info" (.github/workflows/release.yml).
+-->
+<component type="desktop-application">
+  <id>de.werklade.werkterm</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Werkterm</name>
+  <name xml:lang="de">Werkterm</name>
+  <summary>SSH terminal with SFTP browser and editor</summary>
+  <summary xml:lang="de">SSH-Terminal mit SFTP-Browser und Editor</summary>
+
+  <developer id="de.werklade">
+    <name>Marc-Andre Kolski</name>
+  </developer>
+
+  <description>
+    <p>Werkterm is a terminal and SSH client for Linux that combines terminal tabs, an SFTP browser and a text editor in one window.</p>
+    <p xml:lang="de">Werkterm ist ein Terminal- und SSH-Client für Linux, der Terminal-Tabs, einen SFTP-Browser und einen Texteditor in einem Fenster vereint.</p>
+    <ul>
+      <li>Terminal tabs: local, SSH, Telnet and serial</li>
+      <li xml:lang="de">Terminal-Tabs: lokal, SSH, Telnet und seriell</li>
+      <li>SFTP browser that follows the terminal folder</li>
+      <li xml:lang="de">SFTP-Browser, der dem Terminal-Ordner folgt</li>
+      <li>Saved sessions with passwords in the system keyring</li>
+      <li xml:lang="de">Gespeicherte Sitzungen mit Passwörtern im System-Schlüsselbund</li>
+      <li>Jump hosts and SSH tunnels</li>
+      <li xml:lang="de">Jump hosts und SSH-Tunnel</li>
+      <li>MultiExec and macros</li>
+      <li xml:lang="de">MultiExec und Makros</li>
+      <li>File and folder comparison</li>
+      <li xml:lang="de">Datei- und Ordnervergleich</li>
+      <li>Text editor with color code preview and line ending switch</li>
+      <li xml:lang="de">Texteditor mit Farbcode-Vorschau und Zeilenende-Umschalter</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">Werkterm.desktop</launchable>
+
+  <provides>
+    <binary>werkterm</binary>
+  </provides>
+
+  <categories>
+    <category>Network</category>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+
+  <keywords>
+    <keyword>ssh</keyword>
+    <keyword>sftp</keyword>
+    <keyword>telnet</keyword>
+    <keyword>serial</keyword>
+    <keyword>terminal</keyword>
+    <keyword>tunnel</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.10" date="2026-11-13" type="development"/>
+    <release version="0.1.8" date="2026-11-13"/>
+  </releases>
+</component>

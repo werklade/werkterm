@@ -68,6 +68,19 @@ jobs:
             libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils libdbus-1-dev pkg-config
 
+      # appstreamcli fails on warnings too (exit code 3, same as for errors). The only accepted
+      # warning is the missing homepage (no public page yet), so it is lowered to info; any
+      # other warning or error fails the job.
+      - name: Validate AppStream metadata
+        run: |
+          set -euo pipefail
+          if ! command -v appstreamcli >/dev/null; then
+            sudo apt-get install -y --no-install-recommends appstream
+          fi
+          appstreamcli --version
+          appstreamcli validate --no-net --explain --override=url-homepage-missing=info \
+            src-tauri/linux/de.werklade.werkterm.metainfo.xml
+
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: src-tauri -> target
@@ -155,6 +168,20 @@ jobs:
 
       - name: Check release binary for build paths
         run: npm run check-paths
+
+      - name: Check AppStream metadata in .deb
+        run: |
+          set -euo pipefail
+          deb="src-tauri/target/release/bundle/deb/Werkterm_${VERSION}_amd64.deb"
+          entry=usr/share/metainfo/de.werklade.werkterm.metainfo.xml
+          # List into a variable first: "grep -q" closing the pipe early would trip pipefail.
+          # Tauri writes paths without "./"; strip it anyway in case the format changes.
+          listing=$(dpkg-deb -c "$deb")
+          if ! awk '{p=$NF; sub(/^\.\//,"",p); print p}' <<<"$listing" | grep -xF "$entry" >/dev/null; then
+            echo "::error::$entry fehlt in $deb"
+            printf '%s\n' "$listing"
+            exit 1
+          fi
 
       - name: Collect packages
         run: |
