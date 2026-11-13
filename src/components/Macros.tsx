@@ -2,21 +2,28 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useModal } from "./useModal";
 import { SecretDialog } from "./SecretDialog";
-import { escapeText, unescapeText, newMacro, recordInput, shortcutConflict, shortcutFromEvent, parseShortcut, macroTargets, playbackPlan, runPlayback, clearPlayback, type Macro, type MacroStep, type Recording } from "../lib/macros";
+import { escapeText, unescapeText, newMacro, recordInput, shortcutConflict, shortcutFromEvent, parseShortcut, displayShortcut, allowedShortcuts, macroTargets, playbackPlan, runPlayback, clearPlayback, type Macro, type MacroStep, type Recording } from "../lib/macros";
 import { terminalWriters, type Recipient } from "../lib/multiExec";
+import { formatShortcut } from "../lib/formatShortcut";
+import { tp, useT } from "../i18n";
 import "./Macros.css";
 
 type Question = { sequence: number; label: string; secret: boolean; answer(value: string | null): void };
 function QuestionDialog({ question }: { question: Question }) {
+  const t = useT();
   const modal = useModal();
   const [value, setValue] = useState("");
-  return <dialog ref={modal} className="ssh-dialog" aria-label="Rückfrage beim Abspielen" onCancel={event => { event.preventDefault(); question.answer(null); }}><form onSubmit={event => { event.preventDefault(); question.answer(value); setValue(""); }}><h2>Rückfrage beim Abspielen</h2><label>{question.label}<input autoFocus type={question.secret ? "password" : "text"} autoComplete="off" value={value} onChange={event => setValue(event.target.value)} /></label><div className="dialog-actions"><button type="submit">Weiter</button><button type="button" onClick={() => question.answer(null)}>Abbrechen</button></div></form></dialog>;
+  return <dialog ref={modal} className="ssh-dialog" aria-label={t("macro.question.title")} onCancel={event => { event.preventDefault(); question.answer(null); }}><form onSubmit={event => { event.preventDefault(); question.answer(value); setValue(""); }}><h2>{t("macro.question.title")}</h2><label>{question.label}<input autoFocus type={question.secret ? "password" : "text"} autoComplete="off" value={value} onChange={event => setValue(event.target.value)} /></label><div className="dialog-actions"><button type="submit">{t("app.next")}</button><button type="button" onClick={() => question.answer(null)}>{t("common.cancel")}</button></div></form></dialog>;
 }
 function ConfirmDialog({ title, children, accept, onAnswer }: { title: string; children: React.ReactNode; accept: string; onAnswer(value: boolean): void }) {
+  const t = useT();
   const modal = useModal();
-  return <dialog ref={modal} className="ssh-dialog" aria-label={title} onCancel={event => { event.preventDefault(); onAnswer(false); }}><h2>{title}</h2>{children}<div className="dialog-actions"><button onClick={() => onAnswer(true)}>{accept}</button><button autoFocus onClick={() => onAnswer(false)}>Abbrechen</button></div></dialog>;
+  return <dialog ref={modal} className="ssh-dialog" aria-label={title} onCancel={event => { event.preventDefault(); onAnswer(false); }}><h2>{title}</h2>{children}<div className="dialog-actions"><button onClick={() => onAnswer(true)}>{accept}</button><button autoFocus onClick={() => onAnswer(false)}>{t("common.cancel")}</button></div></dialog>;
 }
+const stepTypeKey = { text: "macro.step.text", wait: "macro.step.wait", prompt: "macro.question.title" } as const;
+const addKey = { text: "macro.add.text", wait: "macro.add.wait", prompt: "macro.add.prompt" } as const;
 function MacroEditor({ item, items, onClose, onSave }: { item: Macro; items: Macro[]; onClose(): void; onSave(item: Macro): Promise<void> }) {
+  const t = useT();
   const modal = useModal();
   const [name, setName] = useState(item.name);
   const [shortcut, setShortcut] = useState(item.shortcut ?? "");
@@ -30,32 +37,33 @@ function MacroEditor({ item, items, onClose, onSave }: { item: Macro; items: Mac
     try {
       const conflict = shortcutConflict(shortcut, items, item.id);
       if (conflict) throw new Error(conflict);
-      if (!name.trim() || Array.from(name).length > 80) throw new Error("Name muss 1–80 Zeichen lang sein");
-      if (steps.length > 500) throw new Error("Maximal 500 Schritte erlaubt");
+      if (!name.trim() || Array.from(name).length > 80) throw new Error(t("macro.error.name"));
+      if (steps.length > 500) throw new Error(t("macro.error.steps"));
       const decoded = steps.map(step => step.type === "text" ? { ...step, text: unescapeText(step.text) } : step);
-      if (decoded.reduce((total, step) => total + (step.type === "text" ? new TextEncoder().encode(step.text).length : 0), 0) > 65536) throw new Error("Makrotext überschreitet 64 KB");
-      if (decoded.some(step => step.type === "wait" && (!Number.isInteger(step.ms) || step.ms < 0 || step.ms > 60000))) throw new Error("Wartezeit muss 0–60000 ms betragen");
-      if (decoded.some(step => step.type === "prompt" && (!step.label.trim() || Array.from(step.label).length > 200))) throw new Error("Rückfrage benötigt eine Beschriftung (1–200 Zeichen)");
+      if (decoded.reduce((total, step) => total + (step.type === "text" ? new TextEncoder().encode(step.text).length : 0), 0) > 65536) throw new Error(t("macro.error.size"));
+      if (decoded.some(step => step.type === "wait" && (!Number.isInteger(step.ms) || step.ms < 0 || step.ms > 60000))) throw new Error(t("macro.error.wait"));
+      if (decoded.some(step => step.type === "prompt" && (!step.label.trim() || Array.from(step.label).length > 200))) throw new Error(t("macro.error.prompt"));
       setBusy(true);
       await onSave({ ...item, name, shortcut: shortcut ? parseShortcut(shortcut) : null, steps: decoded, updated: Date.now() });
-    } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); }
   };
-  return <dialog ref={modal} className="ssh-dialog macro-editor" aria-label="Makro bearbeiten" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><h2>Makro bearbeiten</h2><p>Makrotexte werden im Klartext gespeichert. Für Passwörter eine maskierte Rückfrage verwenden.</p><label>Name<input autoFocus maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><label>Tastenkürzel<input readOnly placeholder="Kombination drücken; Rücktaste löscht" value={shortcut} onKeyDown={event => {
+  return <dialog ref={modal} className="ssh-dialog macro-editor" aria-label={t("macro.editor.title")} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><h2>{t("macro.editor.title")}</h2><p>{t("macro.editor.plaintext")}</p><label>{t("macro.editor.name")}<input autoFocus maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><label>{t("macro.editor.shortcut")}<input readOnly placeholder={t("macro.editor.shortcutPlaceholder")} value={displayShortcut(shortcut)} onKeyDown={event => {
     if (event.key === "Tab" || event.key === "Escape") return;
     event.preventDefault(); event.stopPropagation();
     if (event.key === "Backspace" || event.key === "Delete") { setShortcut(""); setError(""); return; }
     if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return;
     const value = shortcutFromEvent(event.nativeEvent);
     if (value) { setShortcut(value); setError(shortcutConflict(value, items, item.id) ?? ""); }
-    else setError("Erlaubt: Strg+Alt+0–9/A–Z oder Strg+Umschalt+F1–F12");
-  }} /></label><p className="macro-hint">Text-Escapes: \n = Enter, \t = Tab, \e = ESC, \x03 = Strg+C, \\ = Backslash, \x0a = LF</p>
-    <div className="macro-steps">{steps.map((step, index) => <section key={index} className={selected === index ? "selected" : ""} onFocus={() => setSelected(index)} onClick={() => setSelected(index)}><div className="macro-step-heading"><strong>{index + 1}. {step.type === "text" ? "Text" : step.type === "wait" ? "Warten" : "Rückfrage beim Abspielen"}</strong><button disabled={index === 0} onClick={event => { event.stopPropagation(); move(index, -1); }}>Hoch</button><button disabled={index === steps.length - 1} onClick={event => { event.stopPropagation(); move(index, 1); }}>Runter</button><button onClick={() => { setSteps(current => current.filter((_, i) => i !== index)); setSelected(Math.max(0, index - 1)); }}>Löschen</button></div>
-      {step.type === "text" ? <><textarea aria-label={`Text Schritt ${index + 1}`} rows={3} value={step.text} onChange={event => update(index, { ...step, text: event.target.value })} /><button onClick={() => update(index, { type: "prompt", label: "Eingabe", secret: true })}>In Rückfrage umwandeln</button></> : step.type === "wait" ? <label>Millisekunden<input type="number" min={0} max={60000} value={step.ms} onChange={event => update(index, { ...step, ms: Number(event.target.value) })} /></label> : <><label>Beschriftung<input maxLength={200} value={step.label} onChange={event => update(index, { ...step, label: event.target.value })} /></label><label><input type="checkbox" checked={step.secret} onChange={event => update(index, { ...step, secret: event.target.checked })} />Maskierte Eingabe</label></>}
-    </section>)}</div><div className="macro-add">{(["text", "wait", "prompt"] as const).map(type => <button key={type} disabled={steps.length >= 500} onClick={() => { setSelected(steps.length); setSteps(current => [...current, type === "text" ? { type, text: "" } : type === "wait" ? { type, ms: 1000 } : { type, label: "Eingabe", secret: true }]); }}>{type === "text" ? "Text" : type === "wait" ? "Warten" : "Rückfrage"} hinzufügen</button>)}</div>{error && <p role="alert">{error}</p>}<div className="dialog-actions"><button disabled={busy} onClick={() => void save()}>Speichern</button><button disabled={busy} onClick={onClose}>Abbrechen</button></div></dialog>;
+    else setError(allowedShortcuts());
+  }} /></label><p className="macro-hint">{t("macro.editor.escapes", { interrupt: formatShortcut(["ctrl", "C"]) })}</p>
+    <div className="macro-steps">{steps.map((step, index) => <section key={index} className={selected === index ? "selected" : ""} onFocus={() => setSelected(index)} onClick={() => setSelected(index)}><div className="macro-step-heading"><strong>{index + 1}. {t(stepTypeKey[step.type])}</strong><button disabled={index === 0} onClick={event => { event.stopPropagation(); move(index, -1); }}>{t("macro.step.up")}</button><button disabled={index === steps.length - 1} onClick={event => { event.stopPropagation(); move(index, 1); }}>{t("macro.step.down")}</button><button onClick={() => { setSteps(current => current.filter((_, i) => i !== index)); setSelected(Math.max(0, index - 1)); }}>{t("common.delete")}</button></div>
+      {step.type === "text" ? <><textarea aria-label={t("macro.step.textLabel", { n: index + 1 })} rows={3} value={step.text} onChange={event => update(index, { ...step, text: event.target.value })} /><button onClick={() => update(index, { type: "prompt", label: t("macro.defaultPromptLabel"), secret: true })}>{t("macro.step.toPrompt")}</button></> : step.type === "wait" ? <label>{t("macro.step.ms")}<input type="number" min={0} max={60000} value={step.ms} onChange={event => update(index, { ...step, ms: Number(event.target.value) })} /></label> : <><label>{t("macro.step.label")}<input maxLength={200} value={step.label} onChange={event => update(index, { ...step, label: event.target.value })} /></label><label><input type="checkbox" checked={step.secret} onChange={event => update(index, { ...step, secret: event.target.checked })} />{t("macro.step.secret")}</label></>}
+    </section>)}</div><div className="macro-add">{(["text", "wait", "prompt"] as const).map(type => <button key={type} disabled={steps.length >= 500} onClick={() => { setSelected(steps.length); setSteps(current => [...current, type === "text" ? { type, text: "" } : type === "wait" ? { type, ms: 1000 } : { type, label: t("macro.defaultPromptLabel"), secret: true }]); }}>{t(addKey[type])}</button>)}</div>{error && <p role="alert">{error}</p>}<div className="dialog-actions"><button disabled={busy} onClick={() => void save()}>{t("common.save")}</button><button disabled={busy} onClick={onClose}>{t("common.cancel")}</button></div></dialog>;
 }
 
 interface Options { activeId: number | null; recipients: Recipient[]; multiExec: boolean; report(message: string): void; showPanel(): void; /** false until the data folder is usable; defaults to true. */ enabled?: boolean }
 export function useMacros(options: Options) {
+  const t = useT();
   const [items, setItems] = useState<Macro[]>([]);
   const [recording, setRecording] = useState<Recording | null>(null);
   const recordingRef = useRef(recording);
@@ -77,14 +85,14 @@ export function useMacros(options: Options) {
     if (!current || current.tabId !== id) return;
     const next = recordInput(current, data, performance.now());
     recordingRef.current = next; setRecording(next);
-    if (next.steps.length >= 500 || next.steps.reduce((n, s) => n + (s.type === "text" ? new TextEncoder().encode(s.text).length : 0), 0) >= 65536) { stop(); latest.current.report("Aufnahme gestoppt: Makrogrenze erreicht. Schritte vor dem Speichern prüfen."); }
+    if (next.steps.length >= 500 || next.steps.reduce((n, s) => n + (s.type === "text" ? new TextEncoder().encode(s.text).length : 0), 0) >= 65536) { stop(); latest.current.report(t("macro.report.limit")); }
   };
   const cancel = () => { playback.current?.controller.abort(); };
   const play = async (item: Macro) => {
-    if (playback.current || recordingRef.current) { latest.current.report("Zuerst Aufnahme oder Wiedergabe beenden"); return; }
+    if (playback.current || recordingRef.current) { latest.current.report(t("macro.report.busy")); return; }
     const { activeId, recipients, multiExec } = latest.current;
     const targets = macroTargets(activeId, recipients, multiExec);
-    if (!targets.length) { latest.current.report("Kein aktives Terminal für das Makro"); return; }
+    if (!targets.length) { latest.current.report(t("macro.report.noTerminal")); return; }
     const controller = new AbortController();
     playback.current = { controller, targets }; setPlaying(true);
     let plan: Awaited<ReturnType<typeof playbackPlan>> = null;
@@ -99,8 +107,8 @@ export function useMacros(options: Options) {
       const completed = await runPlayback(plan, controller.signal,
         () => targets.every(id => latest.current.recipients.some(t => t.id === id && !t.exited) && terminalWriters.has(id)),
         text => { for (const id of targets) terminalWriters.get(id)?.(text, false); });
-      latest.current.report(completed ? "Makro abgespielt" : "Makro abgebrochen");
-    } catch { latest.current.report("Makro konnte nicht abgespielt werden"); }
+      latest.current.report(completed ? t("macro.report.played") : t("macro.report.cancelled"));
+    } catch { latest.current.report(t("macro.report.failed")); }
     finally { if (plan) clearPlayback(plan); playback.current = null; setPlaying(false); setQuestion(null); }
   };
   useEffect(() => {
@@ -120,8 +128,8 @@ export function useMacros(options: Options) {
   });
   const start = () => {
     if (recordingRef.current) { stop(); return; }
-    if (playback.current) { options.report("Zuerst Wiedergabe beenden"); return; }
-    if (!macroTargets(options.activeId, options.recipients, false).length) { options.report("Kein aktives Terminal für die Aufnahme"); return; }
+    if (playback.current) { options.report(t("macro.report.stopPlayback")); return; }
+    if (!macroTargets(options.activeId, options.recipients, false).length) { options.report(t("macro.report.noTerminalRecord")); return; }
     setWarning(true);
   };
   const action = (name: string): boolean => {
@@ -140,7 +148,7 @@ export function useMacros(options: Options) {
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [context]);
-  const panel = <div className="macros-panel"><div className="macro-add"><button disabled={playing} onClick={start}>{recording ? "Stopp" : "Aufnehmen"}</button><button onClick={() => setEditor(newMacro())}>Neues Makro…</button></div><label><input type="checkbox" checked={pauses} disabled={!!recording} onChange={event => setPauses(event.target.checked)} />Pausen aufzeichnen</label>{recording && <p role="status">🔴 Aufnahme läuft ({recording.count} Zeichen)</p>}{playing && <p role="status">Makro wird abgespielt <button onClick={cancel}>Abbrechen</button></p>}<ul className="macro-list">{items.map(item => <li key={item.id}><button onDoubleClick={() => void play(item)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void play(item); } }} onContextMenu={event => { event.preventDefault(); setContext({ item, x: event.clientX, y: event.clientY }); }}><strong>{item.name}</strong><small>{item.shortcut ?? "Kein Kürzel"} · {item.steps.length} Schritte</small></button></li>)}</ul>{!items.length && <p>Keine Makros gespeichert.</p>}</div>;
-  const dialogs = <>{warning && <ConfirmDialog title="Makro aufnehmen" accept="Aufnahme starten" onAnswer={accepted => { setWarning(false); if (accepted) { const id = latest.current.activeId; if (id === null || !macroTargets(id, latest.current.recipients, false).length) { options.report("Terminal nicht mehr verfügbar"); return; } const next: Recording = { tabId: id, steps: [], last: null, pauses, count: 0 }; recordingRef.current = next; setRecording(next); options.showPanel(); requestAnimationFrame(() => document.querySelector<HTMLElement>(`#terminal-${id} .xterm-helper-textarea`)?.focus()); } }}><p>Alles, was du tippst, wird im Klartext im Makro gespeichert. Gib während der Aufnahme keine Passwörter ein – verwende dafür den Schritt 'Rückfrage beim Abspielen'.</p></ConfirmDialog>}{editor && <MacroEditor key={editor.id} item={editor} items={items} onClose={() => setEditor(null)} onSave={async item => { await invoke("macro_save", { item }); await reload(); setEditor(null); }} />}{question && (question.secret ? <SecretDialog key={question.sequence} title={`Rückfrage beim Abspielen: ${question.label}`} prompt={{ type: "secret", requestId: question.sequence, kind: "password", label: question.label }} onAnswer={question.answer} /> : <QuestionDialog key={question.sequence} question={question} />)}{deleting && <ConfirmDialog title="Makro löschen" accept="Löschen" onAnswer={accepted => { const item = deleting; setDeleting(null); if (accepted) void invoke("macro_delete", { id: item.id }).then(reload).catch(reason => options.report(String(reason))); }}><p>„{deleting.name}“ endgültig löschen?</p></ConfirmDialog>}{context && <div ref={contextRef} className="session-context" role="menu" style={{ left: Math.max(0, Math.min(context.x, window.innerWidth - 240)), top: Math.max(0, Math.min(context.y, window.innerHeight - 180)) }} onKeyDown={event => { if (event.key === "Escape") setContext(null); if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); const buttons = Array.from(contextRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []); const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); } }}>{["Abspielen", "Bearbeiten", "Duplizieren", "Löschen"].map((label, index) => <button role="menuitem" key={label} onClick={() => { const item = context.item; setContext(null); if (index === 0) void play(item); else if (index === 1) setEditor(item); else if (index === 2) setEditor({ ...newMacro(item.steps.map(step => ({ ...step }))), name: `${item.name.slice(0, 72)} (Kopie)` }); else setDeleting(item); }}>{label}</button>)}</div>}</>;
+  const panel = <div className="macros-panel"><div className="macro-add"><button disabled={playing} onClick={start}>{recording ? t("macro.panel.stop") : t("macro.panel.record")}</button><button onClick={() => setEditor(newMacro())}>{t("menu.macros.new")}</button></div><label><input type="checkbox" checked={pauses} disabled={!!recording} onChange={event => setPauses(event.target.checked)} />{t("macro.panel.pauses")}</label>{recording && <p role="status">{tp("macro.panel.recording", recording.count)}</p>}{playing && <p role="status">{t("macro.panel.playing")} <button onClick={cancel}>{t("common.cancel")}</button></p>}<ul className="macro-list">{items.map(item => <li key={item.id}><button onDoubleClick={() => void play(item)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void play(item); } }} onContextMenu={event => { event.preventDefault(); setContext({ item, x: event.clientX, y: event.clientY }); }}><strong>{item.name}</strong><small>{item.shortcut ? displayShortcut(item.shortcut) : t("macro.panel.noShortcut")} · {tp("macro.panel.steps", item.steps.length)}</small></button></li>)}</ul>{!items.length && <p>{t("sidebar.placeholder.macros")}</p>}</div>;
+  const dialogs = <>{warning && <ConfirmDialog title={t("macro.record.title")} accept={t("macro.record.start")} onAnswer={accepted => { setWarning(false); if (accepted) { const id = latest.current.activeId; if (id === null || !macroTargets(id, latest.current.recipients, false).length) { options.report(t("macro.report.terminalGone")); return; } const next: Recording = { tabId: id, steps: [], last: null, pauses, count: 0 }; recordingRef.current = next; setRecording(next); options.showPanel(); requestAnimationFrame(() => document.querySelector<HTMLElement>(`#terminal-${id} .xterm-helper-textarea`)?.focus()); } }}><p>{t("macro.record.warning")}</p></ConfirmDialog>}{editor && <MacroEditor key={editor.id} item={editor} items={items} onClose={() => setEditor(null)} onSave={async item => { await invoke("macro_save", { item }); await reload(); setEditor(null); }} />}{question && (question.secret ? <SecretDialog key={question.sequence} title={t("macro.question.titleLabel", { label: question.label })} prompt={{ type: "secret", requestId: question.sequence, kind: "password", label: question.label }} onAnswer={question.answer} /> : <QuestionDialog key={question.sequence} question={question} />)}{deleting && <ConfirmDialog title={t("macro.delete.title")} accept={t("common.delete")} onAnswer={accepted => { const item = deleting; setDeleting(null); if (accepted) void invoke("macro_delete", { id: item.id }).then(reload).catch(reason => options.report(String(reason))); }}><p>{t("macro.delete.text", { name: deleting.name })}</p></ConfirmDialog>}{context && <div ref={contextRef} className="session-context" role="menu" style={{ left: Math.max(0, Math.min(context.x, window.innerWidth - 240)), top: Math.max(0, Math.min(context.y, window.innerHeight - 180)) }} onKeyDown={event => { if (event.key === "Escape") setContext(null); if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); const buttons = Array.from(contextRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []); const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); } }}>{(["macro.context.play", "macro.context.edit", "macro.context.duplicate", "common.delete"] as const).map((label, index) => <button role="menuitem" key={label} onClick={() => { const item = context.item; setContext(null); if (index === 0) void play(item); else if (index === 1) setEditor(item); else if (index === 2) setEditor({ ...newMacro(item.steps.map(step => ({ ...step }))), name: t("macro.copyName", { name: item.name.slice(0, 72) }) }); else setDeleting(item); }}>{t(label)}</button>)}</div>}</>;
   return { items, recordingId: recording?.tabId, recording: !!recording, playing, cancel, capture, action, panel, dialogs, reload };
 }

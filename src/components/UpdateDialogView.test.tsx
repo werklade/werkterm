@@ -4,7 +4,7 @@ import { UpdateDialogView, aptNote, cancelBlockedNote, downloadNote, notConfigur
 import { aptCommand, aptRepoNote, blockedFallback, initialUpdateState, notesMaxChars, updateDownloadUrl, updateReducer, type UpdateCheck, type UpdateEvent, type UpdateInfo, type UpdateState } from "../lib/updateState";
 
 // Same approach as DataDirForm.test.tsx: only the hooks are replaced, the JSX is real.
-vi.mock("react", async importOriginal => ({ ...await importOriginal<typeof import("react")>(), useId: () => "test-update" }));
+vi.mock("react", async importOriginal => ({ ...await importOriginal<typeof import("react")>(), useId: () => "test-update", useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot() }));
 vi.mock("./useModal", () => ({ useModal: () => ({ current: null }) }));
 
 type Element = ReactElement<Record<string, unknown>>;
@@ -69,8 +69,8 @@ describe("up to date and not configured", () => {
   });
   it("says the build has no update check and offers nothing else", () => {
     const tree = render(run([{ type: "info", info: info({ configured: false }) }]));
-    expect(notConfiguredNote).toBe("Update-Prüfung ist in diesem Build nicht eingerichtet.");
-    expect(textOf(tree)).toContain(notConfiguredNote);
+    expect(notConfiguredNote()).toBe("Update-Prüfung ist in diesem Build nicht eingerichtet.");
+    expect(textOf(tree)).toContain(notConfiguredNote());
     expect(labels(tree)).toEqual(["Schließen"]);
   });
 });
@@ -81,8 +81,8 @@ describe("update available", () => {
     const text = textOf(tree);
     expect(text).toContain("Version 0.4.0 ist verfügbar");
     expect(text).toMatch(/Veröffentlicht am \d{2}[./]\d{2}[./]\d{4}|Veröffentlicht am .*2026/);
-    expect(text).toContain(updateRestartNote);
-    expect(updateRestartNote).toBe("Werkterm startet danach neu. Offene Verbindungen werden getrennt.");
+    expect(text).toContain(updateRestartNote());
+    expect(updateRestartNote()).toBe("Werkterm startet danach neu. Offene Verbindungen werden getrennt.");
     expect(labels(tree)).toEqual(["Schließen", "Herunterladen und installieren"]);
     expect(primaries(tree)).toEqual(["Herunterladen und installieren"]);
     (button(tree, "Herunterladen und installieren")!.props.onClick as () => void)();
@@ -111,15 +111,15 @@ describe("update available", () => {
   });
   it("restart note per platform: Linux restarts, NSIS quits and restarts, MSI also asks for admin rights", () => {
     const linux = textOf(render(offer({ installKind: "appimage" })));
-    expect(linux).toContain(updateRestartNote);
-    expect(linux).not.toContain(adminNote);
+    expect(linux).toContain(updateRestartNote());
+    expect(linux).not.toContain(adminNote());
     const nsis = textOf(render(offer({ installKind: "nsis" })));
-    expect(nsis).toContain(windowsRestartNote);
-    expect(nsis).not.toContain(updateRestartNote);
-    expect(nsis).not.toContain(adminNote);
+    expect(nsis).toContain(windowsRestartNote());
+    expect(nsis).not.toContain(updateRestartNote());
+    expect(nsis).not.toContain(adminNote());
     const msi = textOf(render(offer({ installKind: "msi" })));
-    expect(msi).toContain(windowsRestartNote);
-    expect(msi).toContain(adminNote);
+    expect(msi).toContain(windowsRestartNote());
+    expect(msi).toContain(adminNote());
   });
   it("announced version without 'available' never produces an offer", () => {
     const tree = render(run([{ type: "info", info: info() }, { type: "checked", check: check({ available: false }) }]));
@@ -128,13 +128,13 @@ describe("update available", () => {
   });
   it("deb: no install button, apt note and the command in a copyable field", () => {
     const tree = render(offer({ selfUpdate: false, installKind: "deb" }));
-    expect(textOf(tree)).toContain(aptNote);
-    expect(aptNote).toBe("Diese Installation wird über die Paketverwaltung aktualisiert.");
+    expect(textOf(tree)).toContain(aptNote());
+    expect(aptNote()).toBe("Diese Installation wird über die Paketverwaltung aktualisiert.");
     expect(textOf(findAll(tree, e => e.type === "code")[0])).toBe("sudo apt update && sudo apt install --only-upgrade werkterm");
-    expect(textOf(tree)).toContain(aptRepoNote);
+    expect(textOf(tree)).toContain(aptRepoNote());
     expect(labels(tree)).toEqual(["Kopieren", "Schließen"]);
     expect(primaries(tree)).toEqual([]);
-    expect(textOf(tree)).not.toContain(updateRestartNote);
+    expect(textOf(tree)).not.toContain(updateRestartNote());
     (button(tree, "Kopieren")!.props.onClick as () => void)();
     expect(handlers.onCopy).toHaveBeenCalledWith(aptCommand);
   });
@@ -144,16 +144,16 @@ describe("update available", () => {
     expect(textOf(findAll(tree, e => e.type === "code")[0])).toBe(updateDownloadUrl);
     expect(labels(tree)).toEqual(["Kopieren", "Schließen"]);
     expect(primaries(tree)).toEqual([]);
-    expect(textOf(tree)).not.toContain(updateRestartNote);
+    expect(textOf(tree)).not.toContain(updateRestartNote());
     (button(tree, "Kopieren")!.props.onClick as () => void)();
     expect(handlers.onCopy).toHaveBeenCalledWith(updateDownloadUrl);
   });
   it("blocked without a reason falls back to a general sentence", () => {
-    expect(textOf(render(offer({ canInstall: false, blockedReason: null })))).toContain(blockedFallback);
+    expect(textOf(render(offer({ canInstall: false, blockedReason: null })))).toContain(blockedFallback());
   });
   it.each(["rpm", "other"] as const)("%s: download address as copyable text, no install button, nothing opens by itself", kind => {
     const tree = render(offer({ selfUpdate: false, installKind: kind }));
-    expect(textOf(tree)).toContain(downloadNote);
+    expect(textOf(tree)).toContain(downloadNote());
     expect(textOf(findAll(tree, e => e.type === "code")[0])).toBe("https://pkg.werklade.de/werkterm/");
     expect(labels(tree)).toEqual(["Kopieren", "Schließen"]);
     expect(findAll(tree, e => e.type === "a")).toHaveLength(0);
@@ -193,14 +193,14 @@ describe("installing", () => {
     const tree = render(installing({ downloaded: 1024, total: null }));
     expect(bar(tree).props["aria-valuenow"]).toBeUndefined();
     expect(findAll(bar(tree).props.children as ReactNode, e => String(e.props.className).includes("indeterminate"))).toHaveLength(1);
-    expect(String(bar(tree).props["aria-valuetext"])).toBe("1.0 KB heruntergeladen");
+    expect(String(bar(tree).props["aria-valuetext"])).toBe("1,0 KB heruntergeladen");
   });
   it("blocks closing: disabled button, Esc ignored, reason stated, no primary button", () => {
     const tree = render(installing());
     expect(button(tree, "Schließen")!.props.disabled).toBe(true);
     expect(cancel(tree)).toHaveBeenCalled();
     expect(handlers.onClose).not.toHaveBeenCalled();
-    expect(textOf(tree)).toContain(cancelBlockedNote);
+    expect(textOf(tree)).toContain(cancelBlockedNote());
     expect(primaries(tree)).toEqual([]);
   });
   it("keeps the focus inside the dialog on the progress bar", () => {

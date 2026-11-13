@@ -3,7 +3,7 @@ import { Children, isValidElement, type ReactElement, type ReactNode } from "rea
 import { UpdateTransfersDialog } from "./UpdateTransfersDialog";
 import { RestartDialog } from "./DataDirForm";
 
-vi.mock("react", async importOriginal => ({ ...await importOriginal<typeof import("react")>(), useId: () => "test-id" }));
+vi.mock("react", async importOriginal => ({ ...await importOriginal<typeof import("react")>(), useId: () => "test-id", useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot() }));
 vi.mock("./useModal", () => ({ useModal: () => ({ current: null }) }));
 
 type Element = ReactElement<Record<string, unknown>>;

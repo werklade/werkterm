@@ -1,4 +1,5 @@
 import { keyringErrorText } from "../lib/keyringErrors";
+import { tp, useT } from "../i18n";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { buildSessionTree, collectFolderSessions, deleteSessions, selectSessions, jumpHostHint, searchSessions, sessionLabel, type SavedSession, type SessionFolder } from "../lib/sessions";
 import { KindIcon } from "./KindIcon";
@@ -27,6 +28,7 @@ function loadExpanded(): Record<string, boolean> {
   return {};
 }
 export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus, onDeleted }: Props) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(loadExpanded);
   const [selected, setSelected] = useState("");
@@ -89,45 +91,45 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus,
       const row = rows.find(item => item.key === selected); if (row) choose(row);
     }
   }}>
-    <div className="sessions-toolbar" aria-label="Sitzungsaktionen">
-      {selectedSessions.length >= 2 && <span aria-live="polite">{selectedSessions.length} ausgewählt</span>}
-      <button title="Neue Sitzung" aria-label="Neue Sitzung" onClick={() => onEdit()}><Icon name="file-new" /></button>
-      <button title="Bearbeiten" aria-label="Bearbeiten" disabled={!current} onClick={() => onEdit(current)}><Icon name="edit" /></button>
-      <button title="Löschen" aria-label="Löschen" disabled={!selectedSessions.length} onClick={() => setDeleting(selectedSessions)}><Icon name="delete" /></button>
-      <button title={selectedSessions.length ? `${selectedSessions.length === 1 ? "Ausgewählte Sitzung" : `${selectedSessions.length} ausgewählte Sitzungen`} exportieren` : "Alle Sitzungen exportieren"} aria-label="Exportieren" onClick={() => void chooseSessionExport(selectedSessions.map(session => session.id), onStatus)}><Icon name="download" /></button>
-      <button title="Importieren" aria-label="Importieren" aria-expanded={importMenu} onClick={() => setImportMenu(!importMenu)}><Icon name="upload" /></button>
-      <button title="Aktualisieren" aria-label="Aktualisieren" onClick={onReload}><Icon name="refresh" /></button>
+    <div className="sessions-toolbar" aria-label={t("sessions.actions")}>
+      {selectedSessions.length >= 2 && <span aria-live="polite">{t("sessions.selected", { count: selectedSessions.length })}</span>}
+      <button title={t("sessions.new")} aria-label={t("sessions.new")} onClick={() => onEdit()}><Icon name="file-new" /></button>
+      <button title={t("sessions.edit")} aria-label={t("sessions.edit")} disabled={!current} onClick={() => onEdit(current)}><Icon name="edit" /></button>
+      <button title={t("common.delete")} aria-label={t("common.delete")} disabled={!selectedSessions.length} onClick={() => setDeleting(selectedSessions)}><Icon name="delete" /></button>
+      <button title={selectedSessions.length ? tp("sessions.exportSelected", selectedSessions.length) : t("sessions.exportAll")} aria-label={t("sessions.export")} onClick={() => void chooseSessionExport(selectedSessions.map(session => session.id), onStatus)}><Icon name="download" /></button>
+      <button title={t("sessions.import")} aria-label={t("sessions.import")} aria-expanded={importMenu} onClick={() => setImportMenu(!importMenu)}><Icon name="upload" /></button>
+      <button title={t("sessions.refresh")} aria-label={t("sessions.refresh")} onClick={onReload}><Icon name="refresh" /></button>
     </div>
-    {importMenu && <div className="sessions-import-menu"><button title="Aus Werkterm-Datei importieren" onClick={() => { setImportMenu(false); setImportSource("werkterm"); }}>Aus Werkterm-Datei…</button><button title="Aus MobaXterm importieren" onClick={() => { setImportMenu(false); setImportSource("mobaxterm"); }}>Aus MobaXterm…</button><button title="Aus WindTerm importieren" onClick={() => { setImportMenu(false); setImportSource("windterm"); }}>Aus WindTerm…</button></div>}
-    <input className="sessions-search" aria-label="Sitzungen suchen" placeholder="Sitzungen suchen…" value={query} onChange={event => setQuery(event.target.value)} />
-    <div className="sessions-list" role="tree" aria-multiselectable="true" aria-label="Gespeicherte Sitzungen">
+    {importMenu && <div className="sessions-import-menu"><button title={t("sessions.import.werktermTitle")} onClick={() => { setImportMenu(false); setImportSource("werkterm"); }}>{t("sessions.import.werkterm")}</button><button title={t("sessions.import.mobaxtermTitle")} onClick={() => { setImportMenu(false); setImportSource("mobaxterm"); }}>{t("sessions.import.mobaxterm")}</button><button title={t("sessions.import.windtermTitle")} onClick={() => { setImportMenu(false); setImportSource("windterm"); }}>{t("sessions.import.windterm")}</button></div>}
+    <input className="sessions-search" aria-label={t("sessions.search")} placeholder={t("sessions.search.placeholder")} value={query} onChange={event => setQuery(event.target.value)} />
+    <div className="sessions-list" role="tree" aria-multiselectable="true" aria-label={t("sessions.list")}>
       {rows.map((row, index) => <div key={row.key} ref={element => { if (element) rowRefs.current.set(row.key, element); else rowRefs.current.delete(row.key); }} title={row.session ? jumpHostHint(row.session, sessions) || undefined : undefined} role="treeitem" aria-level={row.depth + 1} aria-expanded={row.folder ? Boolean(query || expanded[row.folder.path]) : undefined} aria-selected={row.session ? selectedSessions.some(session => session.id === row.session?.id) : selected === row.key} tabIndex={selected === row.key || (!rows.some(item => item.key === selected) && index === 0) ? 0 : -1} className="session-row" style={{ paddingLeft: 8 + row.depth * 14 }} onPointerDown={() => { preserveSelectionOnFocus.current = true; }} onPointerUp={() => { preserveSelectionOnFocus.current = false; }} onFocus={() => { setSelected(row.key); if (!preserveSelectionOnFocus.current && (selected !== row.key || selection.ids.length === 0)) choose(row); }} onClick={event => { choose(row, event.shiftKey ? "range" : event.ctrlKey || event.metaKey ? "toggle" : "single"); if (row.folder) toggle(row.folder.path); }} onDoubleClick={() => row.session && onConnect(row.session)} onKeyDown={event => keyDown(event, row, index)} onContextMenu={event => { event.preventDefault(); setSelected(row.key); if (row.session && !selectedSessions.some(session => session.id === row.session?.id)) choose(row); setContext({ x: event.clientX, y: event.clientY, row }); }}>
         <span aria-hidden="true">{row.folder ? query || expanded[row.folder.path] ? "▾" : "▸" : ""}</span>{row.folder ? <Icon name="folder" /> : <KindIcon kind={row.session?.kind ?? "ssh"} />}<span className="session-row-label">{row.folder?.name ?? row.session?.name}{row.session && <small title={[sessionLabel(row.session), jumpHostHint(row.session, sessions)].filter(Boolean).join(" – ")}>{sessionLabel(row.session)}{row.session.jumpSessionId && <> · <span className="jump-inline"><Icon name="jump" /></span> {jumpHostHint(row.session, sessions)}</>}</small>}</span>
       </div>)}
-      {rows.length === 0 && <p className="empty-state">{query ? "Keine passenden Sitzungen." : "Noch keine gespeicherten Sitzungen."}</p>}
+      {rows.length === 0 && <p className="empty-state">{query ? t("sessions.empty.search") : t("sessions.empty")}</p>}
     </div>
-    {context && <div ref={contextRef} className="session-context" role="menu" aria-label="Sitzungsaktionen" style={{ left: Math.min(context.x, window.innerWidth - 160), top: Math.min(context.y, Math.max(0, window.innerHeight - 170)) }} onKeyDown={event => { if (event.key === "Escape") { setContext(null); preserveSelectionOnFocus.current = true; rowRefs.current.get(context.row.key)?.focus(); preserveSelectionOnFocus.current = false; } if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); const buttons = Array.from(contextRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []); const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); } }}>
-      {context.row.session && <><button role="menuitem" onClick={() => { onConnect(context.row.session!); setContext(null); }}>Verbinden</button><button role="menuitem" disabled={selectedSessions.length !== 1} onClick={() => { onEdit(context.row.session); setContext(null); }}>Bearbeiten</button></>}
+    {context && <div ref={contextRef} className="session-context" role="menu" aria-label={t("sessions.actions")} style={{ left: Math.min(context.x, window.innerWidth - 160), top: Math.min(context.y, Math.max(0, window.innerHeight - 170)) }} onKeyDown={event => { if (event.key === "Escape") { setContext(null); preserveSelectionOnFocus.current = true; rowRefs.current.get(context.row.key)?.focus(); preserveSelectionOnFocus.current = false; } if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); const buttons = Array.from(contextRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []); const index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); } }}>
+      {context.row.session && <><button role="menuitem" onClick={() => { onConnect(context.row.session!); setContext(null); }}>{t("sessions.connect")}</button><button role="menuitem" disabled={selectedSessions.length !== 1} onClick={() => { onEdit(context.row.session); setContext(null); }}>{t("sessions.edit")}</button></>}
       <button role="menuitem" onClick={() => {
         const targets = context.row.folder ? folderSessions(context.row.folder) : selectedSessions;
         setContext(null);
         if (targets.length) void chooseSessionExport(targets.map(session => session.id), onStatus);
-      }}>{context.row.folder ? "Ordner exportieren…" : selectedSessions.length >= 2 ? `${selectedSessions.length} Sitzungen exportieren…` : "Sitzung exportieren…"}</button>
+      }}>{context.row.folder ? t("sessions.exportFolder") : tp("sessions.exportCount", Math.max(1, selectedSessions.length))}</button>
       <button role="menuitem" onClick={() => {
         setDeleting(context.row.folder ? folderSessions(context.row.folder) : selectedSessions);
         setContext(null);
-      }}>{context.row.folder ? "Ordner mit allen Sitzungen löschen" : `${selectedSessions.length} Sitzungen löschen`}</button>
+      }}>{context.row.folder ? t("sessions.deleteFolder") : tp("sessions.deleteCount", Math.max(1, selectedSessions.length))}</button>
     </div>}
-    {deleting && <FileActionDialog prompt={{ type: "delete", message: `${deleting.length} Sitzungen löschen?\n${deleting.slice(0, 10).map(session => session.name).join("\n")}${deleting.length > 10 ? `\n… und ${deleting.length - 10} weitere` : ""}\nGespeicherte Passwörter werden aus dem Schlüsselbund entfernt.`, answer: accepted => {
+    {deleting && <FileActionDialog prompt={{ type: "delete", message: `${tp("sessions.deleteConfirm", deleting.length)}\n${deleting.slice(0, 10).map(session => session.name).join("\n")}${deleting.length > 10 ? `\n${t("sessions.deleteMore", { count: deleting.length - 10 })}` : ""}\n${t("sessions.deleteKeyring")}`, answer: accepted => {
       const targets = deleting; setDeleting(null);
       if (accepted) void deleteSessions(targets.map(session => session.id)).then(result => {
         onReload();
         if (result.deleted.length) onDeleted?.(result.deleted);
         setSelection(previous => ({ ...previous, ids: previous.ids.filter(id => !result.deleted.includes(id)) }));
-        onStatus([`${result.deleted.length}${result.blocked.length ? ` gelöscht, ${result.blocked.length} nicht gelöscht: ${result.blocked.map(item => `${item.name} (${item.reason})`).join(", ")}` : " Sitzungen gelöscht"}`, ...result.warnings.map(keyringErrorText)].join("; "));
+        onStatus([result.blocked.length ? t("sessions.deletedBlocked", { deleted: result.deleted.length, blocked: result.blocked.length, items: result.blocked.map(item => `${item.name} (${item.reason})`).join(", ") }) : tp("sessions.deleted", result.deleted.length), ...result.warnings.map(keyringErrorText)].join("; "));
       }).catch(reason => { onReload(); onStatus(keyringErrorText(reason)); });
     } }} />}
-    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([`${result.imported} Sitzungen importiert, ${result.skippedDuplicates} übersprungen`, ...(result.warnings ?? [])].join("; ")); }} />}
-    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([`${result.imported} Sitzungen importiert, ${result.skippedDuplicates} Duplikate übersprungen`, ...(result.warnings ?? [])].join("; ")); }} />}
+    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([tp("sessions.imported", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? [])].join("; ")); }} />}
+    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([tp("sessions.imported", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? [])].join("; ")); }} />}
   </div>;
 }

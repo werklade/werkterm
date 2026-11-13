@@ -1,4 +1,5 @@
-import { localFileName, transferText, type TransferProgress } from "./transferFormat";
+import { backendErrorText, localFileName, transferText, type TransferProgress } from "./transferFormat";
+import { t } from "../i18n";
 import { parentPath } from "./paths";
 
 export type TransferJob =
@@ -77,7 +78,7 @@ export class TransferQueue<C> {
     active.controller.abort();
     if (active.transferId !== undefined) {
       active.cancellation = this.dependencies.cancel(active.transferId).catch(reason => {
-        this.dependencies.report(`Transfer konnte nicht abgebrochen werden: ${String(reason)}`);
+        this.dependencies.report(t("transfer.cancelFailed", { reason: backendErrorText(reason) }));
       });
     }
   }
@@ -128,14 +129,14 @@ export class TransferQueue<C> {
     try {
       let entry: Entry | undefined;
       while ((entry = this.pending.shift()) !== undefined) {
-        const active: Active = { ...entry, controller: new AbortController(), text: "Transfer wird vorbereitet…" };
+        const active: Active = { ...entry, controller: new AbortController(), text: t("transfer.preparing") };
         this.active = active;
         this.emit();
         let error: string | undefined;
         try { await this.execute(active); }
         catch (reason: unknown) {
           if (!active.controller.signal.aborted) {
-            error = String(reason).startsWith("DIRECTORY:") ? "Ordner-Upload folgt später" : String(reason);
+            error = backendErrorText(reason);
             this.dependencies.report(error);
           }
         }

@@ -7,6 +7,7 @@ vi.mock("react", async importOriginal => ({
   ...await importOriginal<typeof import("react")>(),
   useState: (initial: unknown) => [initial, vi.fn()],
   useId: () => "test-paste",
+  useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
 }));
 vi.mock("./useModal", () => ({ useModal: () => ({ current: null }) }));
 

@@ -1,7 +1,7 @@
 import { getDesign } from "./designs";
-import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
+import { ansiKeys, importedThemeId, terminalThemes, type TerminalTheme } from "./terminalThemes";
 import { emptyPasteRemember, normalizePasteRemember, type PasteRemember } from "./paste";
-import type { LanguageSetting } from "../i18n";
+import { t, type LanguageSetting } from "../i18n";
 export interface Settings {
   design: string;
   iconSet: string;
@@ -67,10 +67,10 @@ export function normalizeSettings(input: unknown): Settings {
     result.importedTheme = { ...base };
     for (const key of [...ansiKeys, "background", "foreground", "cursor", "selectionBackground"] as const) if (typeof colors[key] === "string" && /^#[0-9a-f]{6}$/i.test(colors[key])) result.importedTheme[key] = colors[key];
   }
-  if (typeof v.theme === "string" && (v.theme === "design" || Object.prototype.hasOwnProperty.call(terminalThemes, v.theme) || (v.theme === "MobaXterm (importiert)" && result.importedTheme))) result.theme = v.theme;
+  if (typeof v.theme === "string" && (v.theme === "design" || Object.prototype.hasOwnProperty.call(terminalThemes, v.theme) || (v.theme === importedThemeId && result.importedTheme))) result.theme = v.theme;
   return result;
 }
-export function selectedTheme(settings: Settings): TerminalTheme { return settings.theme === "design" ? getDesign(settings.design).terminal : settings.theme === "MobaXterm (importiert)" && settings.importedTheme ? settings.importedTheme : terminalThemes[settings.theme] ?? terminalThemes["Werkterm Dunkel"]; }
+export function selectedTheme(settings: Settings): TerminalTheme { return settings.theme === "design" ? getDesign(settings.design).terminal : settings.theme === importedThemeId && settings.importedTheme ? settings.importedTheme : terminalThemes[settings.theme] ?? terminalThemes["Werkterm Dunkel"]; }
 /** Raw localStorage text (current key, then the legacy key). Only a cache: settings.json is the source of truth. */
 export function cachedSettingsText(): string | null {
   try { return localStorage.getItem(storageKey) ?? localStorage.getItem("linmoba.settings"); } catch { return null; }
@@ -107,8 +107,8 @@ export function interpretLoaded(fileText: string | null, cacheText: string | nul
   const local = localValues(cacheText);
   if (fileText !== null) {
     let parsed: unknown;
-    try { parsed = JSON.parse(fileText); } catch { return { ok: false, error: "settings.json ist kein gültiges JSON" }; }
-    if (!isPlainObject(parsed)) return { ok: false, error: "settings.json enthält kein JSON-Objekt" };
+    try { parsed = JSON.parse(fileText); } catch { return { ok: false, error: t("settings.error.invalidJson") }; }
+    if (!isPlainObject(parsed)) return { ok: false, error: t("settings.error.notObject") };
     return { ok: true, settings: { ...normalizeSettings(parsed), ...local }, migrated: false };
   }
   if (cacheText === null || !allowMigrate) return { ok: true, settings: { ...normalizeSettings(null), ...local }, migrated: false };

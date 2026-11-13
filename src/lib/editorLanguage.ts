@@ -1,3 +1,11 @@
+import { t } from "../i18n";
+
+/** Display name for the status bar: generic words are translated, proper language names stay as CodeMirror names them. */
+export function languageDisplayName(name: string | null): string {
+  if (name === null) return t("editor.language.plain");
+  return name === "Properties files" ? t("editor.language.properties") : name;
+}
+
 /** Resolve interpreters from a shebang; filename matching takes precedence in the view. */
 export function languageFromShebang(text: string): string | null {
   const line = text.split(/\r?\n/, 1)[0];

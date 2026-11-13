@@ -299,7 +299,7 @@ describe("SettingsSync", () => {
       io.load.mockResolvedValue(theirsFile(5));
       sync.schedule(withFont(16));
       await expect(sync.flush()).resolves.toBeUndefined();
-      expect(report).toHaveBeenCalledWith(`Einstellungen nicht gespeichert: ${conflictReason}`);
+      expect(report).toHaveBeenCalledWith(`Einstellungen nicht gespeichert: ${conflictReason()}`);
       expect(report).toHaveBeenCalledWith("Einstellungen nicht gespeichert: Datei wurde gleichzeitig geändert");
       expect(onSaved).not.toHaveBeenCalled();
       expect(sync.hasPending()).toBe(true);

@@ -31,6 +31,6 @@ it("formats status and byte directions", () => {
   const status: TunnelStatus = { id: "one", state: "error", error: "Port 8080 ist bereits belegt", connections: 0, bytes_in: 0, bytes_out: 0, bound_port: null };
   expect(statusText(status)).toBe("Fehler: Port 8080 ist bereits belegt");
   expect(statusText({ ...status, state: "running", error: null })).toBe("Aktiv");
-  expect(formatBytes(0)).toBe("0 B"); expect(formatBytes(1024)).toBe("1.0 KiB"); expect(formatBytes(1048576)).toBe("1.0 MiB");
+  expect(formatBytes(0)).toBe("0 B"); expect(formatBytes(1024)).toBe("1,0 KiB"); expect(formatBytes(1048576)).toBe("1,0 MiB");
 });
 it("shows the jump chain", () => { expect(sessionRoute("ssh", [{ ...session, jumpSessionId: "jump" }, { ...session, id: "jump", name: "Gateway" }])).toBe("Server über Gateway"); });

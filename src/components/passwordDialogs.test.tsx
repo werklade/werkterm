@@ -18,6 +18,7 @@ vi.mock("react", async importOriginal => ({
   useState: (initial: unknown) => [initial === null ? host.keyring : typeof initial === "function" ? initial() : initial, vi.fn()],
   useRef: (current: unknown) => ({ current }),
   useId: () => "test-dialog",
+  useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
   useEffect: vi.fn(),
   useReducer: (reducer: typeof passwordInputReducer) => [host.password, (action: Parameters<typeof passwordInputReducer>[1]) => {
     host.password = reducer(host.password, action);
@@ -118,7 +119,7 @@ describe("password field accessibility and errors", () => {
   });
   it("shows the specific keyring error and the alternative login hint", () => {
     expect(sessionSaveError("KEYRING_LOCKED: Schlüsselbund ist gesperrt")).toBe(
-      "Schlüsselbund ist gesperrt. Bitte entsperren oder Anmeldung 'Beim Verbinden fragen' wählen.",
+      "Schlüsselbund ist gesperrt. Entsperren oder Anmeldung „Beim Verbinden fragen“ wählen.",
     );
     expect(sessionSaveError(new Error("Sitzungsdatei konnte nicht gespeichert werden"))).toBe("Sitzungsdatei konnte nicht gespeichert werden");
   });

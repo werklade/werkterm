@@ -1,9 +1,11 @@
 import { inputTargets, type Recipient } from "./multiExec";
 import { shortcutAction, type ShortcutEvent } from "./menu";
+import { formatShortcut } from "./formatShortcut";
+import { currentLocale, t } from "../i18n";
 
 export type MacroStep = { type: "text"; text: string } | { type: "wait"; ms: number } | { type: "prompt"; label: string; secret: boolean };
 export interface Macro { id: string; name: string; steps: MacroStep[]; shortcut: string | null; created: number; updated: number }
-export const newMacro = (steps: MacroStep[] = []): Macro => ({ id: crypto.randomUUID(), name: `Makro ${new Date().toLocaleString()}`, steps, shortcut: null, created: Date.now(), updated: Date.now() });
+export const newMacro = (steps: MacroStep[] = []): Macro => ({ id: crypto.randomUUID(), name: t("macro.defaultName", { date: new Date().toLocaleString(currentLocale()) }), steps, shortcut: null, created: Date.now(), updated: Date.now() });
 
 /** Reversible display syntax. Enter is CR for terminal input; LF retains its own escape. */
 export function escapeText(text: string): string {
@@ -27,7 +29,7 @@ export function unescapeText(text: string): string {
     else if (code === "e") result += "\x1b";
     else if (code === "\\") result += "\\";
     else if (code === "x" && /^[0-9a-f]{2}$/i.test(text.slice(i + 1, i + 3))) { result += String.fromCharCode(parseInt(text.slice(i + 1, i + 3), 16)); i += 2; }
-    else throw new Error("Ungültige Escape-Sequenz. Erlaubt: \\n, \\t, \\e, \\xNN, \\\\");
+    else throw new Error(t("macro.error.escape"));
   }
   return result;
 }
@@ -52,6 +54,10 @@ export function parseShortcut(value: string): string | null {
   if (!match) return null;
   return match[2] ? `Ctrl+Alt+${match[2].toUpperCase()}` : `Ctrl+Shift+${match[3].toUpperCase()}`;
 }
+/** Display text of a stored shortcut ("Ctrl+Alt+A" -> "Strg+Alt+A" / "Ctrl+Alt+A"). */
+export const displayShortcut = (value: string): string => formatShortcut(value.split("+").map(part => /^ctrl$/i.test(part) ? "ctrl" : /^shift$/i.test(part) ? "shift" : part));
+/** Hint shown for invalid combinations. */
+export const allowedShortcuts = (): string => t("macro.error.allowed", { alt: formatShortcut(["ctrl", "Alt", "0–9/A–Z"]), fn: formatShortcut(["ctrl", "shift", "F1–F12"]) });
 export function shortcutFromEvent(event: ShortcutEvent): string | null {
   if (event.metaKey) return null;
   const key = /^(Digit[0-9]|Key[A-Z])$/.test(event.code) ? event.code.replace(/^(Digit|Key)/, "") : event.key;
@@ -61,10 +67,10 @@ export function shortcutConflict(value: string, items: Macro[], id: string): str
   if (!value) return null;
   const parts = value.replace(/Strg/gi, "Ctrl").replace(/Umschalt/gi, "Shift").split("+");
   const key = parts[parts.length - 1] ?? "";
-  if (shortcutAction({ key, code: key === "0" ? "Digit0" : key, ctrlKey: parts.includes("Ctrl"), shiftKey: parts.includes("Shift"), altKey: parts.includes("Alt"), metaKey: false }, false)) return "Konflikt mit einem App-Tastenkürzel";
+  if (shortcutAction({ key, code: key === "0" ? "Digit0" : key, ctrlKey: parts.includes("Ctrl"), shiftKey: parts.includes("Shift"), altKey: parts.includes("Alt"), metaKey: false }, false)) return t("macro.error.conflict");
   const shortcut = parseShortcut(value);
-  if (!shortcut) return "Erlaubt: Strg+Alt+0–9/A–Z oder Strg+Umschalt+F1–F12";
-  return items.some(item => item.id !== id && item.shortcut === shortcut) ? "Tastenkürzel bereits vergeben" : null;
+  if (!shortcut) return allowedShortcuts();
+  return items.some(item => item.id !== id && item.shortcut === shortcut) ? t("macro.error.taken") : null;
 }
 
 export const macroTargets = (focused: number | null, recipients: Recipient[], multiExec: boolean): number[] => focused === null ? [] : multiExec ? inputTargets(focused, recipients) : recipients.filter(t => t.id === focused && !t.exited).map(t => t.id);

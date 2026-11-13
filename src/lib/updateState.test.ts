@@ -31,7 +31,7 @@ describe("update state machine", () => {
   });
   it("rejects an available answer without a usable version", () => {
     const state = run([{ type: "info", info: info() }, { type: "checked", check: available({ version: "<>" }) }]);
-    expect(state).toMatchObject({ phase: "error", message: invalidAnswerMessage, retry: "check" });
+    expect(state).toMatchObject({ phase: "error", message: invalidAnswerMessage(), retry: "check" });
   });
   it("turns failures into the error phase with the matching retry target", () => {
     expect(run([{ type: "failed", message: "x" }])).toMatchObject({ phase: "error", info: null, retry: "info" });
@@ -102,7 +102,7 @@ describe("install notes and errors", () => {
     expect(isRestartRequired(new Error("UPDATE_RESTART_REQUIRED"))).toBe(true);
     expect(isRestartRequired("UPDATE_RESTART_REQUIRED.")).toBe(false);
     expect(isRestartRequired("Update-Server nicht erreichbar")).toBe(false);
-    expect(restartRequiredMessage).toBe("Das Update wurde nicht installiert. Werkterm muss neu gestartet werden.");
+    expect(restartRequiredMessage()).toBe("Das Update wurde nicht installiert. Werkterm muss neu gestartet werden.");
   });
   it("words the transfer question", () => {
     expect(transfersMessage(3)).toBe("3 Übertragungen laufen und werden abgebrochen.");
@@ -117,7 +117,7 @@ describe("install notes and errors", () => {
   });
   it("the apt command upgrades only and needs the repository", () => {
     expect(aptCommand).toBe("sudo apt update && sudo apt install --only-upgrade werkterm");
-    expect(aptRepoNote).toBe("Funktioniert nur, wenn das Werklade-Repository eingebunden ist.");
+    expect(aptRepoNote()).toBe("Funktioniert nur, wenn das Werklade-Repository eingebunden ist.");
   });
   it("drops late answers after the dialog was closed", () => {
     let open = true;
@@ -205,8 +205,8 @@ describe("date and progress", () => {
     expect(progressPercent(NaN, 100)).toBeNull();
   });
   it("describes the progress as text", () => {
-    expect(progressText(512 * 1024, 2 * 1024 * 1024)).toBe("512.0 KB von 2.0 MB (25 %)");
-    expect(progressText(1024, null)).toBe("1.0 KB heruntergeladen");
+    expect(progressText(512 * 1024, 2 * 1024 * 1024)).toBe("512,0 KB von 2,0 MB (25 %)");
+    expect(progressText(1024, null)).toBe("1,0 KB heruntergeladen");
   });
   it("normalizes backend progress messages", () => {
     expect(normalizeProgress({ downloaded: 10, total: 100 })).toEqual({ downloaded: 10, total: 100 });
@@ -287,7 +287,7 @@ describe("start check (no connection without consent)", () => {
     expect(await createStartupChecker(deps({ check: async () => ({ available: false, version: null, notes: null, pubDate: null }) })).run(true, true)).toBeNull();
   });
   it("describes the setting without promising more than it does", () => {
-    expect(updateStartNote).toBe("Fragt beim Start einmal pkg.werklade.de ab. Es werden keine Daten übertragen.");
+    expect(updateStartNote()).toBe("Fragt beim Start einmal pkg.werklade.de ab. Es werden keine Daten übertragen.");
   });
 });
 

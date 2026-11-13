@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 export interface IconSnapshot { name: string; overrides: Readonly<Record<string, string>> }
 let snapshot: IconSnapshot = { name: "Standard", overrides: {} };
 const listeners = new Set<() => void>();
@@ -20,4 +21,6 @@ export async function activateIconSet(name: string) {
   const overrides = await invoke<Record<string, string>>("icon_sets_load", { id: name });
   if (current === request) setIconSet(name, overrides);
 }
+/** Display name of a built-in icon set id; "Standard" is the persisted id of the default set. */
+export const iconSetLabel = (id: string): string => id === "Standard" ? t("iconSet.standard") : id;
 export interface StoredIconSet { id: string; name: string; icons: string[] }

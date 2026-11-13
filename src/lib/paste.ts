@@ -1,3 +1,4 @@
+import { t, tp } from "../i18n";
 export type PasteConfirm = "multiline" | "always" | "never";
 export function hasPasteControls(text: string): boolean { return /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(text); }
 export function shouldConfirmPaste(text: string, mode: PasteConfirm): boolean {
@@ -94,9 +95,9 @@ export function pruneDeleted(remember: PasteRemember, deletedIds: Iterable<strin
 export function hasRemembered(remember: PasteRemember, tabCount = 0): boolean { return remember.global !== null || Object.keys(remember.sessions).length > 0 || tabCount > 0; }
 export function describeRemembered(remember: PasteRemember, tabCount = 0): string {
   const parts: string[] = [];
-  if (remember.global) parts.push("dauerhaft");
+  if (remember.global) parts.push(t("paste.rememberedGlobal"));
   const count = Object.keys(remember.sessions).length;
-  if (count > 0) parts.push(count === 1 ? "1 Profil" : `${count} Profile`);
-  if (tabCount > 0) parts.push(tabCount === 1 ? "1 Tab" : `${tabCount} Tabs`);
-  return parts.length ? `Gemerkt: ${parts.join(", ")}` : "Nichts gemerkt";
+  if (count > 0) parts.push(tp("paste.profiles", count));
+  if (tabCount > 0) parts.push(tp("paste.tabs", tabCount));
+  return parts.length ? t("paste.remembered", { parts: parts.join(", ") }) : t("paste.nothingRemembered");
 }

@@ -1,6 +1,7 @@
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { t } from "../i18n";
 
-const unavailable = () => new Error("Zwischenablage nicht verfügbar");
+const unavailable = () => new Error(t("clipboard.unavailable"));
 
 export async function readClipboardText(): Promise<string> {
   try { return await readText(); } catch { throw unavailable(); }

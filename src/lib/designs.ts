@@ -1,4 +1,5 @@
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
+import { t, type TextKey } from "../i18n";
 import { luminance, mixColor, parseColor } from "./colorCodes";
 import werkladeTokens from "../brand/werklade.tokens.json";
 export const uiTokens = ["bg-content", "bg-app", "bg-panel", "bg-panel-alt", "bg-toolbar", "bg-menubar", "bg-input", "bg-hover", "bg-active", "bg-tab", "bg-tab-active", "fg-primary", "fg-secondary", "fg-muted", "fg-inverse", "accent", "accent-hover", "accent-hover-fill", "border", "border-strong", "focus-ring", "danger", "warning", "success", "on-accent", "monitor-ok", "monitor-warn", "monitor-critical", "selection", "backdrop", "shadow", "warning-bg", "error-bg", "indent-guide", "diff-added", "diff-deleted", "diff-added-text", "diff-deleted-text"] as const;
@@ -100,6 +101,11 @@ export function getUserDesigns(): StoredDesign[] { return [...users].map(([id, d
 export function getDesign(name: string): Design {
   return (Object.prototype.hasOwnProperty.call(builtInDesigns, name) ? builtInDesigns[name] : undefined)
     ?? [...users.values()].find(design => design.name === name) ?? builtInDesigns["Werklade Dunkel"];
+}
+const designLabels: Record<string, TextKey> = { "Werkterm Dunkel": "design.name.werktermDark", "Werklade Dunkel": "design.name.werkladeDark", "Werklade Hell": "design.name.werkladeLight" };
+/** Display name of a design id: built-in names are translated, user-created names are shown as they are. */
+export function designLabel(id: string): string {
+  return Object.prototype.hasOwnProperty.call(designLabels, id) ? t(designLabels[id]) : id;
 }
 export function designColorScheme(design: Design): "light" | "dark" {
   return luminance(parseColor(design.ui["bg-app"])!) > 140 ? "light" : "dark";

@@ -1,6 +1,7 @@
 import { usePasswordInput } from "../lib/passwordInput";
 import { PasswordField } from "./PasswordField";
 import type { SshPrompt } from "../lib/ssh";
+import { useT } from "../i18n";
 import { useModal } from "./useModal";
 
 interface Props {
@@ -10,10 +11,12 @@ interface Props {
 }
 
 export function SecretDialog({ prompt, onAnswer, title }: Props) {
+  const t = useT();
   const dialog = useModal();
   const secret = usePasswordInput();
   const cancel = () => { secret.reset(); onAnswer(null); };
-  const label = title ?? `${prompt.kind === "username" ? "Benutzer" : prompt.kind === "password" ? "Passwort" : "Passphrase"} für ${prompt.label}`;
+  const labelKeys = { username: "secret.label.username", password: "secret.label.password", passphrase: "secret.label.passphrase" } as const;
+  const label = title ?? t(labelKeys[prompt.kind], { label: prompt.label });
   return <dialog ref={dialog} className="ssh-dialog" role="dialog" aria-modal="true" aria-labelledby="secret-title" onCancel={event => { event.preventDefault(); cancel(); }}>
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();
@@ -28,8 +31,8 @@ export function SecretDialog({ prompt, onAnswer, title }: Props) {
       <h2 id="secret-title">{label}</h2>
       {prompt.kind === "username" ? <input autoFocus required autoComplete="off" aria-label={label} value={secret.value} onChange={event => secret.change(event.target.value)} /> : <PasswordField autoFocus autoComplete="off" aria-label={label} value={secret.value} visible={secret.visible} onToggle={secret.toggle} onChange={event => secret.change(event.target.value)} />}
       <div className="dialog-actions">
-        <button type="submit">OK</button>
-        <button type="button" onClick={cancel}>Abbrechen</button>
+        <button type="submit">{t("common.ok")}</button>
+        <button type="button" onClick={cancel}>{t("common.cancel")}</button>
       </div>
     </form>
   </dialog>;

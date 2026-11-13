@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { cachedSettingsText, interpretLoaded, mergeSettings, normalizeSettings, saveSettings, serializeSettings, type Settings } from "./settings";
 import { isSettingsConflict, settingsLoadRaw, settingsSaveRaw, type FileStamp, type LoadedSettingsFile } from "./dataDir";
 
@@ -52,7 +53,7 @@ export interface SettingsSyncHooks {
   /** A write conflict was resolved by merging; the merged result should replace the current state. */
   onMerged?(settings: Settings): void;
 }
-export const conflictReason = "Datei wurde gleichzeitig geändert";
+export const conflictReason = (): string => t("error.SETTINGS_CONFLICT");
 
 export class SettingsSync {
   private state: WriterState = initialWriter;
@@ -171,13 +172,13 @@ export class SettingsSync {
       this.hooks.onSaved?.(stamp);
       if (!newerQueued) { this.latest = merged; this.io.writeCache(merged); this.hooks.onMerged?.(merged); }
     } catch (reason) {
-      this.writeFailed(json, isSettingsConflict(reason) ? conflictReason : String(reason));
+      this.writeFailed(json, isSettingsConflict(reason) ? conflictReason() : String(reason));
     }
   }
 
   private writeFailed(json: string, reason: string): void {
     this.state = finishWrite(this.state, json, false);
-    this.report(`Einstellungen nicht gespeichert: ${reason}`);
+    this.report(t("sync.saveFailed", { reason }));
   }
   private arm(): void {
     if (this.state.pending === null) return;
@@ -186,7 +187,7 @@ export class SettingsSync {
   }
   private fail(reason: string): null {
     this.block();
-    this.report(`Einstellungen nicht geladen: ${reason}`);
+    this.report(t("sync.loadFailed", { reason }));
     return null;
   }
   private clearTimer(): void {

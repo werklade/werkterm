@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getLanguage } from "../i18n";
+import { getLanguage, t } from "../i18n";
 
 export interface SerialConfig { device: string; baud: number; data_bits: number; parity: "none" | "odd" | "even"; stop_bits: number; flow: "none" | "software" | "hardware"; enter: "cr" | "lf" | "crlf"; local_echo: boolean }
 export const defaultSerial: SerialConfig = { device: "", baud: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow: "none", enter: "cr", local_echo: false };
@@ -177,17 +177,17 @@ export function deselectNewImportDuplicates(
 
 /** Matches the persisted backend validation before attempting an IPC call. */
 export function validateSession(session: SavedSession): string | null {
-  if (!Number.isInteger(session.keepaliveInterval ?? 30) || (session.keepaliveInterval ?? 30) < 0 || (session.keepaliveInterval ?? 30) > 3600 || !Number.isInteger(session.keepaliveMax ?? 3) || (session.keepaliveMax ?? 3) < 1 || (session.keepaliveMax ?? 3) > 100) return "Keepalive: Intervall 0–3600, Maximum 1–100";
-  if (!session.name.trim()) return "Sitzungsname darf nicht leer sein";
-  if (!["ssh", "telnet", "serial"].includes(session.kind)) return "Unbekannter Sitzungstyp";
-  if (session.kind !== "ssh" && (session.jumpSessionId || session.auth.type !== "default")) return "Anmeldung und Jump host sind nur für SSH erlaubt";
+  if (!Number.isInteger(session.keepaliveInterval ?? 30) || (session.keepaliveInterval ?? 30) < 0 || (session.keepaliveInterval ?? 30) > 3600 || !Number.isInteger(session.keepaliveMax ?? 3) || (session.keepaliveMax ?? 3) < 1 || (session.keepaliveMax ?? 3) > 100) return t("session.validate.keepalive");
+  if (!session.name.trim()) return t("session.validate.nameEmpty");
+  if (!["ssh", "telnet", "serial"].includes(session.kind)) return t("session.validate.unknownKind");
+  if (session.kind !== "ssh" && (session.jumpSessionId || session.auth.type !== "default")) return t("session.validate.sshOnly");
   if (session.kind === "serial") {
     const c = session.serial;
-    return !c || !c.device.trim() || /\p{Cc}/u.test(c.device) || !Number.isInteger(c.baud) || c.baud < 1 || c.baud > 4294967295 || ![5,6,7,8].includes(c.data_bits) || ![1,2].includes(c.stop_bits) || !["none","odd","even"].includes(c.parity) || !["none","software","hardware"].includes(c.flow) || !["cr","lf","crlf"].includes(c.enter) ? "Ungültige serielle Parameter" : null;
+    return !c || !c.device.trim() || /\p{Cc}/u.test(c.device) || !Number.isInteger(c.baud) || c.baud < 1 || c.baud > 4294967295 || ![5,6,7,8].includes(c.data_bits) || ![1,2].includes(c.stop_bits) || !["none","odd","even"].includes(c.parity) || !["none","software","hardware"].includes(c.flow) || !["cr","lf","crlf"].includes(c.enter) ? t("session.validate.serial") : null;
   }
-  if (!session.host || /[\s\p{Cc}]/u.test(session.host)) return "Host darf nicht leer sein oder Leerzeichen enthalten";
-  if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535) return "Port muss zwischen 1 und 65535 liegen";
-  if (session.auth.type === "keyFile" && !session.auth.path.trim()) return "Schlüsselpfad darf nicht leer sein";
+  if (!session.host || /[\s\p{Cc}]/u.test(session.host)) return t("session.validate.host");
+  if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535) return t("session.validate.port");
+  if (session.auth.type === "keyFile" && !session.auth.path.trim()) return t("session.validate.keyPath");
   return null;
 }
 
@@ -210,7 +210,7 @@ export function jumpHostOptions(sessions: readonly SavedSession[], sessionId?: s
 
 export function jumpHostHint(session: SavedSession, sessions: readonly SavedSession[]): string {
   if (!session.jumpSessionId) return "";
-  return `über ${sessions.find(item => item.id === session.jumpSessionId)?.name ?? "unbekannten Jump host"}`;
+  return t("session.jumpVia", { name: sessions.find(item => item.id === session.jumpSessionId)?.name ?? t("session.jumpUnknown") });
 }
 
 export interface SessionSelection { ids: string[]; anchor: string }

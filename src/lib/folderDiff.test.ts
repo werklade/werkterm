@@ -5,14 +5,14 @@ const result = (left: FolderEntry[], right: FolderEntry[], content: Record<strin
 describe("folder comparisons", () => {
   it("merges by relative path and classifies all categories", () => {
     const rows = mergeFolders(result([entry("same"), entry("changed"), entry("left"), entry("type")], [entry("same"), entry("changed", 9), entry("right"), entry("type", 0, 100, "dir")]));
-    expect(Object.fromEntries(rows.map(r => [r.path, r.result]))).toEqual({ same: "gleich", changed: "unterschiedlich", left: "nur links", right: "nur rechts", type: "Typ unterschiedlich" });
+    expect(Object.fromEntries(rows.map(r => [r.path, r.result]))).toEqual({ same: "same", changed: "different", left: "leftOnly", right: "rightOnly", type: "typeDiffers" });
   });
   it("allows two seconds, requires known times and distinguishes size", () => {
-    expect(mergeFolders(result([entry("a"), entry("b"), entry("c", 8, null)], [entry("a", 8, 102), entry("b", 8, 103), entry("c", 8, null)])).map(r => r.result)).toEqual(["gleich", "unterschiedlich", "unterschiedlich"]);
+    expect(mergeFolders(result([entry("a"), entry("b"), entry("c", 8, null)], [entry("a", 8, 102), entry("b", 8, 103), entry("c", 8, null)])).map(r => r.result)).toEqual(["same", "different", "different"]);
   });
   it("content decides despite timestamps", () => {
     const rows = mergeFolders(result([entry("a"), entry("b")], [entry("a", 8, 900), entry("b")], { a: true, b: false }));
-    expect(rows.map(r => r.result)).toEqual(["gleich", "unterschiedlich"]);
+    expect(rows.map(r => r.result)).toEqual(["same", "different"]);
     expect(rows[0].timeHint).toBe(true);
   });
   it("sorts dates and sizes numerically and filters by name and differences", () => {
@@ -26,7 +26,7 @@ describe("folder comparisons", () => {
     expect(swapPair(swapPair(pair))).toEqual(pair);
     expect(swapPair(pair).sources[0].path).toBe("b");
     const data = result([entry("x")], []);
-    expect(mergeFolders({ ...data, left: data.right, right: data.left })[0].result).toBe("nur rechts");
+    expect(mergeFolders({ ...data, left: data.right, right: data.left })[0].result).toBe("rightOnly");
   });
   it("handles 50 000 paths without duplicate rows", () => {
     const entries = Array.from({ length: 50_000 }, (_, i) => entry(`dir/${i}`));

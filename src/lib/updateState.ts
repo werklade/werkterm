@@ -1,4 +1,5 @@
 import { formatSize } from "./formatSize";
+import { currentLocale, t, tp } from "../i18n";
 
 // Pure logic of the update check: no network, no Tauri. The invoke layer lives in update.ts.
 
@@ -16,26 +17,25 @@ export interface AvailableUpdate { version: string; notes: string; notesTruncate
 
 export const updateDownloadUrl = "https://pkg.werklade.de/werkterm/";
 export const aptCommand = "sudo apt update && sudo apt install --only-upgrade werkterm";
-export const aptRepoNote = "Funktioniert nur, wenn das Werklade-Repository eingebunden ist.";
-export const blockedFallback = "Diese Installation lässt sich nicht automatisch aktualisieren.";
+export const aptRepoNote = (): string => t("update.aptRepoNote");
+export const blockedFallback = (): string => t("update.blockedFallback");
 /** Exact error string of update_install: the process was shut down but the installer did not start. */
 export const restartRequiredCode = "UPDATE_RESTART_REQUIRED";
-export const restartRequiredMessage = "Das Update wurde nicht installiert. Werkterm muss neu gestartet werden.";
+export const restartRequiredMessage = (): string => t("error.UPDATE_RESTART_REQUIRED");
 export const isRestartRequired = (reason: unknown): boolean => (reason instanceof Error ? reason.message : reason) === restartRequiredCode;
-export const transfersMessage = (count: number): string =>
-  count === 1 ? "Eine Übertragung läuft und wird abgebrochen." : `${count} Übertragungen laufen und werden abgebrochen.`;
-export const updateStartNote = "Fragt beim Start einmal pkg.werklade.de ab. Es werden keine Daten übertragen.";
+export const transfersMessage = (count: number): string => tp("update.transfers", count);
+export const updateStartNote = (): string => t("update.startNote");
 export const notesMaxChars = 4000;
 export const notesMaxLines = 60;
 const versionMaxChars = 64;
 
-const installKindLabels: Record<InstallKind, string> = {
-  appimage: "AppImage", deb: "DEB-Paket", rpm: "RPM-Paket", nsis: "Windows-Installer (NSIS)", msi: "Windows-Installer (MSI)", other: "Sonstige Installation",
-};
-export const installKindLabel = (kind: InstallKind): string => installKindLabels[kind] ?? installKindLabels.other;
+const installKindKeys = {
+  appimage: "update.kind.appimage", deb: "update.kind.deb", rpm: "update.kind.rpm", nsis: "update.kind.nsis", msi: "update.kind.msi", other: "update.kind.otherInstall",
+} as const;
+export const installKindLabel = (kind: InstallKind): string => t(installKindKeys[kind] ?? installKindKeys.other);
 /** "AppImage, Testkanal" for the About dialog. */
 export const describeInstall = (info: Pick<UpdateInfo, "installKind" | "channel">): string =>
-  [installKindLabel(info.installKind), ...(info.channel === "test" ? ["Testkanal"] : [])].join(", ");
+  [installKindLabel(info.installKind), ...(info.channel === "test" ? [t("update.channel.test")] : [])].join(", ");
 export const isWindowsInstaller = (kind: InstallKind): boolean => kind === "nsis" || kind === "msi";
 
 /**
@@ -43,16 +43,16 @@ export const isWindowsInstaller = (kind: InstallKind): boolean => kind === "nsis
  * call never returns there; everything that must happen before quitting is done before update_install.
  */
 export function restartHints(kind: InstallKind): string[] {
-  if (kind === "nsis") return ["Werkterm wird beendet und nach dem Update neu gestartet. Offene Verbindungen werden getrennt."];
-  if (kind === "msi") return ["Werkterm wird beendet und nach dem Update neu gestartet. Offene Verbindungen werden getrennt.", "Windows fragt nach dem Beenden nach Administratorrechten. Bei Ablehnung bleibt die bisherige Version installiert; Werkterm dann von Hand starten."];
-  return ["Werkterm startet danach neu. Offene Verbindungen werden getrennt."];
+  if (kind === "nsis") return [t("update.restart.windows")];
+  if (kind === "msi") return [t("update.restart.windows"), t("update.restart.admin")];
+  return [t("update.restart.linux")];
 }
 /** Backend text stays as it is; the sentence names only what was actually stopped. */
 export function withStoppedNote(message: string, stopped: { tunnels: boolean; logs: boolean }): string {
   if (!stopped.tunnels && !stopped.logs) return message;
-  const what = stopped.tunnels && stopped.logs ? "Tunnel und Protokolle" : stopped.tunnels ? "Tunnel" : "Protokolle";
+  const note = t(stopped.tunnels && stopped.logs ? "update.stopped.both" : stopped.tunnels ? "update.stopped.tunnels" : "update.stopped.logs");
   const trimmed = message.trimEnd();
-  return `${trimmed}${/[.!?]$/.test(trimmed) ? "" : "."} Gestoppte ${what} wurden nicht neu gestartet.`;
+  return `${trimmed}${/[.!?]$/.test(trimmed) ? "" : "."} ${note}`;
 }
 
 /** The start check follows the settings file that was actually loaded, never the localStorage cache. */
@@ -99,20 +99,20 @@ export function sanitizeVersion(raw: string | null | undefined): string | null {
   return cleaned || null;
 }
 
-export const invalidAnswerMessage = "Die Antwort der Update-Prüfung ist ungültig.";
+export const invalidAnswerMessage = (): string => t("update.invalidAnswer");
 export type CheckOutcome = { ok: true; update: AvailableUpdate | null } | { ok: false; message: string };
 /** available=false -> up to date. available=true needs a usable version, otherwise the answer is rejected. */
 export function interpretCheck(check: UpdateCheck): CheckOutcome {
-  if (!check || typeof check !== "object") return { ok: false, message: invalidAnswerMessage };
+  if (!check || typeof check !== "object") return { ok: false, message: invalidAnswerMessage() };
   if (check.available !== true) return { ok: true, update: null };
   const version = sanitizeVersion(check.version);
-  if (!version) return { ok: false, message: invalidAnswerMessage };
+  if (!version) return { ok: false, message: invalidAnswerMessage() };
   const notes = sanitizeNotes(check.notes);
   return { ok: true, update: { version, notes: notes.text, notesTruncated: notes.truncated, pubDate: typeof check.pubDate === "string" ? check.pubDate : null } };
 }
 
-/** Local date (dd.mm.yyyy in German); null for missing or unparsable input. */
-export function formatPubDate(pubDate: string | null, locale?: string, timeZone?: string): string | null {
+/** Local date in the UI language (dd.mm.yyyy in German); null for missing or unparsable input. */
+export function formatPubDate(pubDate: string | null, locale: string = currentLocale(), timeZone?: string): string | null {
   if (!pubDate) return null;
   const time = Date.parse(pubDate);
   if (!Number.isFinite(time)) return null;
@@ -133,8 +133,8 @@ export function normalizeProgress(raw: Partial<UpdateProgress> | null | undefine
 }
 export function progressText(downloaded: number, total: number | null): string {
   const percent = progressPercent(downloaded, total);
-  if (percent === null || total === null) return `${formatSize(downloaded)} heruntergeladen`;
-  return `${formatSize(downloaded)} von ${formatSize(total)} (${percent} %)`;
+  if (percent === null || total === null) return t("update.progress.downloaded", { size: formatSize(downloaded) });
+  return t("update.progress.of", { done: formatSize(downloaded), total: formatSize(total), percent });
 }
 
 export type RetryTarget = "info" | "check" | "install";

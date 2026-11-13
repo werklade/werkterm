@@ -8,6 +8,7 @@ const host = vi.hoisted(() => ({ ids: [] as string[], index: 0, context: null as
 vi.mock("react", async importOriginal => ({
   ...await importOriginal<typeof import("react")>(),
   useEffect: vi.fn(),
+  useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
   useRef: (current: unknown) => ({ current }),
   useState: (initial: unknown) => {
     const index = host.index++;

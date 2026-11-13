@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 
 export interface DataDirStatus { configured: boolean; custom: boolean; path: string; defaultPath: string; reachable: boolean }
 export interface DataDirInspect { exists: boolean; isDir: boolean; writable: boolean; hasData: boolean; sameAsCurrent: boolean }
@@ -32,11 +33,11 @@ export interface ChoiceFeedback { tone: "info" | "error"; message: string; canCo
 
 /** Translates the backend inspection of a chosen folder into dialog feedback. */
 export function describeInspect(info: DataDirInspect, options: { allowSame: boolean }): ChoiceFeedback {
-  if (info.exists && !info.isDir) return { tone: "error", message: "Der Pfad ist kein Ordner.", canConfirm: false, showCopy: false };
-  if (!info.writable) return { tone: "error", message: "Der Ordner ist nicht beschreibbar.", canConfirm: false, showCopy: false };
-  if (info.sameAsCurrent && !options.allowSame) return { tone: "info", message: "Dieser Ordner wird bereits verwendet.", canConfirm: false, showCopy: false };
-  if (info.hasData) return { tone: "info", message: "Vorhandene Werkterm-Daten gefunden. Sie werden verwendet.", canConfirm: true, showCopy: false };
-  return { tone: "info", message: "Der Ordner enthält noch keine Werkterm-Daten.", canConfirm: true, showCopy: true };
+  if (info.exists && !info.isDir) return { tone: "error", message: t("dataDir.inspect.notFolder"), canConfirm: false, showCopy: false };
+  if (!info.writable) return { tone: "error", message: t("dataDir.inspect.notWritable"), canConfirm: false, showCopy: false };
+  if (info.sameAsCurrent && !options.allowSame) return { tone: "info", message: t("dataDir.inspect.inUse"), canConfirm: false, showCopy: false };
+  if (info.hasData) return { tone: "info", message: t("dataDir.inspect.hasData"), canConfirm: true, showCopy: false };
+  return { tone: "info", message: t("dataDir.inspect.empty"), canConfirm: true, showCopy: true };
 }
 
 export const fingerprintMinGapMs = 5000;

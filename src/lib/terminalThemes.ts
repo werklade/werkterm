@@ -1,4 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
+import { t, type TextKey } from "../i18n";
 export const ansiKeys = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"] as const;
 export type TerminalTheme = ITheme & Record<typeof ansiKeys[number] | "background" | "foreground" | "cursor", string>;
 function theme(background: string, foreground: string, colors: string[]): TerminalTheme {
@@ -10,4 +11,11 @@ export const terminalThemes: Record<string, TerminalTheme> = {
   "Gruvbox Dark": theme("#282828", "#ebdbb2", ["#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984", "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2"]),
   "Hell": theme("#ffffff", "#202020", ["#202020", "#a31515", "#176b28", "#795e00", "#174ea6", "#811f8c", "#006b70", "#b0b0b0", "#666666", "#c02020", "#247a32", "#8a6500", "#225bbb", "#942da0", "#007b80", "#eeeeee"]),
 };
+/** Persisted id of the theme created by the MobaXterm colour import. */
+export const importedThemeId = "MobaXterm (importiert)";
+const themeLabels: Record<string, TextKey> = { "Werkterm Dunkel": "theme.werktermDark", "Hell": "theme.light", [importedThemeId]: "theme.imported" };
+/** Display name of a theme id: built-in names are translated, everything else (e.g. "Solarized Dark") is shown as is. */
+export function themeLabel(id: string): string {
+  return Object.prototype.hasOwnProperty.call(themeLabels, id) ? t(themeLabels[id]) : id;
+}
 export const emojiFallback = ', "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Twemoji Mozilla"';

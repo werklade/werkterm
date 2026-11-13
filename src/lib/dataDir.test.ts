@@ -9,7 +9,7 @@ const files = (sessions = 1, tunnels = 1, macros = 1, settings = 1): FileFingerp
 describe("describeInspect", () => {
   it("uses existing data and hides the copy option", () => {
     expect(describeInspect(inspect({ hasData: true }), { allowSame: false })).toEqual({
-      tone: "info", message: "Vorhandene Werkterm-Daten gefunden. Sie werden verwendet.", canConfirm: true, showCopy: false,
+      tone: "info", message: "Vorhandene Werkterm-Daten gefunden; sie werden verwendet.", canConfirm: true, showCopy: false,
     });
   });
   it("offers copying for an empty or new folder", () => {

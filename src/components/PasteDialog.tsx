@@ -1,8 +1,10 @@
 import { useId, useState } from "react";
 import { useModal } from "./useModal";
 import { availableScopes, effectiveScope, hasPasteControls, singleLinePaste, stripLastNewline, type PasteChoice, type RememberScope } from "../lib/paste";
+import { tp, useT } from "../i18n";
 export interface PasteRememberRequest { scope: Exclude<RememberScope, "none">; choice: PasteChoice }
 export function PasteDialog({ text, count, multiExec, hasProfile, onAnswer }: { text: string; count: number; multiExec: boolean; hasProfile: boolean; onAnswer(text: string | null, remember?: PasteRememberRequest | null): void }) {
+  const t = useT();
   const dialog = useModal();
   const rememberId = useId();
   const [draft, setDraft] = useState(text);
@@ -16,23 +18,23 @@ export function PasteDialog({ text, count, multiExec, hasProfile, onAnswer }: { 
     onAnswer(single ? singleLinePaste(value) : value, active === "none" ? null : { scope: active, choice: { action: single ? "single-line" : "paste", trim } });
   };
   const hintId = `${rememberId}-hint`;
-  return <dialog ref={dialog} className="ssh-dialog paste-dialog" aria-label="Einfügen bestätigen" onCancel={e => { e.preventDefault(); onAnswer(null); }}>
-    <h2>Einfügen bestätigen</h2>{multiExec && <p>Geht an {count} Terminals</p>}
-    <textarea aria-label="Einzufügender Text" spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)} />
-    <p>{draft.split(/\r\n|\r|\n/).length} Zeilen · {draft.length} Zeichen</p>
-    {hasPasteControls(draft) && <p role="alert">Warnung: Der Text enthält ESC oder andere Steuerzeichen.</p>}
-    <label><input type="checkbox" checked={trim} onChange={e => setTrim(e.target.checked)} />Letzten Zeilenumbruch entfernen</label>
+  return <dialog ref={dialog} className="ssh-dialog paste-dialog" aria-label={t("paste.title")} onCancel={e => { e.preventDefault(); onAnswer(null); }}>
+    <h2>{t("paste.title")}</h2>{multiExec && <p>{tp("paste.sendTo", count)}</p>}
+    <textarea aria-label={t("paste.textLabel")} spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)} />
+    <p>{tp("paste.lines", draft.split(/\r\n|\r|\n/).length)} · {tp("paste.chars", draft.length)}</p>
+    {hasPasteControls(draft) && <p role="alert">{t("paste.controlWarning")}</p>}
+    <label><input type="checkbox" checked={trim} onChange={e => setTrim(e.target.checked)} />{t("paste.trim")}</label>
     <div className="dialog-actions paste-actions">
-      <label className="paste-remember" htmlFor={rememberId}>Auswahl merken?
+      <label className="paste-remember" htmlFor={rememberId}>{t("paste.remember")}
         <select id={rememberId} value={active} disabled={controls} aria-describedby={controls ? hintId : undefined} onChange={e => setScope(e.target.value as RememberScope)}>
-          <option value="none">Nicht merken</option>
-          <option value="tab" disabled={!available.tab}>Für diesen Tab merken</option>
-          <option value="profile" disabled={!available.profile}>{!hasProfile && !multiExec ? "Für das Profil merken (kein Profil)" : "Für das Profil merken"}</option>
-          <option value="global">Dauerhaft merken</option>
+          <option value="none">{t("paste.rememberNone")}</option>
+          <option value="tab" disabled={!available.tab}>{t("paste.rememberTab")}</option>
+          <option value="profile" disabled={!available.profile}>{!hasProfile && !multiExec ? t("paste.rememberNoProfile") : t("paste.rememberProfile")}</option>
+          <option value="global">{t("paste.rememberGlobal")}</option>
         </select>
       </label>
-      {controls && <small id={hintId} className="paste-remember-hint">Bei Steuerzeichen wird immer gefragt</small>}
-      <button autoFocus onClick={() => send(false)}>Einfügen</button><button onClick={() => send(true)}>Als eine Zeile</button><button onClick={() => onAnswer(null)}>Abbrechen</button>
+      {controls && <small id={hintId} className="paste-remember-hint">{t("paste.controlsHint")}</small>}
+      <button autoFocus onClick={() => send(false)}>{t("paste.confirm")}</button><button onClick={() => send(true)}>{t("paste.singleLine")}</button><button onClick={() => onAnswer(null)}>{t("common.cancel")}</button>
     </div>
   </dialog>;
 }

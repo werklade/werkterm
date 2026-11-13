@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { t } from "../i18n";
 import { choicePath, dataDirInspect, describeInspect, type ChoiceFeedback, type DataDirChoice, type DataDirStatus } from "../lib/dataDir";
 import { DataDirForm, type DataDirMode, type DataDirView } from "./DataDirForm";
 
@@ -17,7 +18,7 @@ export interface DataDirDialogProps {
 }
 
 export async function pickDataDir(): Promise<string | null> {
-  const path = await open({ directory: true, multiple: false, title: "Datenordner wählen" });
+  const path = await open({ directory: true, multiple: false, title: t("dataDir.title.choose") });
   return typeof path === "string" ? path : null;
 }
 
@@ -57,13 +58,13 @@ export function DataDirDialog({ mode, status, initialChoice, onApply, onRetry, o
     } catch (reason) { setError(String(reason)); }
   };
   const useDefault = () => {
-    // Setup and unreachable: the explicit button is the choice. Change: inspect first, confirm with "Übernehmen".
+    // Setup and unreachable: the explicit button is the choice. Change: inspect first, confirm with the apply button.
     if (mode === "change") { inspect({ kind: "default", path: status.defaultPath }); return; }
     void apply(null, false);
   };
   const retry = async () => {
     setBusy(true); setError("");
-    try { if (!(await onRetry?.())) setError("Datenordner weiterhin nicht erreichbar."); }
+    try { if (!(await onRetry?.())) setError(t("dataDir.stillUnreachable")); }
     catch (reason) { setError(String(reason)); }
     finally { setBusy(false); }
   };

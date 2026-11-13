@@ -2,6 +2,7 @@ import { writeClipboardText } from "../lib/clipboard";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useModal } from "./useModal";
+import { useT } from "../i18n";
 import { permissionMode, type SerialPermission, type FixOptions } from "../lib/serialPermission";
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
   onExecute(command: string): Promise<void>;
 }
 export function SerialPermissionDialog({ info, onClose, onRetry, onExecute }: Props) {
+  const t = useT();
   const dialog = useModal();
   const [fixes, setFixes] = useState<FixOptions | null>(null);
   const [selected, setSelected] = useState(0);
@@ -38,36 +40,36 @@ export function SerialPermissionDialog({ info, onClose, onRetry, onExecute }: Pr
   const newgrp = "newgrp " + "'" + info.group.split("'").join(String.fromCharCode(39, 34, 39, 34, 39)) + "'";
   return <dialog ref={dialog} className="ssh-dialog" aria-labelledby="serial-permission-title"
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
-    <h2 id="serial-permission-title">Keine Berechtigung für {info.device}</h2>
-    {mode === "member" ? <p>Du bist bereits in der Gruppe {info.group}, die Änderung wirkt aber erst nach Ab- und Anmelden. Sofort in einer Shell: <code>{newgrp}</code></p> : <>
-      <p>Benutzer {info.username} zur Gruppe {info.group} hinzufügen?</p>
-      {info.guessed && <p>Die Gerätegruppe konnte nicht ermittelt werden. „dialout“ ist eine Vermutung; bitte vor der Ausführung prüfen.</p>}
-      {mode === "loading" && !error && <p>Verfügbare Werkzeuge werden geprüft…</p>}
+    <h2 id="serial-permission-title">{t("serial.title", { device: info.device })}</h2>
+    {mode === "member" ? <p>{t("serial.member", { group: info.group })} <code>{newgrp}</code></p> : <>
+      <p>{t("serial.add", { username: info.username, group: info.group })}</p>
+      {info.guessed && <p>{t("serial.guessed")}</p>}
+      {mode === "loading" && !error && <p>{t("serial.checking")}</p>}
       {mode === "options" && option && <>
-        <label>Befehl <select value={selected} disabled={busy || sent} onChange={event => setSelected(Number(event.target.value))}>
-          {fixes!.options.map((item, index) => <option key={item.label} value={index}>{item.label}{index === 0 ? " (empfohlen)" : ""}</option>)}
+        <label>{t("serial.command")} <select value={selected} disabled={busy || sent} onChange={event => setSelected(Number(event.target.value))}>
+          {fixes!.options.map((item, index) => <option key={item.label} value={index}>{item.label}{index === 0 ? ` ${t("serial.recommended")}` : ""}</option>)}
         </select></label>
-        <textarea aria-label="Vollständiger Befehl" readOnly value={option.command} rows={3} style={{ width: "100%", fontFamily: "monospace" }} />
-        <p>{option.needs_root_password ? "fragt das Root-Passwort" : option.hint}</p>
+        <textarea aria-label={t("serial.fullCommand")} readOnly value={option.command} rows={3} style={{ width: "100%", fontFamily: "monospace" }} />
+        <p>{option.needs_root_password ? t("serial.asksRoot") : option.hint}</p>
         {!sent && <button disabled={busy} onClick={() => {
           setBusy(true); setError("");
           void onExecute(option.command).then(() => setSent(true)).catch(reason => setError(String(reason))).finally(() => setBusy(false));
-        }}>Im lokalen Terminal ausführen</button>}
-        <button onClick={() => copy(option.command)}>Befehl kopieren</button>
+        }}>{t("serial.run")}</button>}
+        <button onClick={() => copy(option.command)}>{t("serial.copyCommand")}</button>
       </>}
       {mode === "missing" && fixes && <>
-        <p>Fehlende Werkzeuge: {fixes.missing.join(", ")}</p>
-        <p>Installation als root: {fixes.install_hint}</p>
-        <p>Als root ausführen:</p>
-        <textarea aria-label="Root-Befehl" readOnly value={fixes.root_command} rows={3} style={{ width: "100%", fontFamily: "monospace" }} />
-        <button onClick={() => copy(fixes.root_command)}>Befehl kopieren</button>
+        <p>{t("serial.missing", { tools: fixes.missing.join(", ") })}</p>
+        <p>{t("serial.install", { hint: fixes.install_hint })}</p>
+        <p>{t("serial.runAsRoot")}</p>
+        <textarea aria-label={t("serial.rootCommand")} readOnly value={fixes.root_command} rows={3} style={{ width: "100%", fontFamily: "monospace" }} />
+        <button onClick={() => copy(fixes.root_command)}>{t("serial.copyCommand")}</button>
       </>}
-      {sent && <p>Nach Ab- und Anmelden wirksam (oder <code>{newgrp}</code>). Passworteingabe im lokalen Terminal.</p>}
+      {sent && <><p>{t("serial.sent")} <code>{newgrp}</code></p><p>{t("serial.sentPassword")}</p></>}
     </>}
     {error && <p role="alert">{error}</p>}
     <div className="dialog-actions">
-      {(mode === "member" || sent) && <button onClick={onRetry}>Erneut verbinden</button>}
-      <button disabled={busy} onClick={onClose}>{mode === "member" || sent ? "Schließen" : "Abbrechen"}</button>
+      {(mode === "member" || sent) && <button onClick={onRetry}>{t("serial.retry")}</button>}
+      <button disabled={busy} onClick={onClose}>{mode === "member" || sent ? t("common.close") : t("common.cancel")}</button>
     </div>
   </dialog>;
 }

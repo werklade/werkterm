@@ -3,10 +3,11 @@ import { Text } from "@codemirror/state";
 import { invoke } from "@tauri-apps/api/core";
 import type { BrowserTab } from "../components/FileBrowser";
 import type { EditorDocument } from "./editorTypes";
+import { t } from "../i18n";
 export interface DiffSource { tab: BrowserTab; path: string }
 export interface DiffPair { sources: [DiffSource, DiffSource]; documents: [EditorDocument, EditorDocument] }
 export const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
-export const diffTitle = (a: string, b: string) => `Vergleich: ${fileName(a)} ↔ ${fileName(b)}`;
+export const diffTitle = (a: string, b: string) => t("diff.title", { left: fileName(a), right: fileName(b) });
 export const normalizeEol = (text: string) => text.replace(/\r\n?|\n/g, "\n");
 export const whitespaceAvailable = (sizes: readonly number[]) => sizes.every(size => size <= 1024 * 1024);
 export function normalizedWhitespace(text: string) {
@@ -34,10 +35,12 @@ export function rememberedSource(source: DiffSource | null, tabs: readonly Brows
 export function comparisonSources(marked: DiffSource | null, next: DiffSource): [DiffSource, DiffSource] | null {
   return marked ? [marked, next] : null;
 }
-export const sourceLabel = ({ tab, path }: DiffSource) => `${tab.kind === "ssh" ? tab.target ?? tab.title : tab.kind === "wsl" ? `WSL (${tab.cwd?.host ?? ""})` : "lokal"}:${path}`;
+export const sourceLabel = ({ tab, path }: DiffSource) => `${tab.kind === "ssh" ? tab.target ?? tab.title : tab.kind === "wsl" ? `WSL (${tab.cwd?.host ?? ""})` : t("diff.source.local")}:${path}`;
 export function diffError(reason: unknown) {
   const message = reason instanceof Error ? reason.message : String(reason);
-  return ({ BINARY: "Binärdateien können nicht verglichen werden.", TOO_LARGE: "Die Datei überschreitet die Grenze von 5 MB.", ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", SESSION_CLOSED: "Die Sitzung wurde beendet. Bitte die Datei erneut auswählen." } as Record<string, string>)[message.split(":")[0]] ?? `Vergleich fehlgeschlagen: ${message}`;
+  const code = message.split(":")[0];
+  if (code === "BINARY" || code === "TOO_LARGE" || code === "ENCODING" || code === "SESSION_CLOSED") return t(`diff.error.${code}`);
+  return t("diff.error.failed", { message });
 }
 export async function loadDiffDocument({ tab, path }: DiffSource): Promise<EditorDocument> {
   if (tab.exited || (tab.kind === "ssh" && tab.sessionId === undefined)) throw new Error("SESSION_CLOSED:");

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { clampSplitRatio, type SplitMode } from "../lib/split";
+import { useT } from "../i18n";
 
 export function paneStyle(mode: SplitMode, index: number, x: number, y: number): CSSProperties {
   const columns = mode === "columns" || mode === "quad";
@@ -15,6 +16,7 @@ export function SplitLayout({ mode, panes, terminals, focusedIndex, ratios, onRa
   ratios: { x: number; y: number }; onRatios(value: { x: number; y: number }): void;
   onAssign(index: number, id: number | null): void; onFocus(index: number): void; onNew(index: number): void;
 }) {
+  const t = useT();
   const root = useRef<HTMLDivElement>(null);
   const drag = useRef<"x" | "y" | null>(null);
   useEffect(() => {
@@ -35,7 +37,7 @@ export function SplitLayout({ mode, panes, terminals, focusedIndex, ratios, onRa
     const size = axis === "x" ? rect?.width : rect?.height;
     onRatios({ ...ratios, [axis]: clampSplitRatio(value, size ?? 0, axis === "x" ? 160 : 100) });
   };
-  const separator = (axis: "x" | "y") => <div role="separator" tabIndex={0} aria-label={axis === "x" ? "Spaltenbreite" : "Zeilenhöhe"}
+  const separator = (axis: "x" | "y") => <div role="separator" tabIndex={0} aria-label={axis === "x" ? t("splitLayout.columnWidth") : t("splitLayout.rowHeight")}
     aria-orientation={axis === "x" ? "vertical" : "horizontal"} aria-valuemin={15} aria-valuemax={85} aria-valuenow={Math.round(ratios[axis])}
     className={`split-divider split-divider-${axis}`} style={axis === "x" ? { left: `${ratios.x}%` } : { top: `${ratios.y}%` }}
     onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); drag.current = axis; event.currentTarget.setPointerCapture(event.pointerId); }}
@@ -52,11 +54,11 @@ export function SplitLayout({ mode, panes, terminals, focusedIndex, ratios, onRa
     onKeyDown={event => { if (event.key === "Home") { event.preventDefault(); resize(axis, 50); } else if (["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(event.key)) { event.preventDefault(); resize(axis, ratios[axis] + (["ArrowLeft", "ArrowUp"].includes(event.key) ? -2 : 2)); } }} />;
   return <div ref={root} className="split-chrome">
     {panes.map((id, index) => <div key={index} className={`split-pane-chrome ${focusedIndex === index ? "focused" : ""}`} style={paneStyle(mode, index, ratios.x, ratios.y)}>
-      <header className="split-pane-header"><select aria-label={`Terminal für Bereich ${index + 1}`} value={id ?? ""} onChange={event => onAssign(index, event.target.value === "" ? null : Number(event.target.value))}>
-        <option value="">Terminal wählen</option>{terminals.map(tab => <option key={tab.id} value={tab.id}>{tab.title}</option>)}
-      </select><button className="split-title" onClick={() => onFocus(index)}>{terminals.find(tab => tab.id === id)?.title ?? `Bereich ${index + 1}`}</button>
-        <button aria-label={`Bereich ${index + 1} leeren`} onClick={() => onAssign(index, null)}>×</button></header>
-      {id === null && <div className="split-empty" onPointerDown={() => onFocus(index)}><span>Terminal wählen</span><button onClick={() => onNew(index)}>Neues lokales Terminal</button></div>}
+      <header className="split-pane-header"><select aria-label={t("splitLayout.paneSelect", { n: index + 1 })} value={id ?? ""} onChange={event => onAssign(index, event.target.value === "" ? null : Number(event.target.value))}>
+        <option value="">{t("splitLayout.choose")}</option>{terminals.map(tab => <option key={tab.id} value={tab.id}>{tab.title}</option>)}
+      </select><button className="split-title" onClick={() => onFocus(index)}>{terminals.find(tab => tab.id === id)?.title ?? t("splitLayout.pane", { n: index + 1 })}</button>
+        <button aria-label={t("splitLayout.clear", { n: index + 1 })} onClick={() => onAssign(index, null)}>×</button></header>
+      {id === null && <div className="split-empty" onPointerDown={() => onFocus(index)}><span>{t("splitLayout.choose")}</span><button onClick={() => onNew(index)}>{t("tab.newLocal")}</button></div>}
     </div>)}
     {mode !== "rows" && separator("x")}{mode !== "columns" && separator("y")}
   </div>;

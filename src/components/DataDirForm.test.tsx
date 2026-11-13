@@ -4,7 +4,7 @@ import { DataDirErrorDialog, DataDirForm, DataDirSection, RestartDialog, resetPo
 import { describeInspect, type DataDirInspect, type DataDirStatus } from "../lib/dataDir";
 
 // Same approach as PasteDialog.test.tsx: only the hooks are replaced, the JSX is real.
-vi.mock("react", async importOriginal => ({ ...await importOriginal<typeof import("react")>(), useId: () => "test-datadir" }));
+vi.mock("react", async importOriginal => ({ ...await importOriginal<typeof import("react")>(), useId: () => "test-datadir", useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot() }));
 vi.mock("./useModal", () => ({ useModal: () => ({ current: null }) }));
 
 type Element = ReactElement<Record<string, unknown>>;
@@ -71,7 +71,7 @@ describe("setup dialog", () => {
 describe("folder feedback", () => {
   it("existing data: reports it, hides the copy option and allows confirming", () => {
     const tree = chosen(info({ hasData: true }));
-    expect(textOf(tree)).toContain("Vorhandene Werkterm-Daten gefunden. Sie werden verwendet.");
+    expect(textOf(tree)).toContain("Vorhandene Werkterm-Daten gefunden; sie werden verwendet.");
     expect(textOf(tree)).toContain("E:/Sync/Werkterm");
     expect(checkbox(tree)).toBeUndefined();
     expect(submits(tree)[0].props.disabled).toBe(false);
@@ -197,9 +197,9 @@ describe("settings section", () => {
 describe("unreachable dialog hint (L5)", () => {
   it("warns under 'Standardordner verwenden' that older data may lie there", () => {
     const tree = render({ mode: "unreachable", view: "unreachable", status: { ...status, configured: true, reachable: false } });
-    expect(unreachableDefaultHint).toBe("Dort können ältere Daten liegen. Der gewählte Ordner bleibt unverändert.");
+    expect(unreachableDefaultHint()).toBe("Dort können ältere Daten liegen. Der gewählte Ordner bleibt unverändert.");
     const hint = findAll(tree, e => e.type === "small")[0];
-    expect(textOf(hint)).toBe(unreachableDefaultHint);
+    expect(textOf(hint)).toBe(unreachableDefaultHint());
   });
 });
 

@@ -1,17 +1,19 @@
 import { useModal } from "./useModal";
 import type { DirEntry } from "../lib/fs";
+import { useT } from "../i18n";
 export type ContextAction = "edit" | "download" | "chmod" | "delete" | "remember" | "compare";
 export function BrowserContextMenu({ entry, x, y, onAnswer, markedName, permissionsDisabled, permissionsTitle }: { permissionsDisabled?: boolean; permissionsTitle?: string; markedName?: string; entry: DirEntry; x: number; y: number; onAnswer: (action: ContextAction | null) => void }) {
+  const t = useT();
   const dialog = useModal();
   const file = entry.kind === "file" || (entry.kind === "symlink" && !entry.targetIsDir);
   const items: { action: ContextAction; label: string; disabled?: boolean; title?: string }[] = [
-    ...(file ? [{ action: "edit" as const, label: "Öffnen im Editor" }] : []),
-    ...(entry.kind === "file" || entry.kind === "dir" ? [{ action: "remember" as const, label: "Zum Vergleich merken" }, ...(markedName ? [{ action: "compare" as const, label: `Mit ${markedName} vergleichen` }] : [])] : []),
-    { action: "download", label: "Herunterladen", disabled: !file },
-    { action: "chmod", label: "Berechtigungen…", disabled: permissionsDisabled || entry.kind === "symlink", title: permissionsDisabled ? permissionsTitle : undefined },
-    { action: "delete", label: "Löschen" },
+    ...(file ? [{ action: "edit" as const, label: t("browser.action.edit") }] : []),
+    ...(entry.kind === "file" || entry.kind === "dir" ? [{ action: "remember" as const, label: t("browser.ctx.remember") }, ...(markedName ? [{ action: "compare" as const, label: t("browser.ctx.compare", { name: markedName }) }] : [])] : []),
+    { action: "download", label: t("browser.action.download"), disabled: !file },
+    { action: "chmod", label: t("permissions.menu"), disabled: permissionsDisabled || entry.kind === "symlink", title: permissionsDisabled ? permissionsTitle : undefined },
+    { action: "delete", label: t("common.delete") },
   ];
-  return <dialog ref={dialog} className="browser-context-menu" style={{ left: Math.max(8, Math.min(x, window.innerWidth - 280)), top: Math.max(8, Math.min(y, window.innerHeight - 200)) }} aria-label={`Aktionen für ${entry.name}`} onCancel={event => { event.preventDefault(); onAnswer(null); }} onClick={event => { if (event.target === event.currentTarget) onAnswer(null); }}>
+  return <dialog ref={dialog} className="browser-context-menu" style={{ left: Math.max(8, Math.min(x, window.innerWidth - 280)), top: Math.max(8, Math.min(y, window.innerHeight - 200)) }} aria-label={t("browser.ctx.actionsFor", { name: entry.name })} onCancel={event => { event.preventDefault(); onAnswer(null); }} onClick={event => { if (event.target === event.currentTarget) onAnswer(null); }}>
     <div role="menu" onKeyDown={event => {
       if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
         event.preventDefault();

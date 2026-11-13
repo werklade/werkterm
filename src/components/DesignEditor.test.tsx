@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { ColorRow, DesignEditor, parseDesignColor } from "./DesignEditor";
 import { getDesign } from "../lib/designs";
 const host = vi.hoisted(() => ({ states: [] as unknown[], refs: [] as { current: unknown }[], refIndex: 0, stored: [] as { id: string; design: unknown }[], index: 0, invoke: vi.fn(), register: vi.fn() }));
-vi.mock("react", async original => ({ ...await original<typeof import("react")>(), useEffect: vi.fn(), useRef: (current: unknown) => { const index = host.refIndex++; return host.refs[index] ?? (host.refs[index] = { current }); }, useState: (initial: unknown) => { const index = host.index++; if (!(index in host.states)) host.states[index] = typeof initial === "function" ? initial() : initial; return [host.states[index], (value: unknown) => { host.states[index] = value; }]; } }));
+vi.mock("react", async original => ({ ...await original<typeof import("react")>(), useEffect: vi.fn(), useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(), useRef: (current: unknown) => { const index = host.refIndex++; return host.refs[index] ?? (host.refs[index] = { current }); }, useState: (initial: unknown) => { const index = host.index++; if (!(index in host.states)) host.states[index] = typeof initial === "function" ? initial() : initial; return [host.states[index], (value: unknown) => { host.states[index] = value; }]; } }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: host.invoke }));
 vi.mock("../lib/designs", async original => ({ ...await original<typeof import("../lib/designs")>(), applyDesign: vi.fn(), registerUserDesign: host.register, getUserDesigns: () => host.stored }));
 type Element = ReactElement<Record<string, unknown>>;

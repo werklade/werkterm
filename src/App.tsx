@@ -7,7 +7,7 @@ import { backendSource, type FolderPair, type FolderOptions } from "./lib/folder
 import { clampPanel, DEFAULT_PANEL_WIDTH, loadWidth, storeWidth } from "./lib/browserWidths";
 import { useMacros } from "./components/Macros";
 import { DiffDialog } from "./components/DiffDialog";
-import { comparisonSources, rememberedSource, diffTitle, diffError, loadDiffPair, type DiffSource, type DiffPair } from "./lib/diff";
+import { comparisonSources, rememberedSource, diffTitle, fileName, diffError, loadDiffPair, type DiffSource, type DiffPair } from "./lib/diff";
 import { connectionTitle, connectionStatus } from "./lib/connection";
 import { defaultSerial } from "./lib/sessions";
 import { tuxTestEvent } from "./components/TuxOverlay";
@@ -22,10 +22,10 @@ import { assignPane, cleanPanes, paneCount, seedPanes, type SplitMode } from "./
 import { ToolDialog } from "./components/ToolDialog";
 import { Home } from "./components/Home";
 import { createMenus } from "./lib/actions";
-import { resolveLanguage, setLanguage, useLanguage } from "./i18n";
+import { resolveLanguage, setLanguage, t, tp, useLanguage, useT } from "./i18n";
 import { recentList, lastTabsList, terminalDescriptors, type Recent, type LastTab } from "./lib/history";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { HelpDialog } from "./components/HelpDialog";
 import { UpdateDialog } from "./components/UpdateDialog";
@@ -79,21 +79,34 @@ const DiffView = lazy(() => import("./components/DiffView"));
 const EditorView = lazy(() => import("./components/EditorView"));
 interface EditorTabState { document: EditorDocument; source: BrowserTab; sourceKey: string; dirty: boolean; status: string }
 function EditorCloseDialog({ name, busy, onAnswer }: { name: string; busy: boolean; onAnswer: (answer: "save" | "discard" | "cancel") => void }) {
+  const t = useT();
   const modal = useModal();
   useEffect(() => {
     if (!busy) modal.current?.querySelector<HTMLButtonElement>("[autofocus]")?.focus();
   }, [busy, modal]);
   return <dialog ref={modal} className="ssh-dialog" aria-modal="true" aria-labelledby="editor-close-title" onCancel={event => { event.preventDefault(); if (!busy) onAnswer("cancel"); }}>
-    <h2 id="editor-close-title">Ungespeicherte Änderungen</h2><p>Änderungen an „{name}“ speichern?</p>
-    <div className="dialog-actions"><button disabled={busy} onClick={() => onAnswer("save")}>Speichern</button><button disabled={busy} onClick={() => onAnswer("discard")}>Verwerfen</button><button autoFocus disabled={busy} onClick={() => onAnswer("cancel")}>Abbrechen</button></div>
+    <h2 id="editor-close-title">{t("app.editorClose.title")}</h2><p>{t("app.editorClose.message", { name })}</p>
+    <div className="dialog-actions"><button disabled={busy} onClick={() => onAnswer("save")}>{t("common.save")}</button><button disabled={busy} onClick={() => onAnswer("discard")}>{t("app.discard")}</button><button autoFocus disabled={busy} onClick={() => onAnswer("cancel")}>{t("common.cancel")}</button></div>
   </dialog>;
 }
 function editorOpenError(reason: unknown): string {
   const message = String(reason);
-  const errors: Record<string, string> = { ENCODING: "Die Datei ist nicht als UTF-8 kodiert.", BINARY: "Binärdateien können nicht im Editor geöffnet werden.", TOO_LARGE: "Die Datei ist für den Editor zu groß.", SESSION_CLOSED: "Die SSH-Sitzung wurde beendet. Der Editorinhalt bleibt erhalten.", CONFLICT: "Die Datei wurde außerhalb des Editors geändert." };
-  return errors[message.split(":", 1)[0]] ?? `Datei konnte nicht geöffnet werden: ${message}`;
+  const code = message.split(":", 1)[0];
+  switch (code) {
+    case "ENCODING": return t("app.openError.ENCODING");
+    case "BINARY": return t("app.openError.BINARY");
+    case "TOO_LARGE": return t("app.openError.TOO_LARGE");
+    case "SESSION_CLOSED": return t("app.openError.SESSION_CLOSED");
+    case "CONFLICT": return t("app.openError.CONFLICT");
+    default: return t("app.openError.generic", { message });
+  }
 }
 
+/** Title fields of a folder comparison tab; `titleKey` is resolved at render so it follows the language. */
+const folderDiffTitle = (sources: [DiffSource, DiffSource]) => {
+  const titleParams = { left: sources[0].path.split(/[\\/]/).pop() ?? "", right: sources[1].path.split(/[\\/]/).pop() ?? "" };
+  return { title: t("app.folderDiff.title", titleParams), titleKey: "app.folderDiff.title" as const, titleParams };
+};
 interface QueuedPrompt { tabId: number; prompt: SshPrompt }
 function localTitle() { return /Windows/i.test(navigator.userAgent) ? "PowerShell" : "Shell"; }
 function declinePrompt(prompt: SshPrompt) {
@@ -135,7 +148,11 @@ export default function App() {
     });
     return () => { void subscription.then(stop => stop()); };
   }, [onLog]);
-  const [tabs, setTabs] = useState<BrowserTab[]>([]);
+  // useLanguage subscribes App, so the menus and tab titles built in this render pass follow a language switch.
+  const language = useLanguage();
+  // Stored tabs keep `titleKey` for built-in titles; `tabs` resolves them for the current language.
+  const [storedTabs, setTabs] = useState<BrowserTab[]>([]);
+  const tabs = useMemo(() => storedTabs.map(tab => tab.titleKey ? { ...tab, title: t(tab.titleKey, tab.titleParams) } : tab), [storedTabs, language]);
   const [folderDiffs, setFolderDiffs] = useState<Record<number, FolderPair>>({});
   const [diffs, setDiffs] = useState<Record<number, DiffPair>>({});
   const [diffDialog, setDiffDialog] = useState(false);
@@ -198,19 +215,18 @@ export default function App() {
     }).catch(reason => setStatus(String(reason)));
     return () => { disposed = true; void subscription.then(unlisten => unlisten()); };
   }, [dataReady]);
-  const [status, setStatus] = useState("Bereit");
+  // Empty means "ready": the default text is translated at render time, so it follows the language.
+  const [status, setStatus] = useState("");
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [sessionDialog, setSessionDialog] = useState<{ session?: SavedSession; tabId?: number; preferPassword?: boolean } | null>(null);
   const [userSession, setUserSession] = useState<SavedSession | null>(null);
   const [quickUserTarget, setQuickUserTarget] = useState<string | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus("Gespeicherte Sitzungen konnten nicht geladen werden.")); }, []);
+  const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus(t("app.status.sessionsLoadFailed"))); }, []);
   useEffect(() => { if (dataReady) reloadSessions(); }, [dataReady, reloadSessions]);
   // localStorage only seeds the first render; settings.json replaces it once loaded (see bootstrapData).
   const [settings, setSettings] = useState(loadSettings);
   // main.tsx applies the cached language before the first render; this follows later changes (settings.json load, dialog).
-  // useLanguage subscribes App, so the menus built in this render pass are rebuilt after the language switch.
-  useLanguage();
   useLayoutEffect(() => { setLanguage(resolveLanguage(settings.language)); }, [settings.language]);
   const [fontResetToken, setFontResetToken] = useState(0);
   const fingerprint = useRef<FileFingerprint[] | null>(null);
@@ -218,7 +234,7 @@ export default function App() {
     // Own write: the stamp returned by settings_save becomes the baseline, so it does not count as an external change.
     onSaved: stamp => { fingerprint.current = mergeEntry(fingerprint.current, [{ name: "settings.json", ...stamp }], "settings.json"); },
     // Conflict resolved by merging: show the merged result.
-    onMerged: merged => { settingsRef.current = merged; setSettings(merged); setStatus("Einstellungen mit Änderungen eines anderen Geräts zusammengeführt"); },
+    onMerged: merged => { settingsRef.current = merged; setSettings(merged); setStatus(t("app.status.settingsMerged")); },
   }));
   const [designRevision, setDesignRevision] = useState(0);
   useEffect(() => {
@@ -226,7 +242,7 @@ export default function App() {
     window.addEventListener(designsChangedEvent, changed);
     if (dataReady) void invoke<StoredDesign[]>("designs_list").then(rows => rows.forEach(row => {
       if (!getUserDesigns().some(stored => stored.id === row.id)) registerUserDesign(row.id, row.design);
-    })).catch(() => setStatus("Eigene Designs konnten nicht geladen werden."));
+    })).catch(() => setStatus(t("app.status.designsLoadFailed")));
     return () => window.removeEventListener(designsChangedEvent, changed);
   }, [dataReady]);
   useEffect(() => {
@@ -234,7 +250,7 @@ export default function App() {
     // Derived value, device-local: updates state and cache only and never writes settings.json.
     void defaultLogFolder().then(logFolder => {
       if (!settingsRef.current.logFolder) { const next = normalizeSettings({ ...settingsRef.current, logFolder }); settingsRef.current = next; setSettings(next); saveSettings(next); }
-    }).catch(reason => setStatus(`Protokollordner: ${String(reason)}`));
+    }).catch(reason => setStatus(t("app.status.logFolder", { reason: String(reason) })));
   }, [dataReady]);
   const applyLoadedSettings = (loaded: Settings) => { settingsRef.current = loaded; setSettings(loaded); };
   const refreshFingerprint = async () => { try { fingerprint.current = await dataDirFingerprint(); } catch { fingerprint.current = null; } };
@@ -297,7 +313,7 @@ export default function App() {
   const changeDataDirFrom = (current: DataDirStatus, choice: DataDirChoice) => setDataDirChange({ status: current, choice });
   const pickForChange = async (current: DataDirStatus) => {
     try { const path = await pickDataDir(); if (path !== null) changeDataDirFrom(current, { kind: "folder", path }); }
-    catch (reason) { setStatus(`Ordnerauswahl: ${String(reason)}`); }
+    catch (reason) { setStatus(t("app.status.folderPicker", { reason: String(reason) })); }
   };
   const sidebarVisible = settings.sidebarVisible;
   const setSidebarVisible = (value: boolean | ((current: boolean) => boolean)) => changeSettings({ ...settingsRef.current, sidebarVisible: typeof value === "function" ? value(settingsRef.current.sidebarVisible) : value });
@@ -390,8 +406,8 @@ export default function App() {
   }));
   useEffect(() => transferQueue.subscribe(setTransfer), [transferQueue]);
   useEffect(() => transferQueue.onFinished(event => {
-    if (event.cancelled) setStatus("Transfer abgebrochen");
-    else if (event.error === undefined) setStatus(event.kind === "upload" ? "Upload abgeschlossen" : "Download abgeschlossen");
+    if (event.cancelled) setStatus(t("app.status.transferCancelled"));
+    else if (event.error === undefined) setStatus(event.kind === "upload" ? t("app.status.uploadDone") : t("app.status.downloadDone"));
   }), [transferQueue]);
   useEffect(() => () => {
     for (const sessionId of sessions.current.values()) transferQueue.cancelSession(sessionId);
@@ -406,7 +422,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     void availableShells().then(shells => { if (!cancelled) { setHasWsl(shells.includes("wsl")); setShellsLoaded(true); } }).catch((error: unknown) => {
-      if (!cancelled) setStatus(`Verfügbare Shells konnten nicht geladen werden: ${String(error)}`);
+      if (!cancelled) setStatus(t("app.status.shellsLoadFailed", { reason: String(error) }));
     });
     return () => { cancelled = true; };
   }, []);
@@ -425,7 +441,7 @@ export default function App() {
     if (windowClosing.current) return;
     const id = nextId.current++;
     liveTabs.current.add(id);
-    setTabs(current => [...current, { id, kind, startCommand, title: startCommand ? ({ root: "Root", processes: "Prozesse", hardware: "Hardware" }[startCommand]) : (kind === "wsl" ? "WSL" : shellName), exited: false, browserPath: "" }]);
+    setTabs(current => [...current, { id, kind, startCommand, ...(startCommand ? { titleKey: ({ root: "app.tab.root", processes: "app.tab.processes", hardware: "app.tab.hardware" } as const)[startCommand] } : {}), title: kind === "wsl" ? "WSL" : shellName, exited: false, browserPath: "" }]);
     setActiveId(id);
   };
   const connect = (target: string) => {
@@ -438,7 +454,7 @@ export default function App() {
     sshTabs.current.add(id);
     setTabs(current => [...current, { id, kind: parsed.kind ?? "ssh", serial: parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined, target: target.trim(), title: connectionTitle(parsed.kind ?? "ssh", target, parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined), exited: false, browserPath: "" }]);
     setActiveId(id);
-    setStatus(`Verbinde mit ${connectionTitle(parsed.kind ?? "ssh", target, parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined)}…`);
+    setStatus(t("app.status.connecting", { name: connectionTitle(parsed.kind ?? "ssh", target, parsed.kind === "serial" ? { ...defaultSerial, device: parsed.host, baud: parsed.baud ?? 115200 } : undefined) }));
   };
   const connectSaved = (session: SavedSession, userOverride?: string) => {
     if (windowClosing.current) return;
@@ -448,7 +464,7 @@ export default function App() {
     sshTabs.current.add(id);
     setTabs(current => [...current, { id, kind: session.kind as "ssh" | "telnet" | "serial", serial: session.serial, target: sessionTarget(session, userOverride), savedSessionId: session.id, title: session.name, exited: false, browserPath: "" }]);
     setActiveId(id);
-    setStatus(`Verbinde mit ${session.name}…`);
+    setStatus(t("app.status.connecting", { name: session.name }));
   };
   useEffect(() => {
     if (restoreQueue === null || userSession || quickUserTarget || windowClosing.current) return;
@@ -473,7 +489,7 @@ export default function App() {
     removePrompts(id);
     const currentTabs = tabsRef.current;
     const index = currentTabs.findIndex(tab => tab.id === id);
-    if (currentTabs[index]?.kind === "ssh" && currentTabs[index]?.sessionId === undefined && !currentTabs[index]?.exited) setStatus("Verbindungsaufbau abgebrochen");
+    if (currentTabs[index]?.kind === "ssh" && currentTabs[index]?.sessionId === undefined && !currentTabs[index]?.exited) setStatus(t("app.status.connectAborted"));
     if (activeIdRef.current === id) setActiveId(currentTabs[index + 1]?.id ?? currentTabs[index - 1]?.id ?? 0);
     setTabs(current => current.filter(tab => tab.id !== id));
   };
@@ -496,7 +512,7 @@ export default function App() {
       const id = state.remaining[0];
       const editor = editorsRef.current[id];
       const handle = editorHandles.current.get(id);
-      if (!editor || !handle) throw new Error("Editor ist noch nicht bereit.");
+      if (!editor || !handle) throw new Error(t("app.error.editorNotReady"));
       // Hold the lock across the final dirty check, dialog, save and editor_close.
       await handle.lock();
       try {
@@ -519,8 +535,8 @@ export default function App() {
     if (!shouldConfirmSsh(candidates, settingsRef.current.confirmCloseSsh) && !(tunnelCount && settingsRef.current.confirmCloseSsh)) return true;
     const active = activeSshTabs(candidates);
     const transfers = active.reduce((count, tab) => count + (tab.kind === "ssh" ? transferQueue.countSession(tab.sessionId!) : 0), 0);
-    const destination = active[0] ? connectionTitle(active[0].kind, active[0].target ?? "", active[0].serial) : "Verbindung";
-    const message = ids ? `Verbindung zu ${destination} ist aktiv. Wirklich trennen?` : `${active.length} aktive Verbindung(en) werden getrennt und ${tunnelCount} Tunnel werden gestoppt. Beenden?`;
+    const destination = active[0] ? connectionTitle(active[0].kind, active[0].target ?? "", active[0].serial) : t("app.ssh.destination");
+    const message = ids ? t("app.ssh.closeOne", { destination }) : [active.length > 0 ? tp("app.ssh.closeAll.connections", active.length) : "", tunnelCount > 0 ? tp("app.ssh.closeAll.tunnels", tunnelCount) : "", t("app.ssh.closeAll.question")].filter(Boolean).join(" ");
     return new Promise(resolve => setSshClose({ message, transfers, quitting: !ids, answer: (accepted, never) => {
       if (never) changeSettings({ ...settingsRef.current, confirmCloseSsh: false });
       setSshClose(null); resolve(accepted);
@@ -600,8 +616,8 @@ export default function App() {
         return false;
       }
       if (restart?.kind === "update") throw new Error(withStoppedNote(String(reason instanceof Error ? reason.message : reason), { tunnels: tunnelsStopped, logs: logsStopped }));
-      if (restart) throw new Error(`Wechsel des Datenordners fehlgeschlagen: ${String(reason)}`);
-      reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason));
+      if (restart) throw new Error(t("app.error.dataDirSwitch", { reason: String(reason) }));
+      reportStatus(t("app.error.windowClose", { reason: String(reason) }));
     }
     finally { for (const handle of locked) handle.unlock(); windowClosing.current = false; }
     return done;
@@ -620,7 +636,7 @@ export default function App() {
           ? invoke<EditorDocument>("editor_open_remote", { id: source.sessionId, path })
           : invoke<EditorDocument>("editor_open_local", { path, wslDistro: source.kind === "wsl" ? source.cwd?.host ?? null : null }));
         const id = nextId.current++;
-        const editor: EditorTabState = { document, source: { ...source, browserPath: parentPath(path) }, sourceKey, dirty: false, status: "Editor" };
+        const editor: EditorTabState = { document, source: { ...source, browserPath: parentPath(path) }, sourceKey, dirty: false, status: "" };
         editorsRef.current = { ...editorsRef.current, [id]: editor };
         setEditors(editorsRef.current);
         setTabs(current => [...current, { id, kind: "editor", title: document.name, browserPath: parentPath(path), exited: false }]);
@@ -633,21 +649,21 @@ export default function App() {
   const compareFiles = async (sources: [DiffSource, DiffSource], options: FolderOptions = { recursive: true, contents: false }) => {
     try {
       const kinds = await Promise.all(sources.map(source => invoke<string>("folder_diff_kind", { source: backendSource(source) })));
-      if (kinds[0] !== kinds[1]) throw new Error("Bitte zwei Dateien oder zwei Ordner auswählen. Gemischte Typen sind nicht möglich.");
+      if (kinds[0] !== kinds[1]) throw new Error(t("app.error.mixedCompare"));
       if (kinds[0] === "dir") {
         if (windowClosing.current) return;
         const id = nextId.current++;
         setFolderDiffs(current => ({ ...current, [id]: { sources, options } }));
-        setTabs(current => [...current, { id, kind: "folderDiff", title: `Ordnervergleich: ${sources[0].path.split(/[\\/]/).pop()} ↔ ${sources[1].path.split(/[\\/]/).pop()}`, browserPath: "", exited: false }]);
+        setTabs(current => [...current, { id, kind: "folderDiff", ...folderDiffTitle(sources), browserPath: "", exited: false }]);
         setActiveId(id); return;
       }
-      if (kinds[0] !== "file") throw new Error("Nur reguläre Dateien und Ordner können verglichen werden. Symlinks werden nicht verfolgt.");
+      if (kinds[0] !== "file") throw new Error(t("app.error.unsupportedCompare"));
       const pair = await loadDiffPair(sources);
       for (const source of sources) if (!rememberedSource(source, tabsRef.current)) throw "SESSION_CLOSED:";
       if (windowClosing.current) return;
       const id = nextId.current++;
       setDiffs(current => ({ ...current, [id]: pair }));
-      setTabs(current => [...current, { id, kind: "diff", title: diffTitle(sources[0].path, sources[1].path), browserPath: "", exited: false }]);
+      setTabs(current => [...current, { id, kind: "diff", title: diffTitle(sources[0].path, sources[1].path), titleKey: "diff.title", titleParams: { left: fileName(sources[0].path), right: fileName(sources[1].path) }, browserPath: "", exited: false }]);
       setActiveId(id);
     } catch (reason) { throw diffError(reason); }
   };
@@ -667,7 +683,7 @@ export default function App() {
       if (tab.kind === "ssh" || tab.kind === "telnet" || tab.kind === "serial") sshTabs.current.add(id);
       return { ...tab, exited: false, sessionId: undefined, generation: (tab.generation ?? 0) + 1 };
     }));
-    setStatus("Sitzung wird neu gestartet…");
+    setStatus(t("app.status.restarting"));
   }, []);
   const markExited = useCallback((id: number) => {
     cancelTabTransfers(id);
@@ -728,7 +744,7 @@ export default function App() {
     const pending = item.prompt.type === "hostKey"
       ? answerHostKey(item.prompt.requestId, value === true)
       : answerSecret(item.prompt.requestId, typeof value === "string" ? value : null);
-    void pending.catch(() => setStatus("SSH-Rückfrage konnte nicht beantwortet werden."));
+    void pending.catch(() => setStatus(t("app.status.promptAnswerFailed")));
   };
   useEffect(() => {
     const subscription = listen<number>("tunnel-prompt-closed", event => {
@@ -764,7 +780,7 @@ export default function App() {
       if (tabsRef.current.some(t => t.id === id && !t.exited)) onLog(id, path);
       else return stopLog(id);
     });
-    void operation.catch(reason => setStatus(`Protokoll: ${String(reason)}`)).finally(() => logBusy.current.delete(id));
+    void operation.catch(reason => setStatus(t("app.status.log", { reason: String(reason) }))).finally(() => logBusy.current.delete(id));
   };
   const action = (name: string) => {
     setTemporaryMenu(false);
@@ -788,7 +804,7 @@ export default function App() {
       case "logToggle": if (activeId !== null) toggleSessionLog(activeId); break;
       case "root": case "processes": case "hardware": openTab("local", name); break;
       case "compareFiles": setDiffDialog(true); break;
-      case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: "Lokal", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(String(reason))); break;
+      case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: t("app.tab.local"), titleKey: "app.tab.local", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(String(reason))); break;
       case "compact": changeSettings({ ...settings, compact: !settings.compact }); break;
       case "left": case "right": changeSettings({ ...settings, sidebarRight: name === "right" }); break;
       case "tabNumbers": changeSettings({ ...settings, tabNumbers: !settings.tabNumbers }); break;
@@ -798,7 +814,7 @@ export default function App() {
       case "tux": setTimeout(() => window.dispatchEvent(new Event(tuxTestEvent)), 100); break;
       case "local": openTab("local"); break;
       case "wsl": if (hasWsl) openTab("wsl"); break;
-      case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="Quick connect"]')?.focus()); break;
+      case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>("input[data-quick-connect]")?.focus()); break;
       case "close": if (activeId !== null) closeTab(activeId); break;
       case "tunnels": setTunnelsOpen(true); void reloadTunnels().catch(reason => setStatus(String(reason))); break;
       case "quit": void closeRequest.current(); break;
@@ -869,8 +885,8 @@ export default function App() {
         const loaded = await settingsSync.reloadExternal();
         if (loaded) { applyLoadedSettings(loaded); reloaded = true; }
       }
-      if (reloaded) setStatus("Daten neu geladen");
-    } catch (reason) { setStatus(`Datenordner nicht lesbar: ${String(reason)}`); }
+      if (reloaded) setStatus(t("app.status.dataReloaded"));
+    } catch (reason) { setStatus(t("app.status.dataDirUnreadable", { reason: String(reason) })); }
     finally { checkingFingerprint.current = false; }
   };
   const checkExternalRef = useRef(checkExternal);
@@ -918,23 +934,23 @@ export default function App() {
       <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
       <div className="workspace-body">
       {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.id === "tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
-      <main className="terminal-workspace" aria-label="Terminalbereich">
+      <main className="terminal-workspace" aria-label={t("app.terminalArea")}>
 
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
-        {offerSave && activeTab && quickTarget && <div className="connection-save"><span>Verbindung speichern?</span><button title="Verbindung als Sitzung speichern" onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>Speichern…</button><button title="Hinweis für diesen Tab schließen" onClick={() => dismissSave(activeTab.id)}>Nicht jetzt</button></div>}
-        {gridVisible && <div className="multiexec-header"><strong>MultiExec aktiv</strong><button onClick={() => setUnchecked(new Set())}>Alle</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>Keine</button><button onClick={toggleMultiExec}>Beenden</button></div>}
+        {offerSave && activeTab && quickTarget && <div className="connection-save"><span>{t("app.saveConnection.question")}</span><button title={t("app.saveConnection.title")} onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null } })}>{t("app.saveConnection.save")}</button><button title={t("app.saveConnection.dismissTitle")} onClick={() => dismissSave(activeTab.id)}>{t("app.saveConnection.dismiss")}</button></div>}
+        {gridVisible && <div className="multiexec-header"><strong>{t("app.multiExec.active")}</strong><button onClick={() => setUnchecked(new Set())}>{t("app.multiExec.all")}</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>{t("app.multiExec.none")}</button><button onClick={toggleMultiExec}>{t("app.multiExec.end")}</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
           <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => <TerminalView fontResetToken={fontResetToken} logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : gridVisible ? () => { if (tab.id !== activeId) setActiveId(tab.id); } : undefined} exited={tab.exited}
             onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
-            gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />Eingaben empfangen</label></div> : undefined}
+            gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />{t("app.multiExec.receive")}</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onSerialPermission={(id, info) => setSerialPermission({ id, info })} onExit={markExited} onCloseTab={closeTab} onRestart={restartTab} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>
           {splitVisible && <SplitLayout mode={settings.splitMode} panes={panes} terminals={terminals} focusedIndex={activeId !== null && panes.includes(activeId) ? panes.indexOf(activeId) : focusedPane} ratios={ratios} onRatios={setRatios} onAssign={assignSplit}
             onFocus={index => { setFocusedPane(index); setActiveId(panes[index] ?? null); }}
             onNew={index => { setFocusedPane(index); const id = nextId.current; openTab("local"); setPanes(current => assignPane(current, index, id)); }} />}
-          {Object.entries(folderDiffs).map(([key, pair]) => <div key={key} id={`folderDiff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><FolderDiffView initial={pair} onOpen={compareFiles} onTitle={sources => setTabs(current => current.map(tab => tab.id === Number(key) ? { ...tab, title: `Ordnervergleich: ${sources[0].path.split(/[\\/]/).pop()} ↔ ${sources[1].path.split(/[\\/]/).pop()}` } : tab))} /></div>)}
+          {Object.entries(folderDiffs).map(([key, pair]) => <div key={key} id={`folderDiff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><FolderDiffView initial={pair} onOpen={compareFiles} onTitle={sources => setTabs(current => current.map(tab => tab.id === Number(key) ? { ...tab, ...folderDiffTitle(sources) } : tab))} /></div>)}
           <Suspense fallback={null}>{Object.entries(diffs).map(([key, pair]) => <div key={key} id={`diff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><DiffView pair={pair} settings={settings} onOpen={source => openEditor(source.tab, source.path)} /></div>)}</Suspense>
-          <Suspense fallback={<div className="terminal-empty">Editor wird geladen…</div>}>{Object.entries(editors).map(([key, editor]) => {
+          <Suspense fallback={<div className="terminal-empty">{t("app.status.editorLoading")}</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
             return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView settings={settings} fontResetToken={fontResetToken} ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
               onDirtyChange={dirty => setEditors(current => !current[id] || current[id].dirty === dirty ? current : { ...current, [id]: { ...current[id], dirty } })}
@@ -945,17 +961,17 @@ export default function App() {
       </main>
       </div>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>Makro abbrechen</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{updateVersion && <button type="button" className="update-available" onClick={() => setUpdateOpen(true)}>Version {updateVersion} verfügbar</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>{t("app.footer.cancelMacro")}</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>{t("app.footer.tunnels", { count: activeTunnels })}</button>}{updateVersion && <button type="button" className="update-available" onClick={() => setUpdateOpen(true)}>{t("app.footer.updateAvailable", { version: updateVersion })}</button>}{multiExec && <span>{tp("app.multiExec.status", terminals.length, { active: terminals.filter(tab => !tab.exited && !unchecked.has(tab.id)).length })} · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? (transfer.queued > 0 ? t("app.status.transferQueued", { text: transfer.text, queued: transfer.queued }) : transfer.text) : activeEditor ? (activeEditor.status || t("app.editor")) : (status || t("app.status.ready"))}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>{t("common.cancel")}</button>}</footer>
     {macros.dialogs}
     {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} hasProfile={!pasteRequest.multiExec && !!tabs.find(t => t.id === pasteRequest.source)?.savedSessionId} onAnswer={(text, remember) => {
       if (text !== null && remember && (remember.scope === "global" || !pasteRequest.multiExec)) {
         const source = pasteRequest.source;
         if (remember.scope === "tab") {
-          if (tabsRef.current.some(t => t.id === source)) { tabPasteChoices.current.set(source, remember.choice); setTabPasteCount(tabPasteChoices.current.size); } else setStatus("Auswahl nicht gemerkt");
+          if (tabsRef.current.some(t => t.id === source)) { tabPasteChoices.current.set(source, remember.choice); setTabPasteCount(tabPasteChoices.current.size); } else setStatus(t("app.status.choiceNotRemembered"));
         } else {
           const before = settingsRef.current.pasteRemember;
           const after = rememberChoice(before, remember.scope, tabsRef.current.find(t => t.id === source)?.savedSessionId, remember.choice);
-          if (after === before) setStatus("Auswahl nicht gemerkt"); else changeSettings({ ...settingsRef.current, pasteRemember: after });
+          if (after === before) setStatus(t("app.status.choiceNotRemembered")); else changeSettings({ ...settingsRef.current, pasteRemember: after });
         }
       }
       if (text !== null && tabsRef.current.some(t => t.id === pasteRequest.source && !t.exited)) macros.capture(pasteRequest.source, text.replace(/\r\n|\n/g, "\r"));
@@ -981,17 +997,17 @@ export default function App() {
       onClose={() => setSerialPermission(null)}
       onRetry={() => { setActiveId(serialPermission.id); restartTab(serialPermission.id); setSerialPermission(null); }}
       onExecute={command => new Promise<void>((resolve, reject) => {
-        if (windowClosing.current) { reject(new Error("Fenster wird geschlossen")); return; }
+        if (windowClosing.current) { reject(new Error(t("app.error.windowClosing"))); return; }
         const id = nextId.current;
         serialFixCommands.set(id, { command, resolve, reject });
         openTab("local");
       })} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
-    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus([`${result.imported} Sitzungen importiert, ${result.skippedDuplicates} übersprungen`, ...(result.warnings ?? [])].join("; ")); }} />}
-    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(`${result.imported} Sitzungen importiert`); }} />}
+    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus([tp("app.import.result", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? [])].join("; ")); }} />}
+    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(tp("app.import.done", result.imported)); }} />}
     {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
-    {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={saved => { const isNew = !sessionDialog.session?.id && sessionDialog.tabId === undefined; if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus("Sitzung gespeichert"); if (isNew) connectSaved(saved); }} />}
+    {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={saved => { const isNew = !sessionDialog.session?.id && sessionDialog.tabId === undefined; if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus(t("app.status.sessionSaved")); if (isNew) connectSaved(saved); }} />}
     {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}
     {quickUserTarget && <SessionUserDialog name={quickUserTarget} onAnswer={user => { const target = quickUserTarget; setQuickUserTarget(null); if (user !== null) connect(`${user}@${target}`); }} />}
     {conflict && <FileActionDialog key={conflictSequence} prompt={conflict} />}

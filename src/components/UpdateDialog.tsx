@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { writeClipboardText } from "../lib/clipboard";
+import { t } from "../i18n";
 import { updateCheck, updateInfo } from "../lib/update";
 import { guardLate, initialUpdateState, interpretCheck, updateReducer, type AvailableUpdate, type UpdateCheck, type UpdateProgress } from "../lib/updateState";
 import { UpdateDialogView } from "./UpdateDialogView";
@@ -54,7 +55,7 @@ export function UpdateDialog({ onInstall, onChecked, onClose }: UpdateDialogProp
   }, [state.phase]);
   const copy = (text: string) => {
     setCopyFailed(false);
-    writeClipboardText(text).then(() => setCopyNote("Kopiert")).catch((reason: unknown) => { setCopyFailed(true); setCopyNote(message(reason)); });
+    writeClipboardText(text).then(() => setCopyNote(t("update.copied"))).catch((reason: unknown) => { setCopyFailed(true); setCopyNote(message(reason)); });
   };
   return <UpdateDialogView state={state} copyNote={copyNote} copyFailed={copyFailed} onClose={onClose}
     onInstall={() => dispatch({ type: "install" })} onRetry={() => { setCopyNote(""); dispatch({ type: "retry" }); }} onCopy={copy} />;

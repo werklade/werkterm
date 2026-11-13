@@ -14,6 +14,6 @@ export function QuickConnect({ onConnect, onStatus, className = "" }: { onConnec
     setInvalid(!valid);
     if (valid) { onConnect(input.trim()); setInput(""); } else onStatus(error);
   }}>
-    <input aria-label={t("quick.label")} placeholder={t("quick.placeholder")} value={input} aria-invalid={invalid} title={invalid ? error : "[user@]host[:port]"} onChange={event => { setInput(event.target.value); setInvalid(false); }} />
+    <input data-quick-connect aria-label={t("quick.label")} placeholder={t("quick.placeholder")} value={input} aria-invalid={invalid} title={invalid ? error : "[user@]host[:port]"} onChange={event => { setInput(event.target.value); setInvalid(false); }} />
   </form>;
 }

@@ -4,6 +4,7 @@ import { WerktermImportDialog } from "./WerktermImportDialog";
 const host = vi.hoisted(() => ({ values: [] as unknown[], index: 0, preview: vi.fn(), commit: vi.fn() }));
 vi.mock("react", async importOriginal => ({
   ...await importOriginal<typeof import("react")>(), useId: () => "import", useEffect: vi.fn(),
+  useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
   useState: (initial: unknown) => {
     const index = host.index++;
     if (!(index in host.values)) host.values[index] = typeof initial === "function" ? initial() : initial;
