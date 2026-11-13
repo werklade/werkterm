@@ -83,6 +83,15 @@ AppImage: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, h
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
 ```
 
+## Updates
+
+Werkterm sucht nur auf Anforderung nach Updates: **Hilfe > Nach Updates suchen…**. Eine Prüfung beim Start ist optional (Einstellungen > Updates, standardmäßig aus). Kontaktiert wird ausschließlich `pkg.werklade.de`; es werden keine Daten übertragen.
+
+- AppImage und die Windows-Installer (NSIS, MSI) laden das signierte Update und installieren es; Werkterm startet danach neu. Die Signatur wird gegen einen in Werkterm eingebauten Schlüssel geprüft.
+- Eine `.deb`-Installation wird über die Paketverwaltung aktualisiert (`sudo apt update && sudo apt install --only-upgrade werkterm`), sobald das Werklade-Repository eingebunden ist.
+
+Der Update-Server ist noch nicht in Betrieb; bis dahin meldet die Prüfung, dass der Server nicht erreichbar ist.
+
 ## Datenordner
 
 Beim ersten Start fragt Werkterm nach dem Datenordner: Standardordner oder ein eigener Ordner, z. B. ein von einem Cloud-Client zwischen mehreren Geräten synchronisierter. Später änderbar unter Einstellungen > Datenordner. Werkterm startet beim Wechsel neu; laufende Tunnel werden gestoppt, offene Verbindungen nach Rückfrage getrennt. Unter Windows ist der Standardordner `%APPDATA%\de.werklade.werkterm`.

@@ -83,6 +83,15 @@ AppImage: if the window stays black or rendering crashes even so, starting with 
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
 ```
 
+## Updates
+
+Werkterm checks for updates only when you ask for it: **Hilfe > Nach Updates suchen…**. A check at startup is optional (Settings > Updates, off by default). The only host contacted is `pkg.werklade.de`; no data is transmitted.
+
+- AppImage and the Windows installers (NSIS, MSI) download the signed update and install it; Werkterm restarts afterwards. The signature is verified against a key built into Werkterm.
+- A `.deb` installation is updated through the package manager (`sudo apt update && sudo apt install --only-upgrade werkterm`) once the Werklade repository is set up.
+
+The update server is not live yet; until then the check reports that it cannot reach the server.
+
 ## Data folder
 
 On first start Werkterm asks for the data folder: the default folder or a folder of your own, for example one that a cloud client synchronizes between several devices. Change it later under Settings > Data folder. Werkterm restarts on change; running tunnels are stopped and open connections are closed after confirmation. On Windows the default folder is `%APPDATA%\de.werklade.werkterm`.

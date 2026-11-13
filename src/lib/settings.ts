@@ -16,6 +16,8 @@ export interface Settings {
   fontFamily: string; fontSize: number; lineHeight: number; cursorStyle: "block" | "bar" | "underline";
   cursorBlink: boolean; scrollback: number; theme: string; importedTheme?: TerminalTheme;
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
+  /** Opt-in: one update check at program start. Off by default; Werkterm opens no connection the user did not allow. */
+  updateCheckOnStart: boolean;
 }
 export const defaultSettings: Settings = {
   design: "Werklade Dunkel",
@@ -30,6 +32,7 @@ export const defaultSettings: Settings = {
   fontFamily: '"Cascadia Mono", "DejaVu Sans Mono", monospace', fontSize: 14, lineHeight: 1,
   cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: "design",
   editorFontSize: 14, editorWrap: false, editorTabSize: 4,
+  updateCheckOnStart: false,
 };
 const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
@@ -40,7 +43,7 @@ export function normalizeSettings(input: unknown): Settings {
     result.design = typeof v.design === "string" ? v.design.slice(0,60) : "Werkterm Dunkel";
     if (!("theme" in v)) result.theme = "Werkterm Dunkel";
   }
-  for (const key of ["tuxEnabled", "copyOnSelect", "logAllSessions", "logStripAnsi", "confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
+  for (const key of ["tuxEnabled", "copyOnSelect", "logAllSessions", "logStripAnsi", "confirmCloseSsh", "followTerminalFolder", "shellIntegration", "sshPromptCommand", "monitoring", "cursorBlink", "editorWrap", "compact", "sidebarVisible", "sidebarRight", "tabNumbers", "tabClose", "updateCheckOnStart"] as const) if (typeof v[key] === "boolean") result[key] = v[key];
   for (const [key, min, max] of [["tuxIdleMinutes", 1, 120], ["tuxCount", 1, 8], ["fontSize", 8, 32], ["editorFontSize", 8, 32], ["lineHeight", 1, 2], ["scrollback", 1000, 100000]] as const) {
     const value = v[key]; if (typeof value === "number" && Number.isFinite(value)) result[key] = Math.max(min, Math.min(max, key === "lineHeight" ? value : Math.round(value)));
   }

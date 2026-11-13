@@ -3,8 +3,10 @@ import type { AppMenu } from "../components/MenuBar";
 import { Icon } from "../components/Icon";
 import type { Settings } from "./settings";
 import type { SavedSession } from "./sessions";
-export function createMenus({ macros = [], recording = false, savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux }: {
+export function createMenus({ macros = [], recording = false, savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux, updateVersion = null }: {
   macros?: Macro[]; recording?: boolean; savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
+  /** Version found by the opt-in start check; marks the update entry in the Help menu. */
+  updateVersion?: string | null;
 }): AppMenu[] {
   const sidebarVisible = settings.sidebarVisible;
   const heading = (label: string) => ({ label, action: `heading:${label}`, heading: true });
@@ -49,6 +51,6 @@ export function createMenus({ macros = [], recording = false, savedSessions, set
       { label: "", action: "tools-separator", separator: true }, { label: "MultiExec", action: "multiexec", checked: multiExec, inlineCheck: true, shortcut: "Strg+Umschalt+M" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," },
     ] },
     { label: "Settings", mnemonic: 1, items: [{ label: "Einstellungen…", action: "settings" }] },
-    { label: "Help", mnemonic: 0, items: [{ label: "Tastenkürzel", action: "shortcuts" }, { label: "Über Werkterm", action: "about" }] },
+    { label: "Help", mnemonic: 0, items: [{ label: "Tastenkürzel", action: "shortcuts" }, { label: updateVersion ? `Nach Updates suchen… (Version ${updateVersion} verfügbar)` : "Nach Updates suchen…", action: "updates" }, { label: "Über Werkterm", action: "about" }] },
   ];
 }

@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Update check: "Hilfe > Nach Updates suchen…" asks https://pkg.werklade.de for a newer version. AppImage, NSIS and MSI installations download and install the signed update themselves; .deb installations are pointed to the package manager. A check at startup is opt-in (Settings > Updates, off by default). Werkterm contacts no other host, and never without this click or setting.
+
 - Paste confirmation dialog: the new list "Remember choice?" offers "Don't remember", "Remember for this tab", "Remember for the profile" (saved session) and "Remember permanently". The remembered choice is the action (paste / paste as one line) including "Remove last line break". Content with control characters always asks. With MultiExec only "Remember permanently" applies. Settings show the current state and offer "Reset remembered choice".
 - `npm run check-paths` checks release binaries for user paths of the build machine.
 - Selectable data folder: on first start Werkterm asks "Choose data folder" (default folder or a folder of your own, for example one synchronized by a cloud client and shared by several devices). Changeable later under Settings > Data folder; Werkterm restarts on change, running tunnels are stopped and open connections are closed after confirmation.

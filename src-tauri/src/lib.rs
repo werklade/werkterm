@@ -20,8 +20,36 @@ pub mod ssh;
 pub mod telnet;
 mod terminal_colors;
 pub mod tunnels;
+#[cfg(desktop)]
+mod updater;
 
 use std::sync::Arc;
+
+/// Stops tunnels, terminals and session logs and clears the editor cache. Runs on
+/// RunEvent::Exit and, on Windows, right before the updater starts the installer and exits.
+/// Uses block_on, so it must not be called from an async worker thread.
+fn shutdown(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let manager = app.state::<Arc<tunnels::TunnelManager>>();
+    tauri::async_runtime::block_on(manager.stop_all());
+    telnet::stop_all();
+    session_log::stop_all();
+    let docs = app.state::<Arc<editor::EditorDocs>>();
+    tauri::async_runtime::block_on(docs.retry_deletions());
+    editor::clear_cache();
+}
+
+/// Registers state only; no request is made until update_check/update_install.
+/// The plugin's own JS commands stay unreachable: no `updater:*` permission is granted.
+#[cfg(desktop)]
+fn updater_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry, tauri_plugin_updater::Config> {
+    tauri_plugin_updater::Builder::new().build()
+}
+
+#[cfg(not(desktop))]
+fn updater_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("updater").build()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,6 +68,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(updater_plugin())
         .invoke_handler(tauri::generate_handler![
             data_dir::data_dir_status,
             data_dir::data_dir_inspect,
@@ -49,6 +78,12 @@ pub fn run() {
             data_dir::settings_save,
             data_dir::data_dir_fingerprint,
             data_dir::app_restart,
+            #[cfg(desktop)]
+            updater::update_info,
+            #[cfg(desktop)]
+            updater::update_check,
+            #[cfg(desktop)]
+            updater::update_install,
             designs::designs_list,
             designs::designs_save,
             designs::designs_delete,
@@ -150,14 +185,7 @@ pub fn run() {
         })
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                use tauri::Manager;
-                let manager = app.state::<Arc<tunnels::TunnelManager>>();
-                tauri::async_runtime::block_on(manager.stop_all());
-                telnet::stop_all();
-                session_log::stop_all();
-                let docs = app.state::<Arc<editor::EditorDocs>>();
-                tauri::async_runtime::block_on(docs.retry_deletions());
-                editor::clear_cache();
+                shutdown(app);
             }
         });
 }

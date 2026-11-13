@@ -4,6 +4,9 @@
 // homes or the project path (rustc puts source paths into panic and location messages).
 // Cargo's own "trim-paths" profile option would do this, but it is not stable in the
 // toolchain we use (checked with cargo 1.99.1). All other commands are passed through as-is.
+// For desktop "tauri build" it also enables updater artifacts (.sig files) exactly when
+// TAURI_SIGNING_PRIVATE_KEY is set, and refuses such a signed build while tauri.conf.json
+// still carries the updater public key placeholder.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -91,15 +94,55 @@ export function configsWithRustflags({ startDir, cargoHome }) {
   });
 }
 
+export const PUBKEY_PLACEHOLDER = "WERKTERM_UPDATER_PUBKEY_PLACEHOLDER";
+const UPDATER_ARTIFACTS_CONFIG = JSON.stringify({ bundle: { createUpdaterArtifacts: true } });
+
+/** Updater public key from tauri.conf.json contents ("" when missing). */
+export function updaterPubkey(confText) {
+  const key = JSON.parse(confText)?.plugins?.updater?.pubkey;
+  return typeof key === "string" ? key : "";
+}
+
+/**
+ * Updater handling for desktop "build": with a signing key, adds a --config that turns on
+ * createUpdaterArtifacts right after the "build" word (before any "--" runner arguments);
+ * without one, leaves the arguments alone and returns a notice. A signing key together with
+ * an empty or placeholder public key is an error, so a release cannot ship unusable updates.
+ */
+export function updaterBuildArgs(args, env, pubkey) {
+  const index = args.findIndex(arg => !arg.startsWith("-"));
+  if (index < 0 || args[index] !== "build" || args.slice(0, index).includes("--")) return { args };
+  if (!env.TAURI_SIGNING_PRIVATE_KEY) {
+    return { args, notice: "tauri: building without updater signatures (TAURI_SIGNING_PRIVATE_KEY is not set)" };
+  }
+  if (!pubkey.trim() || pubkey.includes(PUBKEY_PLACEHOLDER)) {
+    return {
+      args,
+      error:
+        "tauri: TAURI_SIGNING_PRIVATE_KEY is set, but plugins.updater.pubkey in src-tauri/tauri.conf.json is still the placeholder. " +
+        "Enter the public key of the signing key there, or unset TAURI_SIGNING_PRIVATE_KEY for an unsigned build.",
+    };
+  }
+  return { args: [...args.slice(0, index + 1), "--config", UPDATER_ARTIFACTS_CONFIG, ...args.slice(index + 1)] };
+}
+
 function exitCodeForSignal(signal) {
   return 128 + (constants.signals[signal] ?? 0);
 }
 
 function main() {
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
   const env = { ...process.env };
   if (isBuild(args)) {
     const projectRoot = resolve(import.meta.dirname, "..");
+    const conf = readFileSync(join(projectRoot, "src-tauri", "tauri.conf.json"), "utf8");
+    const updater = updaterBuildArgs(args, env, updaterPubkey(conf));
+    if (updater.error) {
+      console.error(updater.error);
+      process.exit(1);
+    }
+    if (updater.notice) console.error(updater.notice);
+    args = updater.args;
     const home = homedir();
     for (const file of configsWithRustflags({ startDir: join(projectRoot, "src-tauri"), cargoHome: env.CARGO_HOME || join(home, ".cargo") })) {
       console.error(`WARNING: ${file} sets rustflags; they are ignored for this build because CARGO_ENCODED_RUSTFLAGS is used (scripts/tauri.mjs). Move them to RUSTFLAGS to keep them.`);

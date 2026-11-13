@@ -64,6 +64,10 @@ export class TransferQueue<C> {
   countSession(sessionId: number): number {
     return this.pending.filter(entry => entry.job.sessionId === sessionId).length + Number(this.active?.job.sessionId === sessionId && !this.active.controller.signal.aborted);
   }
+  /** Running and queued jobs of all sessions. */
+  count(): number {
+    return this.pending.length + Number(!!this.active && !this.active.controller.signal.aborted);
+  }
   private state(): QueueState {
     return this.active ? { text: this.active.text, queued: this.pending.length } : null;
   }

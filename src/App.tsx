@@ -27,6 +27,10 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { HelpDialog } from "./components/HelpDialog";
+import { UpdateDialog } from "./components/UpdateDialog";
+import { UpdateTransfersDialog } from "./components/UpdateTransfersDialog";
+import { updateCheck, updateInfo, updateInstall } from "./lib/update";
+import { createStartupChecker, isRestartRequired, startCheckEnabled, withStoppedNote, type UpdateProgress } from "./lib/updateState";
 import { chooseSessionExport } from "./lib/sessionExport";
 import { WerktermImportDialog } from "./components/WerktermImportDialog";
 import { ImportDialog } from "./components/ImportDialog";
@@ -96,7 +100,8 @@ function declinePrompt(prompt: SshPrompt) {
 }
 
 type DataPhase = "checking" | "setup" | "unreachable" | "error" | "ready";
-interface RestartPlan { path: string | null; copy: boolean }
+/** Both plans end in the same sequence (prompts, flush, stop tunnels, last tabs, logs) and an app restart. */
+type RestartPlan = { kind: "dataDir"; path: string | null; copy: boolean } | { kind: "update"; install(): Promise<void> };
 export default function App() {
   // Start order: data_dir_status -> (setup | unreachable dialog) -> settings_load -> "ready" (sessions, macros, tunnels, designs load).
   const [dataPhase, setDataPhase] = useState<DataPhase>("checking");
@@ -229,6 +234,7 @@ export default function App() {
   const applyLoadedSettings = (loaded: Settings) => { settingsRef.current = loaded; setSettings(loaded); };
   const refreshFingerprint = async () => { try { fingerprint.current = await dataDirFingerprint(); } catch { fingerprint.current = null; } };
   /** Status -> dialog (setup / unreachable) -> settings_load -> ready. Re-entered after a dialog choice. */
+  const startCheckAllowed = useRef(false);
   const bootstrapData = async (firstSetup = false): Promise<boolean> => {
     let next: DataDirStatus;
     try { next = await dataDirStatus(); }
@@ -242,6 +248,8 @@ export default function App() {
     const migrate = takeMigrateFlag() || firstSetup;
     const loaded = await settingsSync.load({ migrate });
     if (loaded) applyLoadedSettings(loaded);
+    // The start check follows only the settings that were really loaded; on a failed load (null) the cache must not decide.
+    startCheckAllowed.current = startCheckEnabled(loaded);
     await refreshFingerprint();
     setDataPhase("ready");
     return true;
@@ -326,6 +334,18 @@ export default function App() {
   }, [activeId]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [help, setHelp] = useState<"about" | "shortcuts" | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  /** Version found by the check (start check or dialog); only shown as a marker, never as a pop-up. */
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [restartForUpdate, setRestartForUpdate] = useState(false);
+  const [restartNotInstalled, setRestartNotInstalled] = useState(false);
+  const [transfersPrompt, setTransfersPrompt] = useState<{ count: number; answer(accepted: boolean): void } | null>(null);
+  // Opt-in start check: decided once, the first time the app is ready. With the setting off update_check is never called.
+  const startupUpdateCheck = useRef(createStartupChecker({ info: updateInfo, check: updateCheck }));
+  useEffect(() => {
+    if (!dataReady) return;
+    void startupUpdateCheck.current.run(startCheckAllowed.current, true).then(update => { if (update) setUpdateVersion(update.version); });
+  }, [dataReady]);
   const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | "werkterm" | null>(null);
   const fullscreenPending = useRef(false);
   useEffect(() => { void activateIconSet(settings.iconSet).catch(reason => setStatus(String(reason))); }, [settings.iconSet]);
@@ -521,6 +541,8 @@ export default function App() {
     windowClosing.current = true;
     const locked: EditorHandle[] = [];
     let done = false;
+    let tunnelsStopped = false;
+    let logsStopped = false;
     try {
       const approved = await closeAfterSsh(() => askSshClose(), async () => {
         await Promise.all(pendingOpens.current.values());
@@ -531,20 +553,32 @@ export default function App() {
       if (approved) {
         // Without a usable data folder (setup, unreachable) there is nowhere to store the last tabs; closing must still work.
         const saveLastTabs = async () => { if (dataReadyRef.current) await invoke("last_tabs_save", { tabs: terminalDescriptors(tabsRef.current) }); };
-        const stopLogs = async () => { await Promise.all(tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => stopLog(tab.id))); };
+        const stopLogs = async () => {
+          const terminalTabs = tabsRef.current.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff");
+          if (terminalTabs.some(tab => logPaths[tab.id])) logsStopped = true;
+          await Promise.all(terminalTabs.map(tab => stopLog(tab.id)));
+        };
+        // Update only: running file transfers end with the restart, so ask before anything is stopped.
+        if (restart?.kind === "update") {
+          const running = transferQueue.count();
+          if (running > 0 && !(await new Promise<boolean>(resolve => setTransfersPrompt({ count: running, answer: accepted => { setTransfersPrompt(null); resolve(accepted); } })))) return false;
+        }
         if (restart) {
           await runSwitch({
             flushSettings: () => settingsSync.flush(),
             // Approved closing also stops tunnels; the backend refuses a folder switch while any runs.
             stopTunnels: async () => {
               const running = (await invoke<TunnelStatus[]>("tunnel_list_status")).filter(s => ["running", "connecting", "reconnecting"].includes(s.state));
+              if (running.length) tunnelsStopped = true;
               await Promise.all(running.map(s => invoke("tunnel_stop", { id: s.id })));
             },
             saveLastTabs, stopLogs,
-            setDataDir: async () => { await dataDirSet(restart.path, restart.copy); },
-            lock: () => lockForSwitch(restart.copy),
+            // Point of no return: the data folder switch, or the update download and installation.
+            setDataDir: async () => { if (restart.kind === "dataDir") await dataDirSet(restart.path, restart.copy); else await restart.install(); },
+            // An update does not touch the data folder: writes stay possible, the restart dialog only appears if the restart fails.
+            lock: () => { if (restart.kind === "dataDir") lockForSwitch(restart.copy); },
             restart: () => appRestart(),
-            onRestartFailed: setRestartError,
+            onRestartFailed: message => { if (restart.kind === "update") { setRestartForUpdate(true); setRestartRequired(true); setUpdateOpen(false); } setRestartError(message); },
           });
         } else {
           await settingsSync.flush();
@@ -555,6 +589,12 @@ export default function App() {
         done = true;
       }
     } catch (reason) {
+      if (restart?.kind === "update" && isRestartRequired(reason)) {
+        // Windows: the app was shut down but the installer did not start. No further work, only the restart dialog.
+        settingsSync.lock(); setRestartForUpdate(true); setRestartNotInstalled(true); setRestartRequired(true); setUpdateOpen(false);
+        return false;
+      }
+      if (restart?.kind === "update") throw new Error(withStoppedNote(String(reason instanceof Error ? reason.message : reason), { tunnels: tunnelsStopped, logs: logsStopped }));
       if (restart) throw new Error(`Wechsel des Datenordners fehlgeschlagen: ${String(reason)}`);
       reportStatus("Fenster konnte nicht geschlossen werden: " + String(reason));
     }
@@ -779,6 +819,7 @@ export default function App() {
       case "settings": setSettingsOpen(true); break;
       case "shortcuts": setHelp("shortcuts"); break;
       case "about": setHelp("about"); break;
+      case "updates": setUpdateOpen(true); break;
     }
   };
   const terminals = tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff");
@@ -859,10 +900,12 @@ export default function App() {
     macros.capture(focused, pasted ? data.replace(/\r\n|\n/g, "\r") : data);
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, updateVersion, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
   /** Switch from the settings dialog: same prompts as "Beenden", then data_dir_set and restart. Rejects with the error shown in the dialog. */
-  const restartWithDataDir = async (path: string | null, copy: boolean) => { await closeRequest.current({ path, copy }); };
+  const restartWithDataDir = async (path: string | null, copy: boolean) => { await closeRequest.current({ kind: "dataDir", path, copy }); };
+  /** Update dialog: same sequence as the folder switch; the install replaces data_dir_set. False when the user declined a prompt. */
+  const installUpdate = (onProgress: (progress: UpdateProgress) => void): Promise<boolean> => closeRequest.current({ kind: "update", install: () => updateInstall(onProgress) });
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
@@ -897,7 +940,7 @@ export default function App() {
       </main>
       </div>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>Makro abbrechen</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>Makro abbrechen</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>Tunnel: {activeTunnels} aktiv</button>}{updateVersion && <button type="button" className="update-available" onClick={() => setUpdateOpen(true)}>Version {updateVersion} verfügbar</button>}{multiExec && <span>MultiExec: {terminals.filter(t => !t.exited && !unchecked.has(t.id)).length} von {terminals.length} Terminals · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? `${transfer.text}${transfer.queued > 0 ? ` +${transfer.queued} in Warteschlange` : ""}` : activeEditor?.status ?? status}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>Abbrechen</button>}</footer>
     {macros.dialogs}
     {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} hasProfile={!pasteRequest.multiExec && !!tabs.find(t => t.id === pasteRequest.source)?.savedSessionId} onAnswer={(text, remember) => {
       if (text !== null && remember && (remember.scope === "global" || !pasteRequest.multiExec)) {
@@ -926,7 +969,9 @@ export default function App() {
     {dataPhase === "unreachable" && dataStatus && <DataDirDialog mode="unreachable" status={dataStatus} onApply={applyStartupChoice(false)} onRetry={retryDataDir} />}
     {dataPhase === "error" && <DataDirErrorDialog message={dataError} busy={dataErrorBusy} error={dataErrorAction}
       onRetry={() => void runDataErrorAction(async () => { await bootstrapData(); })} onReset={() => void runDataErrorAction(resetPointer)} />}
-    {restartRequired && <RestartDialog busy={restartBusy} error={restartError} onRestart={() => void retryRestart()} />}
+    {transfersPrompt && <UpdateTransfersDialog count={transfersPrompt.count} onAnswer={transfersPrompt.answer} />}
+    {updateOpen && <UpdateDialog onInstall={installUpdate} onChecked={update => setUpdateVersion(update ? update.version : null)} onClose={() => setUpdateOpen(false)} />}
+    {restartRequired && <RestartDialog busy={restartBusy} error={restartError} update={restartForUpdate} notInstalled={restartNotInstalled} onRestart={() => void retryRestart()} />}
     {serialPermission && <SerialPermissionDialog key={serialPermission.id} info={serialPermission.info}
       onClose={() => setSerialPermission(null)}
       onRetry={() => { setActiveId(serialPermission.id); restartTab(serialPermission.id); setSerialPermission(null); }}

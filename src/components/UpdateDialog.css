@@ -1,0 +1,19 @@
+.update-dialog { width: min(520px, calc(100vw - 32px)); box-sizing: border-box; max-height: calc(100vh - 40px); overflow: auto; }
+.update-headline { font-weight: 600; overflow-wrap: anywhere; }
+.update-meta, .update-note { color: var(--fg-secondary); overflow-wrap: anywhere; }
+.update-channel { display: inline-block; margin: 0 0 8px; padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--fg-secondary); font-size: 12px; }
+.update-error { color: var(--danger); overflow-wrap: anywhere; }
+.update-dialog h3 { margin: 12px 0 4px; font-size: 14px; }
+.update-notes { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; background: var(--bg-input); border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.update-notes:focus-visible, .update-progress:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.update-copy { display: flex; align-items: stretch; gap: 8px; margin: 4px 0 8px; }
+.update-copy code { flex: 1; min-width: 0; padding: 8px 10px; font-family: var(--font-mono); background: var(--bg-input); border-radius: var(--radius); user-select: all; overflow-wrap: anywhere; word-break: break-all; }
+.update-copy button { flex: none; border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 12px; background: var(--bg-toolbar); }
+.update-copy button:hover { background: var(--bg-hover); }
+.update-progress { height: 8px; margin: 12px 0 8px; background: var(--bg-input); border-radius: var(--radius); overflow: hidden; }
+.update-progress-bar { height: 100%; background: var(--accent); transition: width .2s linear; }
+.update-progress-bar.indeterminate { width: 35%; animation: update-slide 1.2s ease-in-out infinite alternate; }
+@keyframes update-slide { from { margin-left: 0; } to { margin-left: 65%; } }
+@media (prefers-reduced-motion: reduce) { .update-progress-bar.indeterminate { animation: none; width: 100%; opacity: .5; } .update-progress-bar { transition: none; } }
+.update-dialog .dialog-actions button:disabled { opacity: .5; cursor: default; }
+.statusbar > button.update-available { color: var(--fg-primary); }

@@ -107,14 +107,14 @@ export function DataDirErrorDialog(p: DataDirErrorDialogProps) {
   </dialog>;
 }
 
-export interface RestartDialogProps { busy: boolean; error: string; onRestart(): void }
+export interface RestartDialogProps { busy: boolean; error: string; onRestart(): void; /** The restart follows an installed update instead of a folder switch. */ update?: boolean; /** Windows: the installer did not start; the update was not installed. */ notInstalled?: boolean }
 /** Shown after the folder was switched but the restart failed; writing stays blocked, the only action is restarting. */
 export function RestartDialog(p: RestartDialogProps) {
   const modal = useModal();
   const titleId = useId();
   return <dialog ref={modal} className="ssh-dialog datadir-dialog" aria-modal="true" aria-labelledby={titleId} onCancel={event => event.preventDefault()}>
     <h2 id={titleId}>Neustart erforderlich</h2>
-    <p>Der Datenordner wurde gewechselt. Werkterm muss neu starten, damit die Änderung gilt.</p>
+    <p>{p.notInstalled ? "Das Update wurde nicht installiert. Werkterm muss neu gestartet werden." : p.update ? "Das Update ist installiert. Werkterm muss neu starten, damit es gilt." : "Der Datenordner wurde gewechselt. Werkterm muss neu starten, damit die Änderung gilt."}</p>
     {p.error && <p role="alert" className="datadir-error">{p.error}</p>}
     <div className="dialog-actions"><button type="submit" autoFocus disabled={p.busy} onClick={p.onRestart}>Neu starten</button></div>
   </dialog>;
