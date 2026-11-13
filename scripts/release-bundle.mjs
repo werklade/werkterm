@@ -17,8 +17,8 @@ import { join, resolve } from "node:path";
 export const PRODUCT = "werkterm";
 export const PREFIX = "Werkterm";
 export const BASE_URL = "https://pkg.werklade.de";
-/** APT setup script from werklade/packages (client/), attached to every GitHub release by hand. */
-export const SETUP_SCRIPT = "werklade-apt-setup.sh";
+/** APT setup script in this repository; the README links to it. */
+export const SETUP_SCRIPT = "install/werklade-apt-setup.sh";
 export const REPO_KEY_FPR = "498E F081 BBC7 50A1 11DB  2EDA E0CD AE7D 9332 A76C";
 export const MAX_NOTES = 20000;
 export const SUMS = "SHA256SUMS";
@@ -333,8 +333,8 @@ export function releaseText({ version, section }) {
     "## Updates",
     "",
     `- APT: the .deb is also available from the APT repository on ${BASE_URL}; installations from there update with \`apt upgrade\`.`,
-    `  Set up the repository with \`${SETUP_SCRIPT}\` attached to this release: \`sudo bash ${SETUP_SCRIPT} --install werkterm\` (\`--dry-run\` shows the steps first).`,
-    `  The script checks the repository key fingerprint \`${REPO_KEY_FPR}\` before changing anything; manual steps: README, section "APT repository".`,
+    `  Set up the repository with \`${SETUP_SCRIPT}\` from the werkterm repository (README, section "APT repository"): \`sudo bash werklade-apt-setup.sh --install werkterm\`.`,
+    `  The script checks the repository key fingerprint \`${REPO_KEY_FPR}\` before changing anything.`,
     `- Updater: AppImage, NSIS and MSI installations find this version under "Hilfe > Nach Updates suchen" (signed update from ${BASE_URL}).`,
     "",
   );

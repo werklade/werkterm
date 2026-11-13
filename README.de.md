@@ -41,7 +41,7 @@ Die aktuelle stabile Version ist 0.1.8 (13.11.2026). Die Pakete setzen glibc 2.3
 
 ### APT-Repository (Debian 13, Ubuntu 24.04 und neuer, amd64)
 
-Am schnellsten: `werklade-apt-setup.sh` aus dem GitHub-Release herunterladen und ausführen (Bash). Das Skript prüft vor jeder Änderung den Fingerprint unten; `--dry-run` zeigt die Schritte nur an, `--remove` entfernt Quelle und Schlüssel wieder.
+Am schnellsten: [`install/werklade-apt-setup.sh`](install/werklade-apt-setup.sh) aus diesem Repository herunterladen (auf GitHub: Datei öffnen, dann „Download raw file“) und ausführen (Bash). Das Skript prüft vor jeder Änderung den Fingerprint unten; `--dry-run` zeigt die Schritte nur an, `--remove` entfernt Quelle und Schlüssel wieder.
 
 ```bash
 sudo bash werklade-apt-setup.sh --install werkterm

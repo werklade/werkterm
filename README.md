@@ -41,7 +41,7 @@ The current stable release is 0.1.8 (2026-11-13). The packages require glibc 2.3
 
 ### APT repository (Debian 13, Ubuntu 24.04 and newer, amd64)
 
-Quickest way: download `werklade-apt-setup.sh` from the GitHub release and run it (Bash). It checks the key fingerprint below before changing anything; `--dry-run` only shows the steps, `--remove` removes the source and key again.
+Quickest way: download [`install/werklade-apt-setup.sh`](install/werklade-apt-setup.sh) from this repository (on GitHub: open the file, then "Download raw file") and run it (Bash). It checks the key fingerprint below before changing anything; `--dry-run` only shows the steps, `--remove` removes the source and key again.
 
 ```bash
 sudo bash werklade-apt-setup.sh --install werkterm

@@ -124,8 +124,8 @@ Die Pakete stichprobenartig installieren (Windows: NSIS-Installer; Linux in WSL:
 ## 4. GitHub-Pre-release
 
 Von Hand auf GitHub: Releases > Draft a new release, Tag `v<version>`, Titel `Werkterm <version>`, Text aus
-`github/RELEASE-TEXT.md`, „Set as a pre-release“ anhaken. Anhänge: die vier Pakete, `github/SHA256SUMS`
-(als `SHA256SUMS`) und `../packages/client/werklade-apt-setup.sh` (Release-Text verweist darauf).
+`github/RELEASE-TEXT.md`, „Set as a pre-release“ anhaken. Anhänge: die vier Pakete und `github/SHA256SUMS`
+(als `SHA256SUMS`). Das APT-Setup-Skript liegt im Repo (`install/werklade-apt-setup.sh`), nicht am Release.
 
 ## 5. Veröffentlichen
 
