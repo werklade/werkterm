@@ -183,6 +183,12 @@ curl -fsS https://pkg.werklade.de/werkterm/updates-test/latest.json | head -c 30
 Scheitert `release`/`release-test` nach einem erfolgreichen `deb`, ist das .deb im APT-Repo, `latest.json` aber
 unverändert. Denselben Aufruf wiederholen: `deb` und `release` sind für denselben Inhalt idempotent.
 
+## Hinweis für Tests unter Windows
+
+NSIS- und MSI-Installation nie auf demselben Rechner mischen. Das MSI übernimmt einen vorhandenen NSIS-Ordner
+(`%LOCALAPPDATA%\Werkterm`) und überschreibt dessen `werkterm.exe`; danach stehen zwei Einträge in „Installierte Apps“.
+Aufräumen: MSI-Eintrag deinstallieren, dann den NSIS-Installer der gewünschten Version erneut ausführen.
+
 ## Härtung (optional)
 
 Derzeit sind die Signier-Secrets Repository-Secrets; Schreibrecht auf das Repo hat nur der Betreiber. Strenger:
