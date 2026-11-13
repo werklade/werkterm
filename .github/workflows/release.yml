@@ -128,12 +128,15 @@ jobs:
         with:
           toolchain: stable
 
+      # bundleMediaFramework copies everything in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 into the
+      # AppImage, so only the plugins WebKitGTK needs are installed (base: appsink; good; gl).
       - name: Install Linux packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils libdbus-1-dev pkg-config
+            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils libdbus-1-dev pkg-config \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-gl
 
       # Read-only: the signing job never writes caches (the check job saves this one).
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -182,6 +185,24 @@ jobs:
             printf '%s\n' "$listing"
             exit 1
           fi
+
+      - name: Check GStreamer plugins in AppImage
+        run: |
+          set -euo pipefail
+          appimage="$PWD/src-tauri/target/release/bundle/appimage/Werkterm_${VERSION}_amd64.AppImage"
+          work=$(mktemp -d)
+          (cd "$work" && "$appimage" --appimage-extract >/dev/null)
+          for f in usr/lib/gstreamer-1.0/libgstapp.so usr/lib/gstreamer-1.0/libgstopengl.so \
+              apprun-hooks/linuxdeploy-plugin-gstreamer.sh; do
+            if [ ! -e "$work/squashfs-root/$f" ]; then
+              echo "::error::$f fehlt im AppImage"
+              exit 1
+            fi
+          done
+          echo "GStreamer-Plugins im AppImage: $(ls "$work/squashfs-root/usr/lib/gstreamer-1.0" | wc -l)"
+          echo "gst-plugin-scanner: $(cd "$work/squashfs-root" && find . -name gst-plugin-scanner -print)"
+          du -sh "$appimage" "$work/squashfs-root/usr/lib/gstreamer-1.0"
+          rm -rf "$work"
 
       - name: Collect packages
         run: |

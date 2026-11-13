@@ -122,7 +122,7 @@ WERKTERM_WEBKIT_WORKAROUND=1 werkterm
 
 Not yet confirmed on real NVIDIA hardware.
 
-AppImage: if the window stays black or rendering crashes even so, starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` helped in one test. This is the Debian/Ubuntu path; other distributions use different paths. Interim workaround: the AppImage currently ships no GStreamer plugins.
+AppImage before 0.1.10: if the window stays black or rendering crashes even so, the AppImage lacks GStreamer plugins. Starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu path; other distributions use different paths) helps. From 0.1.10 the AppImage ships the plugins itself; remove the variable then, as mixing system plugins with the bundled GStreamer can crash.
 
 ```bash
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.8_amd64.AppImage
@@ -206,7 +206,7 @@ The Rust backend uses Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyring` 
 - Exec listing requires GNU-compatible tools and does not provide SFTP writes/transfers.
 - Secret Service or session D-Bus may be unavailable, especially under WSL; saved-password operations then report an error.
 - Windows/WSL development: WSL tabs use the default distribution; PowerShell UNC directory listing is not confirmed.
-- AppImage without GStreamer plugins: see "Linux: display problems / black window".
+- AppImage before 0.1.10 without GStreamer plugins: see "Linux: display problems / black window".
 - Linux serial-permission assistance still needs a real-device test in the packaged application. STATUS.md also lists window-level SSH close confirmation as awaiting manual verification.
 
 ## Roadmap

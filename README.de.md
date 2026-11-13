@@ -122,7 +122,7 @@ WERKTERM_WEBKIT_WORKAROUND=1 werkterm
 
 Auf echter NVIDIA-Hardware noch nicht bestätigt.
 
-AppImage: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, half bei einem Test der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0`. Das ist der Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade. Übergangslösung: Das AppImage liefert derzeit keine GStreamer-Plugins mit.
+AppImage vor 0.1.10: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, fehlen dem AppImage GStreamer-Plugins. Abhilfe ist der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade). Ab 0.1.10 bringt das AppImage die Plugins selbst mit; die Variable dann entfernen, denn System-Plugins mit dem mitgelieferten GStreamer zu mischen kann abstürzen.
 
 ```bash
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.8_amd64.AppImage
@@ -206,7 +206,7 @@ Das Rust-Backend verwendet Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyr
 - Exec-Listing benötigt GNU-kompatible Werkzeuge und bietet keine SFTP-Schreibaktionen/Transfers.
 - Secret Service oder Sitzungs-D-Bus können insbesondere unter WSL fehlen; gespeicherte Passwortoperationen melden dann einen Fehler.
 - Windows-/WSL-Entwicklung: WSL-Tabs nutzen die Standarddistribution; PowerShell-UNC-Verzeichnislisting ist nicht bestätigt.
-- AppImage ohne GStreamer-Plugins: siehe „Linux: Darstellungsprobleme / schwarzes Fenster“.
+- AppImage vor 0.1.10 ohne GStreamer-Plugins: siehe „Linux: Darstellungsprobleme / schwarzes Fenster“.
 - Die Linux-Seriell-Berechtigungshilfe benötigt noch einen Gerätetest in der paketierten Anwendung. STATUS.md nennt außerdem die SSH-Schließen-Rückfrage auf Fensterebene als manuell zu prüfen.
 
 ## Ausblick
