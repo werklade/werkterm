@@ -7,7 +7,7 @@ import { createMenus } from "./actions";
 import { searchSessions, terminalDescriptors } from "./history";
 import { parseQuickConnect } from "./quickConnect";
 import { normalizeSettings, defaultSettings } from "./settings";
-import { shortcuts } from "./menu";
+import { shortcutList } from "./menu";
 import type { SavedSession } from "./sessions";
 const session: SavedSession = { id: "a", kind: "ssh", name: "Production", host: "server.example", user: "marc", port: 22, folder: "Work/Servers", auth: { type: "ask" }, source: null };
 const noop = () => {};
@@ -44,32 +44,32 @@ describe("View preferences and shared action definitions", () => {
     const all = definitions().flatMap(m => m.items).filter(i => i.shortcut);
     expect(new Set(all.map(i => i.shortcut)).size).toBe(all.length);
     expect(new Set(all.map(i => i.action)).size).toBe(all.length);
-    expect(all.map(i => i.action).sort()).toEqual(shortcuts.map(i => i.action).sort());
+    expect(all.map(i => i.action).sort()).toEqual(shortcutList().map(i => i.action).sort());
   });
   it("groups sessions and restricts root and processes to Linux while sharing hardware with Windows", () => {
-    expect(definitions().find(m => m.label === "Sessions")?.items.find(item => item.heading)).toMatchObject({ label: "Work/Servers", heading: true });
+    expect(definitions().find(m => m.id === "sessions")?.items.find(item => item.heading)).toMatchObject({ label: "Work/Servers", heading: true });
     expect(definitions().flatMap(m => m.items).some(i => i.action === "root")).toBe(false);
     expect(definitions(true).flatMap(m => m.items).some(i => i.action === "root")).toBe(true);
     for (const isLinux of [false, true]) {
-      const tools = definitions(isLinux).find(menu => menu.label === "Tools")!.items;
+      const tools = definitions(isLinux).find(menu => menu.id === "tools")!.items;
       expect(tools.filter(item => item.action === "hardware")).toEqual([{ label: "Hardware anzeigen", action: "hardware" }]);
       expect(tools.some(item => item.action === "processes")).toBe(isLinux);
     }
-    expect(definitions().find(m => m.label === "Split")?.items.filter(i => !i.disabled).map(i => i.action)).toEqual([]);
+    expect(definitions().find(m => m.id === "split")?.items.filter(i => !i.disabled).map(i => i.action)).toEqual([]);
   });
   it("activates all split layouts and local tools outside MultiExec", () => {
     const menus = createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 1, multiExec: false, isLinux: true });
-    expect(menus.find(menu => menu.label === "Split")?.items.filter(item => !item.disabled).map(item => item.action)).toEqual(["single", "split:columns", "split:rows", "split:quad"]);
+    expect(menus.find(menu => menu.id === "split")?.items.filter(item => !item.disabled).map(item => item.action)).toEqual(["single", "split:columns", "split:rows", "split:quad"]);
     for (const action of ["ascii", "ports", "keygen"]) expect(menus.flatMap(menu => menu.items).find(item => item.action === action)?.disabled).not.toBe(true);
     expect(menus.flatMap(menu => menu.items).filter(item => ["ascii", "ports", "keygen"].includes(item.action))).toHaveLength(3);
   });
   it("renders toolbar order, pressed state, enabled macro menu and shell tooltip", () => {
     const html = renderToStaticMarkup(<Toolbar hasWsl={false} menus={definitions()} shellName="zsh" multiExec={true} onAction={noop}/>);
-    const labels = ["Session", "Sessions", "Lokales Terminal", "Tools", "View", "Split", "MultiExec", "Settings", "Help", "Macros", "Beenden"];
+    const labels = ["Sitzung", "Sitzungen", "Lokales Terminal", "Werkzeuge", "Ansicht", "Teilen", "MultiExec", "Einstellungen", "Hilfe", "Makros", "Beenden"];
     const positions = labels.map(label => html.indexOf(`>${label}</span>`));
     expect(positions.every(i => i >= 0)).toBe(true); expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(html).toContain('title="zsh"'); expect(html).toContain('aria-pressed="true"'); expect(html).toContain('title="Macros"'); expect(html).not.toContain("Makros folgen");
-    expect(definitions().find(menu => menu.label === "Makros")?.items.map(item => item.action)).toContain("macro:record");
+    expect(html).toContain('title="zsh"'); expect(html).toContain('aria-pressed="true"'); expect(html).toContain('title="Makros"'); expect(html).not.toContain("Makros folgen");
+    expect(definitions().find(menu => menu.id === "macros")?.items.map(item => item.action)).toContain("macro:record");
   });
 });
 
@@ -85,11 +85,11 @@ it("serializes terminal order without editor or runtime data", () => {
 });
 
 it("orders session management before imports and saved folders without a trailing separator", () => {
-  const sessions = definitions().find(menu => menu.label === "Sessions")!.items;
+  const sessions = definitions().find(menu => menu.id === "sessions")!.items;
   expect(sessions.slice(0, 8).map(item => item.action)).toEqual([
     "newSession", "sessions", "sessions-transfer-separator", "exportSessions", "werkterm", "mobaxterm", "windterm", "sessions-saved-separator",
   ]);
   expect(new Set(sessions.map(item => item.action)).size).toBe(sessions.length);
-  const empty = createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 0, multiExec: false, isLinux: true }).find(menu => menu.label === "Sessions")!.items;
+  const empty = createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 0, multiExec: false, isLinux: true }).find(menu => menu.id === "sessions")!.items;
   expect(empty[empty.length - 1]?.action).toBe("windterm");
 });

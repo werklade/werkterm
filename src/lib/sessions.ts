@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getLanguage } from "../i18n";
 
 export interface SerialConfig { device: string; baud: number; data_bits: number; parity: "none" | "odd" | "even"; stop_bits: number; flow: "none" | "software" | "hardware"; enter: "cr" | "lf" | "crlf"; local_echo: boolean }
 export const defaultSerial: SerialConfig = { device: "", baud: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow: "none", enter: "cr", local_echo: false };
@@ -102,8 +103,8 @@ export function buildSessionTree(sessions: readonly SavedSession[]): SessionFold
     folder.sessions.push(session);
   }
   const sort = (folder: SessionFolder) => {
-    folder.folders.sort((a, b) => a.name.localeCompare(b.name, "de"));
-    folder.sessions.sort((a, b) => a.name.localeCompare(b.name, "de"));
+    folder.folders.sort((a, b) => a.name.localeCompare(b.name, getLanguage()));
+    folder.sessions.sort((a, b) => a.name.localeCompare(b.name, getLanguage()));
     folder.folders.forEach(sort);
   };
   sort(root);
@@ -111,9 +112,9 @@ export function buildSessionTree(sessions: readonly SavedSession[]): SessionFold
 }
 
 export function searchSessions(sessions: readonly SavedSession[], query: string): SavedSession[] {
-  const term = query.trim().toLocaleLowerCase("de");
+  const term = query.trim().toLocaleLowerCase(getLanguage());
   return sessions.filter(session => [session.name, session.host, session.serial?.device ?? "", session.user ?? ""]
-    .some(value => value.toLocaleLowerCase("de").includes(term)));
+    .some(value => value.toLocaleLowerCase(getLanguage()).includes(term)));
 }
 
 type SessionTarget = Pick<SavedSession, "host" | "port" | "user"> & Partial<Pick<SavedSession, "kind" | "serial">>;

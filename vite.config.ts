@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 // @ts-expect-error type error without @types/node package
@@ -8,6 +9,8 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react()],
   optimizeDeps: { exclude: ["@xterm/xterm"] },
+  // German is the language of the existing assertions; tests that need English switch explicitly.
+  test: { setupFiles: ["src/test/setup.ts"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

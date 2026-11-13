@@ -1,6 +1,7 @@
 import { getDesign } from "./designs";
 import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 import { emptyPasteRemember, normalizePasteRemember, type PasteRemember } from "./paste";
+import type { LanguageSetting } from "../i18n";
 export interface Settings {
   design: string;
   iconSet: string;
@@ -18,6 +19,8 @@ export interface Settings {
   editorFontSize: number; editorWrap: boolean; editorTabSize: 2 | 4 | 8;
   /** Opt-in: one update check at program start. Off by default; Werkterm opens no connection the user did not allow. */
   updateCheckOnStart: boolean;
+  /** UI language; "system" follows the OS locale. Per device (see localOnlyKeys). */
+  language: LanguageSetting;
 }
 export const defaultSettings: Settings = {
   design: "Werklade Dunkel",
@@ -33,6 +36,7 @@ export const defaultSettings: Settings = {
   cursorStyle: "block", cursorBlink: true, scrollback: 1000, theme: "design",
   editorFontSize: 14, editorWrap: false, editorTabSize: 4,
   updateCheckOnStart: false,
+  language: "system",
 };
 const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
@@ -49,6 +53,7 @@ export function normalizeSettings(input: unknown): Settings {
   }
   if (v.rightClick === "menu" || v.rightClick === "paste") result.rightClick = v.rightClick;
   if (typeof v.logFolder === "string") result.logFolder = v.logFolder;
+  if (v.language === "system" || v.language === "de" || v.language === "en") result.language = v.language;
   if (v.pasteConfirm === "always" || v.pasteConfirm === "never" || v.pasteConfirm === "multiline") result.pasteConfirm = v.pasteConfirm;
   if (v.splitMode === "single" || v.splitMode === "columns" || v.splitMode === "rows" || v.splitMode === "quad") result.splitMode = v.splitMode;
   if (v.bars === "menu" || v.bars === "toolbar" || v.bars === "both") result.bars = v.bars;
@@ -77,7 +82,7 @@ export function loadSettings(): Settings {
 /** Writes the localStorage cache only; the file write is done by SettingsSync. */
 export function saveSettings(settings: Settings): void { try { localStorage.setItem(storageKey, JSON.stringify(normalizeSettings(settings))); } catch { /* Session settings remain usable. */ } }
 /** Settings that describe this device (local paths). They live in localStorage only, never in settings.json. */
-export const localOnlyKeys = ["logFolder"] as const;
+export const localOnlyKeys = ["logFolder", "language"] as const;
 const isLocalKey = (key: string): boolean => (localOnlyKeys as readonly string[]).includes(key);
 /** JSON text of the shared settings file: normalized, without device-local keys. */
 export function serializeSettings(settings: Settings): string {
@@ -85,8 +90,8 @@ export function serializeSettings(settings: Settings): string {
   for (const key of localOnlyKeys) delete shared[key];
   return JSON.stringify(shared, null, 2);
 }
-const localValues = (cacheText: string | null): Pick<Settings, "logFolder"> => {
-  try { return { logFolder: normalizeSettings(JSON.parse(cacheText ?? "null")).logFolder }; } catch { return { logFolder: "" }; }
+const localValues = (cacheText: string | null): Pick<Settings, typeof localOnlyKeys[number]> => {
+  try { const { logFolder, language } = normalizeSettings(JSON.parse(cacheText ?? "null")); return { logFolder, language }; } catch { return { logFolder: defaultSettings.logFolder, language: defaultSettings.language }; }
 };
 
 const isPlainObject = (value: unknown): boolean => !!value && typeof value === "object" && !Array.isArray(value);
@@ -138,5 +143,5 @@ export function mergeSettings(base: Settings | null, mine: Settings, theirs: Set
     if (mineEntry === undefined) delete sessions[id]; else sessions[id] = mineEntry;
   }
   result.pasteRemember = { global, sessions };
-  return { ...normalizeSettings(result), logFolder: mine.logFolder };
+  return { ...normalizeSettings(result), logFolder: mine.logFolder, language: mine.language };
 }

@@ -163,6 +163,25 @@ describe("mergeSettings (write conflict)", () => {
   it("always keeps the local logFolder", () => {
     expect(mergeSettings(base, { ...base, logFolder: "/mine" }, { ...base, logFolder: "/theirs" }).logFolder).toBe("/mine");
   });
+  it("always keeps the local language", () => {
+    expect(mergeSettings(base, { ...base, language: "en" }, { ...base, language: "de" }).language).toBe("en");
+  });
+});
+
+describe("language setting", () => {
+  it("defaults to the system language and accepts only known values", () => {
+    expect(defaultSettings.language).toBe("system");
+    expect(normalizeSettings({}).language).toBe("system");
+    for (const language of ["system", "de", "en"] as const) expect(normalizeSettings({ language }).language).toBe(language);
+    for (const language of ["fr", "", "EN", null, 1, {}]) expect(normalizeSettings({ language }).language).toBe("system");
+  });
+  it("stays per device: not written to the file, taken from the cache when loading", () => {
+    expect(JSON.parse(serializeSettings({ ...defaultSettings, language: "en" }))).not.toHaveProperty("language");
+    const outcome = interpretLoaded('{"language":"de","fontSize":20}', '{"language":"en"}');
+    expect(outcome.ok && outcome.settings).toMatchObject({ language: "en", fontSize: 20 });
+    const without = interpretLoaded('{"language":"en"}', null);
+    expect(without.ok && without.settings.language).toBe("system");
+  });
 });
 
 it("uses Werklade icons for new installs and Standard for existing settings", () => {

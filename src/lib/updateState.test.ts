@@ -292,7 +292,7 @@ describe("start check (no connection without consent)", () => {
 });
 
 describe("Help menu", () => {
-  const help = (updateVersion?: string | null) => createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 1, multiExec: false, isLinux: true, updateVersion }).find(menu => menu.label === "Help")!.items;
+  const help = (updateVersion?: string | null) => createMenus({ savedSessions: [], settings: defaultSettings, hasWsl: false, activeId: 1, multiExec: false, isLinux: true, updateVersion }).find(menu => menu.id === "help")!.items;
   it("offers the update check", () => {
     expect(help().map(item => item.action)).toEqual(["shortcuts", "updates", "about"]);
     expect(help()[1].label).toBe("Nach Updates suchen…");

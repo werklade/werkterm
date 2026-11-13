@@ -1,8 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { allowMenuMnemonic, menuMove, shortcutAction } from "../lib/menu";
+import { useT } from "../i18n";
 export interface MenuItem { heading?: boolean; radio?: boolean; icon?: React.ReactNode; label: string; action: string; shortcut?: string; disabled?: boolean; tooltip?: string; checked?: boolean; separator?: boolean; inlineCheck?: boolean }
-export interface AppMenu { label: string; mnemonic: number; items: MenuItem[] }
+/** `id` is language independent (lookups, React keys); `label` is the translated name. */
+export interface AppMenu { id: string; label: string; mnemonic: number; items: MenuItem[] }
 export function MenuBar({ menus, onAction, toolbarIcon, iconOnly = false }: { menus: AppMenu[]; onAction(action: string): void; toolbarIcon?: React.ReactNode; iconOnly?: boolean }) {
+  const t = useT();
   const menuId = useId();
   const root = useRef<HTMLElement>(null);
   const previous = useRef<HTMLElement | null>(null);
@@ -36,7 +39,7 @@ export function MenuBar({ menus, onAction, toolbarIcon, iconOnly = false }: { me
     document.addEventListener("pointerdown", outside); document.addEventListener("keydown", key, true);
     return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", key, true); };
   });
-  return <nav ref={root} className={toolbarIcon ? "toolbar-menu" : "menubar"} role="menubar" aria-label={toolbarIcon ? "Werkzeuge" : "Hauptmenü"} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) close(false); }} onKeyDown={e => {
+  return <nav ref={root} className={toolbarIcon ? "toolbar-menu" : "menubar"} role="menubar" aria-label={toolbarIcon ? t("menubar.tools") : t("menubar.main")} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) close(false); }} onKeyDown={e => {
     const index = open ?? top;
     if (["ArrowLeft", "ArrowRight"].includes(e.key)) {
       e.preventDefault(); const next = menuMove(index, e.key, menus.map(() => false));
@@ -45,7 +48,7 @@ export function MenuBar({ menus, onAction, toolbarIcon, iconOnly = false }: { me
       e.preventDefault(); if (open === null) show(index, e.key === "ArrowUp"); else setItem(menuMove(item, e.key, menus[index].items.map(entry => !!entry.disabled || !!entry.separator || !!entry.heading)));
     } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
     else if (e.key === "Tab") close(false);
-  }}>{menus.map((menu, index) => <div className="menu-root" key={menu.label}>
+  }}>{menus.map((menu, index) => <div className="menu-root" key={menu.id}>
     <button className={iconOnly ? "menu-icon-button" : toolbarIcon ? "toolbar-button" : undefined} aria-label={iconOnly ? menu.label : undefined} role="menuitem" data-top={index} tabIndex={top === index ? 0 : -1} aria-haspopup="menu" aria-expanded={open === index} aria-controls={`${menuId}-menu-${index}`} title={menu.label} onFocus={() => setTop(index)} onClick={() => open === index ? close(true) : show(index)}>{toolbarIcon}{iconOnly ? null : toolbarIcon ? <span>{menu.label}</span> : <>{menu.label.slice(0, menu.mnemonic)}<u>{menu.label[menu.mnemonic]}</u>{menu.label.slice(menu.mnemonic + 1)}</>}</button>
     {open === index && <div id={`${menuId}-menu-${index}`} className="app-menu" role="menu" aria-label={menu.label}>{menu.items.map((entry, i) => entry.separator ? <hr key={entry.action} role="separator" /> : entry.heading ? <div key={entry.action} className="menu-heading" role="presentation">{entry.label}</div> : <button key={entry.action} data-entry={`${index}-${i}`} tabIndex={-1} role={entry.radio ? "menuitemradio" : entry.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={entry.checked} aria-disabled={entry.disabled || undefined} title={entry.tooltip} onFocus={() => setItem(i)} onClick={() => { if (entry.disabled) return; close(true); onAction(entry.action); }}><span>{entry.icon}{entry.checked === undefined || (entry.inlineCheck && !entry.checked) ? "" : entry.checked ? "✓ " : "　"}{entry.label}</span><kbd>{entry.shortcut}</kbd></button>)}</div>}
   </div>)}</nav>;

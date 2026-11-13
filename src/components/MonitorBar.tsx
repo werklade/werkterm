@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { Icon } from "./Icon";
 import { MonitorTooltip as Tip } from "./MonitorTooltip";
 import { decimal, rate, size, uptime, users, distro, distroBadges, history, dfTable, orderDisks, fittingCount, type Disk } from "./monitorFormat";
+import { currentLocale } from "../i18n";
 import "./MonitorBar.css";
 interface Network { name: string; rx: number; tx: number; rxErrors: number; txErrors: number; rxDrop: number; txDrop: number }
 interface Sample { host: string; version: string | null; osName: string | null; osId: string | null; osIdLike: string | null; cpuCores: number | null; load: number[]; cpuParts: number[]; cpuPercent: number | null; memUsed: number; memTotal: number; memAvailable: number | null; cached: number | null; buffers: number | null; swapTotal: number | null; swapUsed: number | null; netRx: number | null; netTx: number | null; interfaces: Network[]; uptimeSecs: number; who: string[]; disks: Disk[]; dfAll: Disk[]; unsupported: boolean }
@@ -70,7 +71,7 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
     <Tip content={cpu}><svg className="monitor-history" viewBox="0 0 60 16" role="img" aria-label="CPU-Verlauf der letzten 60 Messwerte">{values.map((v, i) => <rect key={i} x={60 - values.length + i} y={16 - v * .16} width=".8" height={v * .16} />)}</svg></Tip>
     <Tip content={<Table rows={([ ["Gesamt", sample.memTotal], ["Belegt", sample.memUsed], ["Verfügbar", sample.memAvailable], ["Cache", sample.cached], ["Puffer", sample.buffers], ["Swap gesamt", sample.swapTotal], ["Swap belegt", sample.swapUsed]] as const).map(([n, v]) => [n, v === null ? "–" : `${decimal(v / 1024 ** 2, 2)} MiB`])} />}>RAM {decimal(sample.memUsed / 1024 ** 3, 2)} / {decimal(sample.memTotal / 1024 ** 3, 2)} GiB <Meter value={sample.memTotal ? sample.memUsed / sample.memTotal * 100 : 0} /></Tip>
     <Tip content={network(true)}>↑ {rate(sample.netTx)}</Tip><Tip content={network(false)}>↓ {rate(sample.netRx)}</Tip>
-    <Tip content={<><div>Laufzeit: {uptime(sample.uptimeSecs, true)}</div><div>Gestartet: {new Date(Date.now() - sample.uptimeSecs * 1000).toLocaleString("de-DE")}</div></>}>◷ {uptime(sample.uptimeSecs)}</Tip>
+    <Tip content={<><div>Laufzeit: {uptime(sample.uptimeSecs, true)}</div><div>Gestartet: {new Date(Date.now() - sample.uptimeSecs * 1000).toLocaleString(currentLocale())}</div></>}>◷ {uptime(sample.uptimeSecs)}</Tip>
     <Tip content={<><strong>Ausgabe von who:</strong><pre>{sample.who.join("\n") || "–"}</pre></>}>♙ {users(sample.who)}</Tip>
     <div className="monitor-disks" ref={diskBox}>
       {visible.map(d => <span key={d.device + d.mount} data-mount={d.mount} className="monitor-disk"><Tip content={df}><span className={d.usedPercent >= 90 ? "monitor-critical" : undefined}>{d.mount}: {decimal(d.usedPercent)} %</span> <Meter value={d.usedPercent} /></Tip></span>)}

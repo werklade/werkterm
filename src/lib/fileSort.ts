@@ -1,4 +1,5 @@
 import type { DirEntry } from "./fs";
+import { getLanguage } from "../i18n";
 
 export type FileSortColumn = "name" | "size" | "modified";
 export interface FileSort {
@@ -9,7 +10,7 @@ export interface FileSort {
 export const defaultFileSort: FileSort = { column: "name", direction: "asc" };
 const storageKey = "werkterm.fileBrowser.sort";
 const directory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
-const compareName = (a: DirEntry, b: DirEntry) => a.name.localeCompare(b.name, "de", { numeric: true, sensitivity: "base" });
+const compareName = (a: DirEntry, b: DirEntry) => a.name.localeCompare(b.name, getLanguage(), { numeric: true, sensitivity: "base" });
 
 /** Returns a new array; directories remain first for either direction. */
 export function sortFileEntries(entries: readonly DirEntry[], sort: FileSort): DirEntry[] {

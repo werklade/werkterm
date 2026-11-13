@@ -3,54 +3,73 @@ import type { AppMenu } from "../components/MenuBar";
 import { Icon } from "../components/Icon";
 import type { Settings } from "./settings";
 import type { SavedSession } from "./sessions";
+import { getLanguage, t, type Language } from "../i18n";
+import { formatShortcut } from "./formatShortcut";
+
+export type MenuId = "edit" | "terminal" | "sessions" | "macros" | "view" | "split" | "tools" | "settings" | "help";
+/**
+ * Index of the mnemonic letter within the translated top-level menu label.
+ * Must be unique per language (case-insensitive); enforced by a unit test.
+ */
+export const menuMnemonics: Record<Language, Record<MenuId, number>> = {
+  // Bearbeiten, Terminal, Sitzungen, Makros, Ansicht, Teilen (i), Werkzeuge, Einstellungen, Hilfe
+  de: { edit: 0, terminal: 0, sessions: 0, macros: 0, view: 0, split: 2, tools: 0, settings: 0, help: 0 },
+  // Edit, Terminal, Sessions, Macros, View, Split (p), Tools (o), Settings (i), Help
+  en: { edit: 0, terminal: 0, sessions: 0, macros: 0, view: 0, split: 1, tools: 1, settings: 4, help: 0 },
+};
+
 export function createMenus({ macros = [], recording = false, savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux, updateVersion = null }: {
   macros?: Macro[]; recording?: boolean; savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
   /** Version found by the opt-in start check; marks the update entry in the Help menu. */
   updateVersion?: string | null;
 }): AppMenu[] {
   const sidebarVisible = settings.sidebarVisible;
-  const heading = (label: string) => ({ label, action: `heading:${label}`, heading: true });
+  const mnemonic = (id: MenuId) => menuMnemonics[getLanguage()][id];
+  /** `key` is language independent; the label is only displayed. */
+  const heading = (key: string, label: string) => ({ label, action: `heading:${key}`, heading: true });
   const radio = (label: string, action: string, checked: boolean) => ({ label, action, checked, radio: true });
-  const folders = [...new Set(savedSessions.map(s => s.folder || "Ohne Ordner"))].sort();
+  const noFolder = t("menu.sessions.noFolder");
+  const folders = [...new Set(savedSessions.map(s => s.folder || noFolder))].sort();
+  const ctrlShift = (key: string) => formatShortcut(["ctrl", "shift", key]);
   return [
-    { label: "Bearbeiten", mnemonic: 0, items: [{ label: "Einfügen", action: "paste", disabled: !canPaste }] },
-    { label: "Terminal", mnemonic: 0, items: [
-      { label: "Lokales Terminal", action: "local", shortcut: "Strg+Umschalt+T" },
+    { id: "edit", label: t("menu.edit"), mnemonic: mnemonic("edit"), items: [{ label: t("menu.edit.paste"), action: "paste", disabled: !canPaste }] },
+    { id: "terminal", label: t("menu.terminal"), mnemonic: mnemonic("terminal"), items: [
+      { label: t("menu.terminal.local"), action: "local", shortcut: ctrlShift("T") },
       ...(hasWsl ? [{ label: "WSL", action: "wsl" }] : []),
-      { label: logging ? "Protokoll stoppen" : "Protokoll starten", action: "logToggle", disabled: !canLog },
-      { label: "Protokollordner öffnen", action: "logFolder" },
-      { label: "Quick connect…", action: "quick" }, { label: "Tab schließen", action: "close", shortcut: "Strg+Umschalt+W", disabled: activeId === 0 }, { label: "Beenden", action: "quit" },
+      { label: logging ? t("menu.terminal.logStop") : t("menu.terminal.logStart"), action: "logToggle", disabled: !canLog },
+      { label: t("menu.terminal.logFolder"), action: "logFolder" },
+      { label: t("menu.terminal.quick"), action: "quick" }, { label: t("menu.terminal.close"), action: "close", shortcut: ctrlShift("W"), disabled: activeId === 0 }, { label: t("menu.terminal.quit"), action: "quit" },
     ] },
-    { label: "Sessions", mnemonic: 0, items: [
-      { label: "Neue Sitzung…", action: "newSession" }, { label: "Sitzungs-Panel anzeigen", action: "sessions" },
+    { id: "sessions", label: t("menu.sessions"), mnemonic: mnemonic("sessions"), items: [
+      { label: t("menu.sessions.new"), action: "newSession" }, { label: t("menu.sessions.panel"), action: "sessions" },
       { label: "", action: "sessions-transfer-separator", separator: true },
-      { label: "Sitzungen exportieren…", action: "exportSessions" }, { label: "Import aus Werkterm-Datei…", action: "werkterm" },
-      { label: "Import aus MobaXterm…", action: "mobaxterm" }, { label: "Import aus WindTerm…", action: "windterm" },
+      { label: t("menu.sessions.export"), action: "exportSessions" }, { label: t("menu.sessions.importWerkterm"), action: "werkterm" },
+      { label: t("menu.sessions.importMobaxterm"), action: "mobaxterm" }, { label: t("menu.sessions.importWindterm"), action: "windterm" },
       ...(savedSessions.length ? [{ label: "", action: "sessions-saved-separator", separator: true }] : []),
-      ...folders.flatMap(folder => [heading(folder), ...savedSessions.filter(s => (s.folder || "Ohne Ordner") === folder).map(s => ({ label: `  ${s.name}`, action: `saved:${s.id}`, icon: <Icon name={s.kind === "ssh" ? "ssh" : "terminal"}/> }))]),
+      ...folders.flatMap(folder => [heading(`folder:${folder}`, folder), ...savedSessions.filter(s => (s.folder || noFolder) === folder).map(s => ({ label: `  ${s.name}`, action: `saved:${s.id}`, icon: <Icon name={s.kind === "ssh" ? "ssh" : "terminal"}/> }))]),
     ] },
-    { label: "Makros", mnemonic: 0, items: [
-      { label: recording ? "Aufnahme stoppen" : "Aufnahme starten", action: "macro:record" },
-      { label: "Neues Makro…", action: "macro:new" },
+    { id: "macros", label: t("menu.macros"), mnemonic: mnemonic("macros"), items: [
+      { label: recording ? t("menu.macros.recordStop") : t("menu.macros.recordStart"), action: "macro:record" },
+      { label: t("menu.macros.new"), action: "macro:new" },
       { label: "", action: "macro:separator1", separator: true },
       ...macros.map(item => ({ label: item.name, action: `macro:play:${item.id}`, shortcut: item.shortcut ?? undefined })),
       { label: "", action: "macro:separator2", separator: true },
-      { label: "Makros verwalten", action: "macros" },
+      { label: t("menu.macros.manage"), action: "macros" },
     ] },
-    { label: "View", mnemonic: 0, items: [
-      heading("Menü und Werkzeugleiste"), radio("Menüleiste anzeigen", "bars:menu", settings.bars === "menu"), radio("Werkzeugleiste anzeigen", "bars:toolbar", settings.bars === "toolbar"), radio("Beides", "bars:both", settings.bars === "both"),
-      heading("Werkzeugleiste"), radio("Kleine Buttons", "size:small", settings.toolbarSize === "small"), radio("Standard", "size:standard", settings.toolbarSize === "standard"), radio("Standard mit Beschriftung", "size:labels", settings.toolbarSize === "labels"), { label: "Kompaktmodus", action: "compact", checked: settings.compact },
-      heading("Seitenleiste"), { label: "Seitenleiste ein-/ausblenden", action: "sidebar", checked: sidebarVisible }, radio("Links", "left", !settings.sidebarRight), radio("Rechts", "right", settings.sidebarRight),
-      heading("Tabs"), { label: "Tab-Nummern anzeigen", action: "tabNumbers", checked: settings.tabNumbers }, { label: "Schließen-Button anzeigen", action: "tabClose", checked: settings.tabClose },
-      { label: "Monitoring-Leiste", action: "monitoring", checked: settings.monitoring }, { label: "Schrift größer", action: "larger", shortcut: "Strg+Umschalt+Plus" }, { label: "Schrift kleiner", action: "smaller", shortcut: "Strg+Umschalt+Minus" }, { label: "Schrift Standard", action: "resetFont", shortcut: "Strg+Umschalt+0" }, { label: "Vollbild", action: "fullscreen", shortcut: "F11" },
+    { id: "view", label: t("menu.view"), mnemonic: mnemonic("view"), items: [
+      heading("bars", t("menu.view.barsHeading")), radio(t("menu.view.showMenu"), "bars:menu", settings.bars === "menu"), radio(t("menu.view.showToolbar"), "bars:toolbar", settings.bars === "toolbar"), radio(t("menu.view.showBoth"), "bars:both", settings.bars === "both"),
+      heading("toolbar", t("menu.view.toolbarHeading")), radio(t("menu.view.sizeSmall"), "size:small", settings.toolbarSize === "small"), radio(t("menu.view.sizeStandard"), "size:standard", settings.toolbarSize === "standard"), radio(t("menu.view.sizeLabels"), "size:labels", settings.toolbarSize === "labels"), { label: t("menu.view.compact"), action: "compact", checked: settings.compact },
+      heading("sidebar", t("menu.view.sidebarHeading")), { label: t("menu.view.sidebarToggle"), action: "sidebar", checked: sidebarVisible }, radio(t("menu.view.sidebarLeft"), "left", !settings.sidebarRight), radio(t("menu.view.sidebarRight"), "right", settings.sidebarRight),
+      heading("tabs", t("menu.view.tabsHeading")), { label: t("menu.view.tabNumbers"), action: "tabNumbers", checked: settings.tabNumbers }, { label: t("menu.view.tabClose"), action: "tabClose", checked: settings.tabClose },
+      { label: t("menu.view.monitoring"), action: "monitoring", checked: settings.monitoring }, { label: t("menu.view.fontLarger"), action: "larger", shortcut: ctrlShift("Plus") }, { label: t("menu.view.fontSmaller"), action: "smaller", shortcut: ctrlShift("Minus") }, { label: t("menu.view.fontReset"), action: "resetFont", shortcut: ctrlShift("0") }, { label: t("menu.view.fullscreen"), action: "fullscreen", shortcut: "F11" },
     ] },
-    { label: "Split", mnemonic: 1, items: [{ ...radio("Ein Terminal", "single", settings.splitMode === "single"), disabled: multiExec }, ...([ ["Zwei nebeneinander", "columns"], ["Zwei untereinander", "rows"], ["Vier Terminals", "quad"] ] as const).map(([label, mode]) => ({ ...radio(label, `split:${mode}`, settings.splitMode === mode), disabled: multiExec }))] },
-    { label: "Tools", mnemonic: 1, items: [heading("System"), { label: "Lokales Terminal", action: "local" }, ...(isLinux ? [{ label: "Root-Terminal", action: "root" }, { label: "Laufende Prozesse", action: "processes" }] : []), { label: "Hardware anzeigen", action: "hardware" }, { label: "Tux-Wanderer starten", action: "tux" },
-      heading("Editor"), { label: "Lokale Datei öffnen…", action: "openFile" }, { label: "ASCII-Tabelle", action: "ascii" }, { label: "Dateien vergleichen…", action: "compareFiles" },
-      heading("Netzwerk"), { label: "SSH-Schlüssel erzeugen", action: "keygen" }, { label: "Offene lokale Ports", action: "ports" }, { label: "SSH-Tunnel", action: "tunnels" },
-      { label: "", action: "tools-separator", separator: true }, { label: "MultiExec", action: "multiexec", checked: multiExec, inlineCheck: true, shortcut: "Strg+Umschalt+M" }, { label: "Einstellungen…", action: "settings", shortcut: "Strg+," },
+    { id: "split", label: t("menu.split"), mnemonic: mnemonic("split"), items: [{ ...radio(t("menu.split.single"), "single", settings.splitMode === "single"), disabled: multiExec }, ...([ [t("menu.split.columns"), "columns"], [t("menu.split.rows"), "rows"], [t("menu.split.quad"), "quad"] ] as const).map(([label, mode]) => ({ ...radio(label, `split:${mode}`, settings.splitMode === mode), disabled: multiExec }))] },
+    { id: "tools", label: t("menu.tools"), mnemonic: mnemonic("tools"), items: [heading("system", t("menu.tools.systemHeading")), { label: t("menu.terminal.local"), action: "local" }, ...(isLinux ? [{ label: t("menu.tools.root"), action: "root" }, { label: t("menu.tools.processes"), action: "processes" }] : []), { label: t("menu.tools.hardware"), action: "hardware" }, { label: t("menu.tools.tux"), action: "tux" },
+      heading("editor", t("menu.tools.editorHeading")), { label: t("menu.tools.openFile"), action: "openFile" }, { label: t("menu.tools.ascii"), action: "ascii" }, { label: t("menu.tools.compareFiles"), action: "compareFiles" },
+      heading("network", t("menu.tools.networkHeading")), { label: t("menu.tools.keygen"), action: "keygen" }, { label: t("menu.tools.ports"), action: "ports" }, { label: t("menu.tools.tunnels"), action: "tunnels" },
+      { label: "", action: "tools-separator", separator: true }, { label: t("menu.tools.multiexec"), action: "multiexec", checked: multiExec, inlineCheck: true, shortcut: ctrlShift("M") }, { label: t("menu.settings.open"), action: "settings", shortcut: formatShortcut(["ctrl", ","]) },
     ] },
-    { label: "Settings", mnemonic: 1, items: [{ label: "Einstellungen…", action: "settings" }] },
-    { label: "Help", mnemonic: 0, items: [{ label: "Tastenkürzel", action: "shortcuts" }, { label: updateVersion ? `Nach Updates suchen… (Version ${updateVersion} verfügbar)` : "Nach Updates suchen…", action: "updates" }, { label: "Über Werkterm", action: "about" }] },
+    { id: "settings", label: t("menu.settings"), mnemonic: mnemonic("settings"), items: [{ label: t("menu.settings.open"), action: "settings" }] },
+    { id: "help", label: t("menu.help"), mnemonic: mnemonic("help"), items: [{ label: t("menu.help.shortcuts"), action: "shortcuts" }, { label: updateVersion ? t("menu.help.updatesAvailable", { version: updateVersion }) : t("menu.help.updates"), action: "updates" }, { label: t("menu.help.about"), action: "about" }] },
   ];
 }

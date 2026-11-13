@@ -1,4 +1,5 @@
-export const decimal = (n: number, digits = 0) => n.toLocaleString("de-DE", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+import { currentLocale } from "../i18n";
+export const decimal = (n: number, digits = 0) => n.toLocaleString(currentLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
 export function size(n: number) { const units = ["B", "kB", "MB", "GB", "TB"]; let i = 0; while (n >= 1000 && i < 4) { n /= 1000; i++; } return `${decimal(n, i ? 1 : 0)} ${units[i]}`; }
 export const rate = (n: number | null) => n === null ? "–" : `${size(n)}/s`;
 export function uptime(n: number, full = false) { const d = Math.floor(n / 86400), h = Math.floor(n / 3600) % 24, m = Math.floor(n / 60) % 60; return full ? `${d} ${d === 1 ? "Tag" : "Tage"}, ${h} h, ${m} min (${n} Sekunden)` : d ? `${d} ${d === 1 ? "Tag" : "Tage"}` : h ? `${h} h` : `${m} min`; }

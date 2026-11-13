@@ -22,6 +22,7 @@ import { assignPane, cleanPanes, paneCount, seedPanes, type SplitMode } from "./
 import { ToolDialog } from "./components/ToolDialog";
 import { Home } from "./components/Home";
 import { createMenus } from "./lib/actions";
+import { resolveLanguage, setLanguage, useLanguage } from "./i18n";
 import { recentList, lastTabsList, terminalDescriptors, type Recent, type LastTab } from "./lib/history";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -207,6 +208,10 @@ export default function App() {
   useEffect(() => { if (dataReady) reloadSessions(); }, [dataReady, reloadSessions]);
   // localStorage only seeds the first render; settings.json replaces it once loaded (see bootstrapData).
   const [settings, setSettings] = useState(loadSettings);
+  // main.tsx applies the cached language before the first render; this follows later changes (settings.json load, dialog).
+  // useLanguage subscribes App, so the menus built in this render pass are rebuilt after the language switch.
+  useLanguage();
+  useLayoutEffect(() => { setLanguage(resolveLanguage(settings.language)); }, [settings.language]);
   const [fontResetToken, setFontResetToken] = useState(0);
   const fingerprint = useRef<FileFingerprint[] | null>(null);
   const [settingsSync] = useState(() => new SettingsSync(fileSettingsIo, message => setStatus(message), {
@@ -912,7 +917,7 @@ export default function App() {
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
       <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
       <div className="workspace-body">
-      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.label === "Tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.id === "tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label="Terminalbereich">
 
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}

@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - AppStream metadata in the .deb, so software centers show Werkterm with description and license.
+- Interface language German or English: Settings > General > Language ("System language" by default; any system language other than English falls back to German). Stored per device. Menus, toolbar, sidebar, tabs, start page, keyboard-shortcut help and the settings tabs are translated; the remaining dialogs and backend messages follow in later steps.
+
+### Changed
+
+- German menu and toolbar names are now consistently German: Sitzungen, Werkzeuge, Ansicht, Teilen, Einstellungen, Hilfe, Makros, Schnellverbindung. Alt shortcuts for the German menus follow the new names (for example Alt+A for Ansicht instead of Alt+V, Alt+W for Werkzeuge instead of Alt+O); the shortcut help lists them for the current language.
+- Dates, numbers and sorting follow the interface language instead of a fixed German locale.
+- The settings dialog opens on the new General tab.
 
 ### Fixed
 

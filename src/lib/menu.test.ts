@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowMenuMnemonic, menuMove, shortcutAction, shortcuts, type ShortcutEvent } from "./menu";
+import { allowMenuMnemonic, menuMove, shortcutAction, shortcutList, type ShortcutEvent } from "./menu";
 const event = (patch: Partial<ShortcutEvent>): ShortcutEvent => ({ key: "", code: "", ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...patch });
 it("preserves Alt combinations in terminals and editors", () => {
   const alt = event({ key: "t", altKey: true });
@@ -31,6 +31,7 @@ describe("shortcuts", () => {
       [{ key: ",", ctrlKey: true }, "settings"],
       [{ key: "M", ctrlKey: true, shiftKey: true }, "multiexec"],
     ];
+    const shortcuts = shortcutList();
     expect(new Set(shortcuts.map(s => s.shortcut)).size).toBe(shortcuts.length);
     expect(new Set(shortcuts.map(s => s.action)).size).toBe(shortcuts.length);
     for (const [input, action] of inputs) expect(shortcutAction(event(input), false)).toBe(action);

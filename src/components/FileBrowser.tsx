@@ -18,6 +18,7 @@ import { loadFileSort, saveFileSort, sortFileEntries, type FileSortColumn } from
 import type { Settings } from "../lib/settings";
 import { countEntries, createFile, deleteEntry, makeDirectory, remoteChild } from "../lib/transfers";
 import type { TransferQueueHandle } from "../lib/transferQueue";
+import { currentLocale } from "../i18n";
 import "./FileBrowser.css";
 
 export interface BrowserTab {
@@ -357,7 +358,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
         setSelected(sortedEntries[next].name);
         listRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[next]?.focus();
       }
-    }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">Leeres Verzeichnis</p>}</div>}
+    }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString(currentLocale(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">Leeres Verzeichnis</p>}</div>}
     {context && <BrowserContextMenu {...context} permissionsDisabled={!permissionsReady} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? "Unix-Rechte sind hier nicht änderbar" : "Nur mit SFTP verfügbar"} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
     {prompt?.type === "sudo" ? <SecretDialog key={promptSequence} title={`sudo-Passwort für ${prompt.label}`} prompt={{ type: "secret", requestId: 0, kind: "password", label: prompt.label }} onAnswer={prompt.answer} />
       : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} onAnswer={prompt.answer} />

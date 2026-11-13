@@ -1,14 +1,20 @@
+import { t } from "../i18n";
+import { formatShortcut } from "./formatShortcut";
 export interface ShortcutEvent { key: string; code: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
-export const shortcuts = [
-  { action: "multiexec", label: "MultiExec", shortcut: "Strg+Umschalt+M" },
-  { action: "local", label: "Neues lokales Terminal", shortcut: "Strg+Umschalt+T" },
-  { action: "close", label: "Tab schließen", shortcut: "Strg+Umschalt+W" },
-  { action: "larger", label: "Schrift größer", shortcut: "Strg+Umschalt+Plus" },
-  { action: "smaller", label: "Schrift kleiner", shortcut: "Strg+Umschalt+Minus" },
-  { action: "resetFont", label: "Standardschriftgröße", shortcut: "Strg+Umschalt+0" },
-  { action: "fullscreen", label: "Vollbild", shortcut: "F11" },
-  { action: "settings", label: "Einstellungen", shortcut: "Strg+, (außer im Terminal)" },
-] as const;
+/** Shortcut list of the help dialog, in the current language (labels and key names are translated). */
+export function shortcutList(): { action: string; label: string; shortcut: string }[] {
+  const ctrlShift = (key: string) => formatShortcut(["ctrl", "shift", key]);
+  return [
+    { action: "multiexec", label: t("menu.tools.multiexec"), shortcut: ctrlShift("M") },
+    { action: "local", label: t("tab.newLocal"), shortcut: ctrlShift("T") },
+    { action: "close", label: t("menu.terminal.close"), shortcut: ctrlShift("W") },
+    { action: "larger", label: t("menu.view.fontLarger"), shortcut: ctrlShift("Plus") },
+    { action: "smaller", label: t("menu.view.fontSmaller"), shortcut: ctrlShift("Minus") },
+    { action: "resetFont", label: t("shortcut.resetFont"), shortcut: ctrlShift("0") },
+    { action: "fullscreen", label: t("menu.view.fullscreen"), shortcut: "F11" },
+    { action: "settings", label: t("menu.settings"), shortcut: `${formatShortcut(["ctrl", ","])} ${t("shortcut.exceptTerminal")}` },
+  ];
+}
 export function shortcutAction(e: ShortcutEvent, terminal: boolean): string | null {
   if (e.altKey || e.metaKey) return null;
   if (e.key === "F11" && !e.ctrlKey && !e.shiftKey) return "fullscreen";
