@@ -5,7 +5,7 @@ Deutsche Fassung: [README.de.md](README.de.md)
 Werkterm is a desktop application built with Tauri 2, Rust and React. It provides local terminals, SSH with an SFTP browser that follows the terminal directory, and an integrated editor. It targets Linux first and also runs on Windows 10/11 x64.
 
 > [!NOTE]
-> Werkterm is a prerelease (currently 0.1.7) for invited testers. Please submit feedback through Issues.
+> Werkterm is a prerelease (currently 0.1.8) for invited testers. Please submit feedback through Issues.
 
 ## Independence and trademarks
 
@@ -37,28 +37,73 @@ Linux x86_64 with WebKitGTK 4.1 and GTK 3: Debian-family runtime packages includ
 
 ## Installing
 
-Prebuilt packages (`.deb`, AppImage, `SHA256SUMS`) are attached to the GitHub release, visible to invited testers; alternatively build them as described below. The packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives); Debian 12 and Ubuntu 22.04 are not supported. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names.
+The current stable release is 0.1.8 (2026-11-13). The packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives); Debian 12 and Ubuntu 22.04 are not supported. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names. Alternatively build the packages as described below.
 
-Debian-family systems, Bash (installs a system package):
+### APT repository (Debian 13, Ubuntu 24.04 and newer, amd64)
 
-```bash
-sudo apt install ./Werkterm_0.1.7_amd64.deb
+Requires `curl` and `gpg` (`sudo apt install curl gpg`). Repository: `https://pkg.werklade.de/apt`, suite `stable`, component `main`, architecture `amd64`. The repository key is ed25519 with this fingerprint:
+
+```
+498E F081 BBC7 50A1 11DB  2EDA E0CD AE7D 9332 A76C
 ```
 
-Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`.
+Bash, as a normal user (`sudo` is used per command). First download the key without installing it and compare the fingerprint:
+
+```bash
+curl -fsSL -o /tmp/werklade-archive-keyring.asc https://pkg.werklade.de/werklade-archive-keyring.asc
+gpg --show-keys --with-fingerprint /tmp/werklade-archive-keyring.asc
+```
+
+The displayed fingerprint must match the value above exactly. If it differs, stop and delete `/tmp/werklade-archive-keyring.asc`. Only then install the key, add the source and install the package (changes system configuration):
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo install -m 0644 /tmp/werklade-archive-keyring.asc /etc/apt/keyrings/werklade-archive-keyring.asc
+rm /tmp/werklade-archive-keyring.asc
+sudo tee /etc/apt/sources.list.d/werklade.sources >/dev/null <<'EOF'
+Types: deb
+URIs: https://pkg.werklade.de/apt
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/werklade-archive-keyring.asc
+EOF
+sudo apt update
+sudo apt install werkterm
+```
+
+Verify by starting `werkterm`. Updates arrive with `sudo apt update && sudo apt upgrade`. To uninstall (Bash):
+
+```bash
+sudo apt remove werkterm
+sudo rm /etc/apt/sources.list.d/werklade.sources /etc/apt/keyrings/werklade-archive-keyring.asc
+sudo apt update
+```
+
+### AppImage, Windows installers and `.deb` file
+
+AppImage and Windows installers are available at `https://pkg.werklade.de/werkterm/downloads/<version>/` (for example `0.1.8`) and, for invited testers, as GitHub pre-release `v0.1.8`. The `.sig` files in the download folder belong to the built-in updater and are not needed for installation. The `.deb` is not in the download folder; it is available through the APT repository or the GitHub release.
+
+Local `.deb` from the GitHub release, Bash (installs a system package):
+
+```bash
+sudo apt install ./Werkterm_0.1.8_amd64.deb
+```
+
+Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`. A `.deb` installed this way is not connected to the repository; for updates through APT use the section above.
 
 AppImage, Bash (`libfuse2` required; its package name can vary by distribution):
 
 ```bash
-chmod +x ./Werkterm_0.1.7_amd64.AppImage
-./Werkterm_0.1.7_amd64.AppImage
+chmod +x ./Werkterm_0.1.8_amd64.AppImage
+./Werkterm_0.1.8_amd64.AppImage
 ```
 
 Verify that the application window opens.
 
-Windows: run `Werkterm_0.1.7_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_0.1.7_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`. If the taskbar still shows the old icon after an update, that is the Windows icon cache: run `ie4uinit.exe -show` or sign out and back in.
+Windows: run `Werkterm_0.1.8_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_0.1.8_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`. If the taskbar still shows the old icon after an update, that is the Windows icon cache: run `ie4uinit.exe -show` or sign out and back in.
 
-Check downloads against `SHA256SUMS` (Linux: `sha256sum -c SHA256SUMS`, Windows PowerShell: `Get-FileHash <file>`).
+Check downloads against `SHA256SUMS` (Linux: `sha256sum --check --ignore-missing SHA256SUMS`, Windows PowerShell: `Get-FileHash <file>`). The `SHA256SUMS` in the pkg.werklade.de download folder does not list the `.deb`; the one in the GitHub release does.
 
 ### Linux: display problems / black window
 
@@ -80,7 +125,7 @@ Not yet confirmed on real NVIDIA hardware.
 AppImage: if the window stays black or rendering crashes even so, starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` helped in one test. This is the Debian/Ubuntu path; other distributions use different paths. Interim workaround: the AppImage currently ships no GStreamer plugins.
 
 ```bash
-GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
+GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.8_amd64.AppImage
 ```
 
 ## Updates
@@ -88,9 +133,7 @@ GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd
 Werkterm checks for updates only when you ask for it: **Hilfe > Nach Updates suchen…**. A check at startup is optional (Settings > Updates, off by default). The only host contacted is `pkg.werklade.de`; no data is transmitted.
 
 - AppImage and the Windows installers (NSIS, MSI) download the signed update and install it; Werkterm restarts afterwards. The signature is verified against a key built into Werkterm.
-- A `.deb` installation is updated through the package manager (`sudo apt update && sudo apt install --only-upgrade werkterm`) once the Werklade repository is set up.
-
-The update server is not live yet; until then the check reports that it cannot reach the server.
+- A `.deb` installation is updated through the Werklade APT repository (`sudo apt update && sudo apt upgrade`).
 
 ## Data folder
 

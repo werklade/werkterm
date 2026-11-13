@@ -5,7 +5,7 @@ English version: [README.md](README.md)
 Werkterm ist eine Desktop-Anwendung mit Tauri 2, Rust und React. Sie bietet lokale Terminals, SSH mit einem SFTP-Browser, der dem Terminal-Verzeichnis folgt, und einen integrierten Editor. Zielplattformen sind Linux (vorrangig) und Windows 10/11 x64.
 
 > [!NOTE]
-> Werkterm ist eine Vorabversion (aktuell 0.1.7) für eingeladene Tester. Bitte Rückmeldungen über Issues einreichen.
+> Werkterm ist eine Vorabversion (aktuell 0.1.8) für eingeladene Tester. Bitte Rückmeldungen über Issues einreichen.
 
 ## Unabhängigkeit und Marken
 
@@ -37,28 +37,73 @@ Linux x86_64 mit WebKitGTK 4.1 und GTK 3: Laufzeitpakete auf Debian-basierten Sy
 
 ## Installation
 
-Fertige Pakete (`.deb`, AppImage, `SHA256SUMS`) hängen am GitHub-Release, sichtbar für eingeladene Tester; alternativ lassen sie sich wie unten beschrieben selbst bauen. Die Pakete setzen glibc 2.39 oder neuer voraus (Debian 13, Ubuntu 24.04 und Abkömmlinge); Debian 12 und Ubuntu 22.04 werden nicht unterstützt. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung.
+Die aktuelle stabile Version ist 0.1.8 (13.11.2026). Die Pakete setzen glibc 2.39 oder neuer voraus (Debian 13, Ubuntu 24.04 und Abkömmlinge); Debian 12 und Ubuntu 22.04 werden nicht unterstützt. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung. Alternativ lassen sich die Pakete wie unten beschrieben selbst bauen.
 
-Debian-basierte Systeme, Bash (installiert ein Systempaket):
+### APT-Repository (Debian 13, Ubuntu 24.04 und neuer, amd64)
 
-```bash
-sudo apt install ./Werkterm_0.1.7_amd64.deb
+Benötigt `curl` und `gpg` (`sudo apt install curl gpg`). Repository: `https://pkg.werklade.de/apt`, Suite `stable`, Komponente `main`, Architektur `amd64`. Der Repository-Schlüssel ist ed25519 mit diesem Fingerprint:
+
+```
+498E F081 BBC7 50A1 11DB  2EDA E0CD AE7D 9332 A76C
 ```
 
-Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`.
+Bash, als normaler Benutzer (`sudo` wird je Befehl verwendet). Zuerst den Schlüssel herunterladen, noch nicht installieren, und den Fingerprint vergleichen:
+
+```bash
+curl -fsSL -o /tmp/werklade-archive-keyring.asc https://pkg.werklade.de/werklade-archive-keyring.asc
+gpg --show-keys --with-fingerprint /tmp/werklade-archive-keyring.asc
+```
+
+Der angezeigte Fingerprint muss exakt mit dem Wert oben übereinstimmen. Weicht er ab: abbrechen und `/tmp/werklade-archive-keyring.asc` löschen. Erst danach Schlüssel installieren, Quelle anlegen und Paket installieren (ändert die Systemkonfiguration):
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo install -m 0644 /tmp/werklade-archive-keyring.asc /etc/apt/keyrings/werklade-archive-keyring.asc
+rm /tmp/werklade-archive-keyring.asc
+sudo tee /etc/apt/sources.list.d/werklade.sources >/dev/null <<'EOF'
+Types: deb
+URIs: https://pkg.werklade.de/apt
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/werklade-archive-keyring.asc
+EOF
+sudo apt update
+sudo apt install werkterm
+```
+
+Prüfung: `werkterm` starten. Updates kommen mit `sudo apt update && sudo apt upgrade`. Deinstallation, Bash:
+
+```bash
+sudo apt remove werkterm
+sudo rm /etc/apt/sources.list.d/werklade.sources /etc/apt/keyrings/werklade-archive-keyring.asc
+sudo apt update
+```
+
+### AppImage, Windows-Installer und `.deb`-Datei
+
+AppImage und Windows-Installer liegen unter `https://pkg.werklade.de/werkterm/downloads/<Version>/` (z. B. `0.1.8`) und für eingeladene Tester im GitHub-Pre-release `v0.1.8`. Die `.sig`-Dateien im Download-Ordner gehören zum eingebauten Updater und werden für die Installation nicht benötigt. Die `.deb`-Datei liegt nicht im Download-Ordner; sie gibt es über das APT-Repository oder den GitHub-Release.
+
+Lokale `.deb` aus dem GitHub-Release, Bash (installiert ein Systempaket):
+
+```bash
+sudo apt install ./Werkterm_0.1.8_amd64.deb
+```
+
+Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`. Eine so installierte `.deb` ist nicht mit dem Repository verbunden; für Updates über APT den Abschnitt oben verwenden.
 
 AppImage, Bash (`libfuse2` erforderlich; der Paketname kann je Distribution abweichen):
 
 ```bash
-chmod +x ./Werkterm_0.1.7_amd64.AppImage
-./Werkterm_0.1.7_amd64.AppImage
+chmod +x ./Werkterm_0.1.8_amd64.AppImage
+./Werkterm_0.1.8_amd64.AppImage
 ```
 
 Zur Prüfung muss sich das Anwendungsfenster öffnen.
 
-Windows: `Werkterm_0.1.7_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_0.1.7_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`. Zeigt die Taskleiste nach einem Update noch das alte Symbol, liegt das am Symbol-Cache von Windows: `ie4uinit.exe -show` ausführen oder ab- und wieder anmelden.
+Windows: `Werkterm_0.1.8_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_0.1.8_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`. Zeigt die Taskleiste nach einem Update noch das alte Symbol, liegt das am Symbol-Cache von Windows: `ie4uinit.exe -show` ausführen oder ab- und wieder anmelden.
 
-Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum -c SHA256SUMS`, Windows-PowerShell: `Get-FileHash <Datei>`).
+Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum --check --ignore-missing SHA256SUMS`, Windows-PowerShell: `Get-FileHash <Datei>`). Die `SHA256SUMS` im Download-Ordner von pkg.werklade.de führt die `.deb` nicht auf; die im GitHub-Release schon.
 
 ### Linux: Darstellungsprobleme / schwarzes Fenster
 
@@ -80,7 +125,7 @@ Auf echter NVIDIA-Hardware noch nicht bestätigt.
 AppImage: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, half bei einem Test der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0`. Das ist der Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade. Übergangslösung: Das AppImage liefert derzeit keine GStreamer-Plugins mit.
 
 ```bash
-GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd64.AppImage
+GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.8_amd64.AppImage
 ```
 
 ## Updates
@@ -88,9 +133,7 @@ GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.7_amd
 Werkterm sucht nur auf Anforderung nach Updates: **Hilfe > Nach Updates suchen…**. Eine Prüfung beim Start ist optional (Einstellungen > Updates, standardmäßig aus). Kontaktiert wird ausschließlich `pkg.werklade.de`; es werden keine Daten übertragen.
 
 - AppImage und die Windows-Installer (NSIS, MSI) laden das signierte Update und installieren es; Werkterm startet danach neu. Die Signatur wird gegen einen in Werkterm eingebauten Schlüssel geprüft.
-- Eine `.deb`-Installation wird über die Paketverwaltung aktualisiert (`sudo apt update && sudo apt install --only-upgrade werkterm`), sobald das Werklade-Repository eingebunden ist.
-
-Der Update-Server ist noch nicht in Betrieb; bis dahin meldet die Prüfung, dass der Server nicht erreichbar ist.
+- Eine `.deb`-Installation wird über das Werklade-APT-Repository aktualisiert (`sudo apt update && sudo apt upgrade`).
 
 ## Datenordner
 
