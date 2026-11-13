@@ -351,6 +351,8 @@ describe("release text", () => {
     expect(text.indexOf("## Added")).toBeLessThan(text.indexOf("## Fixed"));
     for (const name of Object.values(names)) expect(text).toContain(name);
     expect(text).toContain("APT");
+    expect(text).toContain("sudo bash werklade-apt-setup.sh --install werkterm");
+    expect(text).toContain("498E F081 BBC7 50A1 11DB  2EDA E0CD AE7D 9332 A76C");
   });
 });
 
