@@ -68,9 +68,8 @@ jobs:
             libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils libdbus-1-dev pkg-config
 
-      # appstreamcli fails on warnings too (exit code 3, same as for errors). The only accepted
-      # warning is the missing homepage (no public page yet), so it is lowered to info; any
-      # other warning or error fails the job.
+      # appstreamcli fails on warnings too (exit code 3, same as for errors), so any warning or
+      # error fails the job.
       - name: Validate AppStream metadata
         run: |
           set -euo pipefail
@@ -78,7 +77,7 @@ jobs:
             sudo apt-get install -y --no-install-recommends appstream
           fi
           appstreamcli --version
-          appstreamcli validate --no-net --explain --override=url-homepage-missing=info \
+          appstreamcli validate --no-net --explain \
             src-tauri/linux/de.werklade.werkterm.metainfo.xml
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

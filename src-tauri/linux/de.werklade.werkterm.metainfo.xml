@@ -2,9 +2,7 @@
 <!--
   AppStream metadata for the .deb (installed to /usr/share/metainfo/).
   On a version change add a new <release> at the top of <releases> (scripts/metainfo.test.mjs checks it).
-  No <screenshots> and no <url type="homepage">: there is no public web page yet, and the
-  repository is private, so no <url type="vcs-browser"> either. CI therefore validates with
-  "override url-homepage-missing=info" (.github/workflows/release.yml).
+  No <screenshots> yet. The URLs point to the GitHub repository, which goes public with 1.0.0.
 -->
 <component type="desktop-application">
   <id>de.werklade.werkterm</id>
@@ -40,6 +38,10 @@
       <li xml:lang="de">Texteditor mit Farbcode-Vorschau und Zeilenende-Umschalter</li>
     </ul>
   </description>
+
+  <url type="homepage">https://github.com/werklade/werkterm</url>
+  <url type="bugtracker">https://github.com/werklade/werkterm/issues</url>
+  <url type="vcs-browser">https://github.com/werklade/werkterm</url>
 
   <launchable type="desktop-id">Werkterm.desktop</launchable>
 
