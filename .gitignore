@@ -23,7 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# LinMoba
+# Werkterm
 src-tauri/target/
 src-tauri/gen/schemas/
 tmp/
@@ -34,5 +34,6 @@ logs/
 .claude/settings.local.json
 .claude/worktrees/
 
-# Created by the ChatGPT desktop app; Codex instructions live in prompts/
+# Local AI tooling: instructions and briefs stay out of the repository
 AGENTS.md
+prompts/

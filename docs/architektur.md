@@ -80,8 +80,6 @@ Vor dem Schreiben wird der bekannte Ausgangsinhalt im lokalen App-Cache gesicher
 
 `secrets.rs` nutzt `keyring` für den System-Schlüsselbund: unter Linux Secret Service, unter Windows den nativen Store. Fehlender D-Bus/Secret Service, gesperrte Sammlung und andere Fehler werden kategorisiert, ohne beliebige Providertexte als Diagnosen weiterzugeben. Ohne verfügbaren Store funktionieren gespeicherte Passwortoperationen nicht zuverlässig; insbesondere WSL stellt ihn nicht automatisch bereit.
 
-Bei der Umbenennung wurde die Identität von `de.marck.linmoba` auf `de.werklade.werkterm` geändert. Existiert noch keine neue `sessions.json`, wird eine gültige alte Datei bestmöglich kopiert; die Quelle bleibt erhalten und eine bestehende Zieldatei wird nicht ersetzt. Beim Lesen eines Passworts wird zuerst der neue Service geprüft, dann der alte. Nach erfolgreichem Schreiben unter dem neuen Service wird der alte Eintrag bestmöglich gelöscht. Schlägt das Schreiben fehl, bleibt der alte Eintrag erhalten. Frontend-Einstellungen in localStorage beginnen unter der neuen Identität neu.
-
 Importmodule lesen MobaXterm-/WindTerm-Sitzungsdaten; WindTerm-OneKey-Zuordnungen betreffen öffentliche Metadaten, keine Entschlüsselung gespeicherter Geheimnisse. Der Farbimport ist in `terminal_colors.rs` getrennt implementiert.
 
 ## sudo-Modus

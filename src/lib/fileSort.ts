@@ -26,7 +26,7 @@ export function sortFileEntries(entries: readonly DirEntry[], sort: FileSort): D
 
 export function loadFileSort(): FileSort {
   try {
-    const saved: unknown = JSON.parse((localStorage.getItem(storageKey) ?? localStorage.getItem(storageKey.replace(/^werkterm\./, "linmoba."))) ?? "null");
+    const saved: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
     if (saved && typeof saved === "object" && "column" in saved && "direction" in saved
       && (saved.column === "name" || saved.column === "size" || saved.column === "modified")
       && (saved.direction === "asc" || saved.direction === "desc")) {

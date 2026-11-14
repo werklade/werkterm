@@ -22,7 +22,7 @@ interface Props {
 type Row = { key: string; depth: number; folder?: SessionFolder; session?: SavedSession; parent?: string };
 function loadExpanded(): Record<string, boolean> {
   try {
-    const parsed: unknown = JSON.parse((localStorage.getItem("werkterm.sessionFolders") ?? localStorage.getItem("linmoba.sessionFolders")) ?? "{}");
+    const parsed: unknown = JSON.parse(localStorage.getItem("werkterm.sessionFolders") ?? "{}");
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"));
   } catch { /* Storage may be unavailable. */ }
   return {};

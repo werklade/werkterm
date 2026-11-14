@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - German texts follow one style: no "bitte", no direct address, consistent terms (for example Sprungserver instead of "Jump host", Übertragung instead of "Transfer", Im Editor öffnen, Aktualisieren, Fingerabdruck); English leftovers such as "Refresh" or "Follow Terminal Folder" are German now.
 - Sizes and counts use the decimal and thousands separators of the interface language (German "1,5 KB", "100.000").
 
+### Removed
+
+- Takeover of sessions, keyring entries and interface preferences from installations made before the rename to Werkterm (before 0.1.0).
+
 ### Fixed
 
 - AppImage: the GStreamer plugins WebKitGTK needs are now included. Before, the window could stay black or rendering could crash unless `GST_PLUGIN_PATH_1_0` pointed to the system plugins; remove this variable from 0.1.10 on.
@@ -134,7 +138,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Renamed LinMoba to Werkterm, including product, package/executable and application identifier (`de.werklade.werkterm`); the integrated editor is named Editor.
+- Renamed the project to Werkterm, including product, package/executable and application identifier (`de.werklade.werkterm`); the integrated editor is named Editor.
 - Copy valid legacy `sessions.json` when the new configuration has no session file, preserving the original. Migrate legacy keyring entries on use. Frontend localStorage preferences start fresh.
 - Open the SSH shell before SFTP to preserve PAM login messages; drain terminal output immediately to avoid setup deadlocks.
 - Use cancellable Linux PTY reading and process-group termination with SIGKILL escalation.

@@ -2,7 +2,7 @@ export const DEFAULT_PANEL_WIDTH = 260;
 export interface ColumnWidths { name: number; size: number; modified: number }
 export const DEFAULT_COLUMNS: ColumnWidths = { name: 100, size: 65, modified: 110 };
 export function loadWidth(key: string, fallback: number): number {
-  try { const value = Number(localStorage.getItem(key) ?? localStorage.getItem(key.replace(/^werkterm\./, "linmoba."))); return Number.isFinite(value) && value > 0 ? value : fallback; }
+  try { const value = Number(localStorage.getItem(key)); return Number.isFinite(value) && value > 0 ? value : fallback; }
   catch { return fallback; }
 }
 export function storeWidth(key: string, value: number) {

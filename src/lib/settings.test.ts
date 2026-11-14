@@ -30,8 +30,8 @@ describe("settings validation and migration", () => {
     expect(normalizeSettings({ fontSize: NaN, scrollback: Infinity, fontFamily: " " })).toEqual({ ...defaultSettings, design: "Werkterm Dunkel", iconSet: "Standard", theme: "Werkterm Dunkel" });
     expect(normalizeSettings({ fontSize: 8, editorFontSize: 32, lineHeight: 1, scrollback: 100000, editorTabSize: 8 })).toMatchObject({ fontSize: 8, editorFontSize: 32, lineHeight: 1, scrollback: 100000, editorTabSize: 8 });
   });
-  it("migrates the previous storage key and tolerates storage errors", () => {
-    const getItem = vi.fn((key: string) => key === "linmoba.settings" ? '{"shellIntegration":false}' : null);
+  it("reads the stored settings and tolerates storage errors", () => {
+    const getItem = vi.fn((key: string) => key === "werkterm.settings" ? '{"shellIntegration":false}' : null);
     vi.stubGlobal("localStorage", { getItem, setItem: vi.fn() });
     expect(loadSettings().shellIntegration).toBe(false);
     vi.stubGlobal("localStorage", { getItem: () => { throw Error("denied"); }, setItem: () => { throw Error("quota"); } });

@@ -71,9 +71,9 @@ export function normalizeSettings(input: unknown): Settings {
   return result;
 }
 export function selectedTheme(settings: Settings): TerminalTheme { return settings.theme === "design" ? getDesign(settings.design).terminal : settings.theme === importedThemeId && settings.importedTheme ? settings.importedTheme : terminalThemes[settings.theme] ?? terminalThemes["Werkterm Dunkel"]; }
-/** Raw localStorage text (current key, then the legacy key). Only a cache: settings.json is the source of truth. */
+/** Raw localStorage text. Only a cache: settings.json is the source of truth. */
 export function cachedSettingsText(): string | null {
-  try { return localStorage.getItem(storageKey) ?? localStorage.getItem("linmoba.settings"); } catch { return null; }
+  try { return localStorage.getItem(storageKey); } catch { return null; }
 }
 /** Synchronous cache read for the very first render (no design flicker). */
 export function loadSettings(): Settings {
