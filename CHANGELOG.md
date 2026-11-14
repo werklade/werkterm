@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - AppStream metadata in the .deb, so software centers show Werkterm with description and license.
+- Linux menu entry: the description (`Comment`) is English by default with a German translation (`Comment[de]`), so desktop environments show it in the system language.
 - Interface language German or English: Settings > General > Language ("System language" by default; any system language other than English falls back to German). Stored per device. Menus, toolbar, sidebar, tabs, start page, keyboard-shortcut help and the settings tabs are translated, and so are all dialogs, the editor (including the search panel and folding), the file browser, sessions, tunnels, macros, tools, data folder and update dialogs. Messages from the backend (connection, file, session, tunnel, update and device errors) are sent as codes and shown in the interface language; technical details from libraries and the operating system (for example "os error 2") stay in their original English wording.
 
 ### Changed

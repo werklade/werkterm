@@ -52,7 +52,7 @@
     "publisher": "Marc-Andre Kolski",
     "category": "Utility",
     "shortDescription": "SSH-Terminal mit SFTP-Browser und Editor für Linux",
-    "longDescription": "Werkterm ist ein Terminal- und SSH-Client für Linux: Terminal-Tabs (lokal, SSH, Telnet, seriell), SFTP-Browser, der dem Terminal-Ordner folgt, gespeicherte Sitzungen mit Passwörtern im System-Schlüsselbund, Jump hosts und SSH-Tunnel, MultiExec, Makros, Datei- und Ordnervergleich sowie ein Texteditor mit Farbcode-Vorschau und Zeilenende-Umschalter.",
+    "longDescription": "Werkterm ist ein Terminal- und SSH-Client für Linux: Terminal-Tabs (lokal, SSH, Telnet, seriell), SFTP-Browser, der dem Terminal-Ordner folgt, gespeicherte Sitzungen mit Passwörtern im System-Schlüsselbund, Sprungserver und SSH-Tunnel, MultiExec, Makros, Datei- und Ordnervergleich sowie ein Texteditor mit Farbcode-Vorschau und Zeilenende-Umschalter.",
     "linux": {
       "appimage": {
         "bundleMediaFramework": true
