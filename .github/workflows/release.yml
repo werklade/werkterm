@@ -1,6 +1,6 @@
 # Builds and checks the release packages. This workflow does NOT publish anything:
-# no GitHub release, no SSH, no server access. Publishing happens from the publishing machine with
-# "npm run publish-pkg" (docs/release.md) using the artifact "werkterm-<version>".
+# no GitHub release, no SSH, no server access. Publishing to pkg.werklade.de happens by hand,
+# see docs/release.md ("npm run publish-pkg" with the artifact "werkterm-<version>").
 name: Release build
 
 on:

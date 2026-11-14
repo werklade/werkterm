@@ -37,3 +37,4 @@ logs/
 # Local AI tooling: instructions and briefs stay out of the repository
 AGENTS.md
 prompts/
+CLAUDE.md

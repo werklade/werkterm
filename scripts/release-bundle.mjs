@@ -309,7 +309,7 @@ export function validateServerRelease({ version, names, texts, hashes }) {
   return errors;
 }
 
-/** Markdown text for the GitHub pre-release. */
+/** Markdown text for the GitHub release. */
 export function releaseText({ version, section }) {
   const names = artifactNames(version);
   const order = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"];

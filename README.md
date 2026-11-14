@@ -5,7 +5,7 @@ Deutsche Fassung: [README.de.md](README.de.md)
 Werkterm is a desktop application built with Tauri 2, Rust and React. It provides local terminals, SSH with an SFTP browser that follows the terminal directory, and an integrated editor. It targets Linux first and also runs on Windows 10/11 x64.
 
 > [!NOTE]
-> Werkterm is a prerelease (currently 0.1.8) for invited testers. Please submit feedback through Issues.
+> The current stable release is listed on the [GitHub releases page](https://github.com/werklade/werkterm/releases). Feedback goes to [Issues](https://github.com/werklade/werkterm/issues).
 
 ## Contents
 
@@ -29,7 +29,7 @@ Werkterm is a desktop application built with Tauri 2, Rust and React. It provide
 
 ## Independence and trademarks
 
-Werkterm is a private, independent project with no affiliation to Mobatek. It has not been commissioned, reviewed or supported by Mobatek. MobaXterm is a trademark of Mobatek and is mentioned only to describe importing sessions and colors. WindTerm, Debian and other product names are trademarks of their respective owners. The software is supplied without warranty under the GPL; see [LICENSE](LICENSE).
+Werkterm is an independent project with no affiliation to Mobatek. It has not been commissioned, reviewed or supported by Mobatek. MobaXterm is a trademark of Mobatek and is mentioned only to describe importing sessions and colors. WindTerm, Debian and other product names are trademarks of their respective owners. The software is supplied without warranty under the GPL; see [LICENSE](LICENSE).
 
 ## Screens
 
@@ -57,11 +57,11 @@ Linux x86_64 with WebKitGTK 4.1 and GTK 3: Debian-family runtime packages includ
 
 ## Installing
 
-The current stable release is 0.1.8 (2026-11-13). The packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives); Debian 12 and Ubuntu 22.04 are not supported. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names. Alternatively build the packages as described below.
+The current stable release is listed on the [GitHub releases page](https://github.com/werklade/werkterm/releases). The packages require glibc 2.39 or newer (Debian 13, Ubuntu 24.04 and derivatives); Debian 12 and Ubuntu 22.04 are not supported. Tested on Debian 13 (WebKitGTK 2.54). The product name is `Werkterm`, the package/executable name is `werkterm`. The recorded Linux build uses these case-sensitive artifact names. Alternatively build the packages as described below.
 
 ### APT repository (Debian 13, Ubuntu 24.04 and newer, amd64)
 
-Quickest way: download [`install/werklade-apt-setup.sh`](install/werklade-apt-setup.sh) from this repository (on GitHub: open the file, then "Download raw file") and run it (Bash). It checks the key fingerprint below before changing anything; `--dry-run` only shows the steps, `--remove` removes the source and key again.
+Quickest way: download [`install/werklade-apt-setup.sh`](install/werklade-apt-setup.sh) from this repository (on GitHub: open the file, then "Download raw file") and run it (Bash). Alternatively fetch it directly: `curl -fsSLO https://raw.githubusercontent.com/werklade/werkterm/main/install/werklade-apt-setup.sh`. It checks the key fingerprint below before changing anything; `--dry-run` only shows the steps, `--remove` removes the source and key again.
 
 ```bash
 sudo bash werklade-apt-setup.sh --install werkterm
@@ -110,12 +110,12 @@ sudo apt update
 
 ### AppImage, Windows installers and `.deb` file
 
-AppImage and Windows installers are available at `https://pkg.werklade.de/werkterm/downloads/<version>/` (for example `0.1.8`) and, for invited testers, as GitHub pre-release `v0.1.8`. The `.sig` files in the download folder belong to the built-in updater and are not needed for installation. The `.deb` is not in the download folder; it is available through the APT repository or the GitHub release.
+AppImage and Windows installers are available at `https://pkg.werklade.de/werkterm/downloads/<version>/` (for example `1.0.0`) and on the [GitHub releases page](https://github.com/werklade/werkterm/releases) of `werklade/werkterm`. The `.sig` files in the download folder belong to the built-in updater and are not needed for installation. The `.deb` is not in the download folder; it is available through the APT repository or the GitHub release.
 
 Local `.deb` from the GitHub release, Bash (installs a system package):
 
 ```bash
-sudo apt install ./Werkterm_0.1.8_amd64.deb
+sudo apt install ./Werkterm_1.0.0_amd64.deb
 ```
 
 Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`. A `.deb` installed this way is not connected to the repository; for updates through APT use the section above.
@@ -123,13 +123,13 @@ Verify by starting `werkterm`. To uninstall: `sudo apt remove werkterm`. A `.deb
 AppImage, Bash (`libfuse2` required; its package name can vary by distribution):
 
 ```bash
-chmod +x ./Werkterm_0.1.8_amd64.AppImage
-./Werkterm_0.1.8_amd64.AppImage
+chmod +x ./Werkterm_1.0.0_amd64.AppImage
+./Werkterm_1.0.0_amd64.AppImage
 ```
 
 Verify that the application window opens.
 
-Windows: run `Werkterm_0.1.8_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_0.1.8_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`. If the taskbar still shows the old icon after an update, that is the Windows icon cache: run `ie4uinit.exe -show` or sign out and back in.
+Windows: run `Werkterm_1.0.0_x64-setup.exe` (installs for the current user, no admin rights) or deploy `Werkterm_1.0.0_x64_en-US.msi`. The packages are not code-signed, so SmartScreen shows "Unknown publisher" on first start; choose "More info" → "Run anyway". Uninstall via Settings → Apps. Settings and sessions are stored in `%APPDATA%\de.werklade.werkterm`. If the taskbar still shows the old icon after an update, that is the Windows icon cache: run `ie4uinit.exe -show` or sign out and back in.
 
 Check downloads against `SHA256SUMS` (Linux: `sha256sum --check --ignore-missing SHA256SUMS`, Windows PowerShell: `Get-FileHash <file>`). The `SHA256SUMS` in the pkg.werklade.de download folder does not list the `.deb`; the one in the GitHub release does.
 
@@ -150,7 +150,7 @@ WERKTERM_WEBKIT_WORKAROUND=1 werkterm
 
 Not yet confirmed on real NVIDIA hardware.
 
-AppImage before 0.1.10: if the window stays black or rendering crashes even so, the AppImage lacks GStreamer plugins. Starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu path; other distributions use different paths) helps. From 0.1.10 the AppImage ships the plugins itself; remove the variable then, as mixing system plugins with the bundled GStreamer can crash.
+AppImage before 1.0.0: if the window stays black or rendering crashes even so, the AppImage lacks GStreamer plugins. Starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu path; other distributions use different paths) helps. From 1.0.0 the AppImage ships the plugins itself; remove the variable then, as mixing system plugins with the bundled GStreamer can crash.
 
 ```bash
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.8_amd64.AppImage
@@ -234,7 +234,7 @@ The Rust backend uses Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyring` 
 - Exec listing requires GNU-compatible tools and does not provide SFTP writes/transfers.
 - Secret Service or session D-Bus may be unavailable, especially under WSL; saved-password operations then report an error.
 - Windows/WSL development: WSL tabs use the default distribution; PowerShell UNC directory listing is not confirmed.
-- AppImage before 0.1.10 without GStreamer plugins: see "Linux: display problems / black window".
+- AppImage before 1.0.0 without GStreamer plugins: see "Linux: display problems / black window".
 - Linux serial-permission assistance still needs a real-device test in the packaged application. STATUS.md also lists window-level SSH close confirmation as awaiting manual verification.
 
 ## Roadmap

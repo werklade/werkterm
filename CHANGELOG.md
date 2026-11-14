@@ -28,7 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- AppImage: the GStreamer plugins WebKitGTK needs are now included. Before, the window could stay black or rendering could crash unless `GST_PLUGIN_PATH_1_0` pointed to the system plugins; remove this variable from 0.1.10 on.
+- AppImage: the GStreamer plugins WebKitGTK needs are now included. Before, the window could stay black or rendering could crash unless `GST_PLUGIN_PATH_1_0` pointed to the system plugins; remove this variable from 1.0.0 on.
 
 ## [0.1.8] – 2026-11-13
 

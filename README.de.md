@@ -5,7 +5,7 @@ English version: [README.md](README.md)
 Werkterm ist eine Desktop-Anwendung mit Tauri 2, Rust und React. Sie bietet lokale Terminals, SSH mit einem SFTP-Browser, der dem Terminal-Verzeichnis folgt, und einen integrierten Editor. Zielplattformen sind Linux (vorrangig) und Windows 10/11 x64.
 
 > [!NOTE]
-> Werkterm ist eine Vorabversion (aktuell 0.1.8) für eingeladene Tester. Bitte Rückmeldungen über Issues einreichen.
+> Die aktuelle stabile Version steht auf der [GitHub-Releases-Seite](https://github.com/werklade/werkterm/releases). Rückmeldungen gehen an [Issues](https://github.com/werklade/werkterm/issues).
 
 ## Inhalt
 
@@ -29,7 +29,7 @@ Werkterm ist eine Desktop-Anwendung mit Tauri 2, Rust und React. Sie bietet loka
 
 ## Unabhängigkeit und Marken
 
-Werkterm ist ein privates, unabhängiges Projekt ohne Verbindung zu Mobatek. Es wurde von Mobatek weder beauftragt noch geprüft oder unterstützt. MobaXterm ist eine Marke von Mobatek und wird ausschließlich zur Beschreibung des Imports von Sitzungen und Farben genannt. WindTerm, Debian und weitere Produktnamen sind Marken ihrer jeweiligen Inhaber. Die Software wird gemäß GPL ohne Gewährleistung bereitgestellt; siehe [LICENSE](LICENSE).
+Werkterm ist ein unabhängiges Projekt ohne Verbindung zu Mobatek. Es wurde von Mobatek weder beauftragt noch geprüft oder unterstützt. MobaXterm ist eine Marke von Mobatek und wird ausschließlich zur Beschreibung des Imports von Sitzungen und Farben genannt. WindTerm, Debian und weitere Produktnamen sind Marken ihrer jeweiligen Inhaber. Die Software wird gemäß GPL ohne Gewährleistung bereitgestellt; siehe [LICENSE](LICENSE).
 
 ## Bildschirmansichten
 
@@ -57,11 +57,11 @@ Linux x86_64 mit WebKitGTK 4.1 und GTK 3: Laufzeitpakete auf Debian-basierten Sy
 
 ## Installation
 
-Die aktuelle stabile Version ist 0.1.8 (13.11.2026). Die Pakete setzen glibc 2.39 oder neuer voraus (Debian 13, Ubuntu 24.04 und Abkömmlinge); Debian 12 und Ubuntu 22.04 werden nicht unterstützt. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung. Alternativ lassen sich die Pakete wie unten beschrieben selbst bauen.
+Die aktuelle stabile Version steht auf der [GitHub-Releases-Seite](https://github.com/werklade/werkterm/releases). Die Pakete setzen glibc 2.39 oder neuer voraus (Debian 13, Ubuntu 24.04 und Abkömmlinge); Debian 12 und Ubuntu 22.04 werden nicht unterstützt. Getestet unter Debian 13 (WebKitGTK 2.54). Der Produktname ist `Werkterm`, Paket-/Programmname ist `werkterm`. Der dokumentierte Linux-Build verwendet folgende Dateinamen mit dieser Groß-/Kleinschreibung. Alternativ lassen sich die Pakete wie unten beschrieben selbst bauen.
 
 ### APT-Repository (Debian 13, Ubuntu 24.04 und neuer, amd64)
 
-Am schnellsten: [`install/werklade-apt-setup.sh`](install/werklade-apt-setup.sh) aus diesem Repository herunterladen (auf GitHub: Datei öffnen, dann „Download raw file“) und ausführen (Bash). Das Skript prüft vor jeder Änderung den Fingerprint unten; `--dry-run` zeigt die Schritte nur an, `--remove` entfernt Quelle und Schlüssel wieder.
+Am schnellsten: [`install/werklade-apt-setup.sh`](install/werklade-apt-setup.sh) aus diesem Repository herunterladen (auf GitHub: Datei öffnen, dann „Download raw file“) und ausführen (Bash). Alternativ direkt abrufen: `curl -fsSLO https://raw.githubusercontent.com/werklade/werkterm/main/install/werklade-apt-setup.sh`. Das Skript prüft vor jeder Änderung den Fingerprint unten; `--dry-run` zeigt die Schritte nur an, `--remove` entfernt Quelle und Schlüssel wieder.
 
 ```bash
 sudo bash werklade-apt-setup.sh --install werkterm
@@ -110,12 +110,12 @@ sudo apt update
 
 ### AppImage, Windows-Installer und `.deb`-Datei
 
-AppImage und Windows-Installer liegen unter `https://pkg.werklade.de/werkterm/downloads/<Version>/` (z. B. `0.1.8`) und für eingeladene Tester im GitHub-Pre-release `v0.1.8`. Die `.sig`-Dateien im Download-Ordner gehören zum eingebauten Updater und werden für die Installation nicht benötigt. Die `.deb`-Datei liegt nicht im Download-Ordner; sie gibt es über das APT-Repository oder den GitHub-Release.
+AppImage und Windows-Installer liegen unter `https://pkg.werklade.de/werkterm/downloads/<Version>/` (z. B. `1.0.0`) und auf der [GitHub-Releases-Seite](https://github.com/werklade/werkterm/releases) von `werklade/werkterm`. Die `.sig`-Dateien im Download-Ordner gehören zum eingebauten Updater und werden für die Installation nicht benötigt. Die `.deb`-Datei liegt nicht im Download-Ordner; sie gibt es über das APT-Repository oder den GitHub-Release.
 
 Lokale `.deb` aus dem GitHub-Release, Bash (installiert ein Systempaket):
 
 ```bash
-sudo apt install ./Werkterm_0.1.8_amd64.deb
+sudo apt install ./Werkterm_1.0.0_amd64.deb
 ```
 
 Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`. Eine so installierte `.deb` ist nicht mit dem Repository verbunden; für Updates über APT den Abschnitt oben verwenden.
@@ -123,13 +123,13 @@ Prüfung: `werkterm` starten. Deinstallation: `sudo apt remove werkterm`. Eine s
 AppImage, Bash (`libfuse2` erforderlich; der Paketname kann je Distribution abweichen):
 
 ```bash
-chmod +x ./Werkterm_0.1.8_amd64.AppImage
-./Werkterm_0.1.8_amd64.AppImage
+chmod +x ./Werkterm_1.0.0_amd64.AppImage
+./Werkterm_1.0.0_amd64.AppImage
 ```
 
 Zur Prüfung muss sich das Anwendungsfenster öffnen.
 
-Windows: `Werkterm_0.1.8_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_0.1.8_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`. Zeigt die Taskleiste nach einem Update noch das alte Symbol, liegt das am Symbol-Cache von Windows: `ie4uinit.exe -show` ausführen oder ab- und wieder anmelden.
+Windows: `Werkterm_1.0.0_x64-setup.exe` ausführen (installiert für den aktuellen Benutzer, ohne Adminrechte) oder `Werkterm_1.0.0_x64_en-US.msi` verteilen. Die Pakete sind nicht signiert; SmartScreen meldet beim ersten Start „Unbekannter Herausgeber“ – „Weitere Informationen“ → „Trotzdem ausführen“. Deinstallation über Einstellungen → Apps. Einstellungen und Sitzungen liegen unter `%APPDATA%\de.werklade.werkterm`. Zeigt die Taskleiste nach einem Update noch das alte Symbol, liegt das am Symbol-Cache von Windows: `ie4uinit.exe -show` ausführen oder ab- und wieder anmelden.
 
 Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum --check --ignore-missing SHA256SUMS`, Windows-PowerShell: `Get-FileHash <Datei>`). Die `SHA256SUMS` im Download-Ordner von pkg.werklade.de führt die `.deb` nicht auf; die im GitHub-Release schon.
 
@@ -150,7 +150,7 @@ WERKTERM_WEBKIT_WORKAROUND=1 werkterm
 
 Auf echter NVIDIA-Hardware noch nicht bestätigt.
 
-AppImage vor 0.1.10: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, fehlen dem AppImage GStreamer-Plugins. Abhilfe ist der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade). Ab 0.1.10 bringt das AppImage die Plugins selbst mit; die Variable dann entfernen, denn System-Plugins mit dem mitgelieferten GStreamer zu mischen kann abstürzen.
+AppImage vor 1.0.0: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, fehlen dem AppImage GStreamer-Plugins. Abhilfe ist der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade). Ab 1.0.0 bringt das AppImage die Plugins selbst mit; die Variable dann entfernen, denn System-Plugins mit dem mitgelieferten GStreamer zu mischen kann abstürzen.
 
 ```bash
 GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 ./Werkterm_0.1.8_amd64.AppImage
@@ -234,7 +234,7 @@ Das Rust-Backend verwendet Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyr
 - Exec-Listing benötigt GNU-kompatible Werkzeuge und bietet keine SFTP-Schreibaktionen/Transfers.
 - Secret Service oder Sitzungs-D-Bus können insbesondere unter WSL fehlen; gespeicherte Passwortoperationen melden dann einen Fehler.
 - Windows-/WSL-Entwicklung: WSL-Tabs nutzen die Standarddistribution; PowerShell-UNC-Verzeichnislisting ist nicht bestätigt.
-- AppImage vor 0.1.10 ohne GStreamer-Plugins: siehe „Linux: Darstellungsprobleme / schwarzes Fenster“.
+- AppImage vor 1.0.0 ohne GStreamer-Plugins: siehe „Linux: Darstellungsprobleme / schwarzes Fenster“.
 - Die Linux-Seriell-Berechtigungshilfe benötigt noch einen Gerätetest in der paketierten Anwendung. STATUS.md nennt außerdem die SSH-Schließen-Rückfrage auf Fensterebene als manuell zu prüfen.
 
 ## Ausblick

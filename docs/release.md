@@ -1,15 +1,15 @@
 # Release von Werkterm
 
 Die CI baut und prüft die Pakete, veröffentlicht aber nichts. Veröffentlicht wird vom Veröffentlichungsrechner per SSH
-über den Forced Command `werklade-publish` (Protokoll: `../packages/docs/publish-protokoll.md`).
-Den GitHub-Pre-release legt der Nutzer von Hand an.
+über den Forced Command `werklade-publish` (Protokoll: internes Betriebshandbuch, privates Repo `werklade/packages`).
+Den GitHub-Release legt der Nutzer von Hand an.
 
 | Schritt | Wo | Was |
 |---|---|---|
 | 1 | Entwicklungs-PC | Version erhöhen, CHANGELOG, Commit, Tag |
 | 2 | GitHub Actions | Workflow `Release build` (`.github/workflows/release.yml`) baut und bündelt |
 | 3 | Veröffentlichungsrechner | Artefakt `werkterm-<version>` prüfen |
-| 4 | GitHub (Web) | Pre-release von Hand anlegen |
+| 4 | GitHub (Web) | Release von Hand anlegen |
 | 5 | Veröffentlichungsrechner | `npm run publish-pkg` erst `test`, dann `stable` |
 
 ## Voraussetzungen
@@ -32,8 +32,8 @@ Den GitHub-Pre-release legt der Nutzer von Hand an.
       IdentitiesOnly yes
   ```
 
-  Den Schlüssel und die Zeile in `authorized_keys` beschreibt das interne Betriebshandbuch,
-  Schritt 10. Ein anderer Alias geht mit `--host <alias>`.
+  Den Schlüssel und die Zeile in `authorized_keys` beschreibt das interne Betriebshandbuch
+  (privates Repo `werklade/packages`). Ein anderer Alias geht mit `--host <alias>`.
 - Optional `ssh-agent`, damit die Passphrase nur einmal abgefragt wird (sonst fragt `ssh` bei jedem der bis zu
   vier Aufrufe):
 
@@ -121,15 +121,16 @@ sha256sum -c SHA256SUMS && sha256sum -c github/SHA256SUMS
 
 Die Pakete stichprobenartig installieren (Windows: NSIS-Installer; Linux in WSL: AppImage und .deb).
 
-## 4. GitHub-Pre-release
+## 4. GitHub-Release
 
 Von Hand auf GitHub: Releases > Draft a new release, Tag `v<version>`, Titel `Werkterm <version>`, Text aus
-`github/RELEASE-TEXT.md`, „Set as a pre-release“ anhaken. Anhänge: die vier Pakete und `github/SHA256SUMS`
+`github/RELEASE-TEXT.md`. Ab 1.0.0 ist es ein normaler Release: „Set as the latest release“ anhaken. „Set as a
+pre-release“ nur für Testbuilds. Anhänge: die vier Pakete und `github/SHA256SUMS`
 (als `SHA256SUMS`). Das APT-Setup-Skript liegt im Repo (`install/werklade-apt-setup.sh`), nicht am Release.
 
 ## 5. Veröffentlichen
 
-Vorher die Server-Sicherung nach `../packages/docs/betrieb.md`, Abschnitt 7.1. Das Skript sichert bei `stable`
+Vorher die Server-Sicherung nach dem internen Betriebshandbuch (privates Repo `werklade/packages`). Das Skript sichert bei `stable`
 zusätzlich die öffentliche `latest.json` als `werkterm-updates-<vorige Version>.json` in einen festen Ordner und
 nennt den Pfad am Ende:
 
@@ -203,5 +204,5 @@ Rückweg: Secrets wieder als Repository-Secrets anlegen, `environment:` entferne
 
 ## Rücknahme
 
-Fehlerhafte Version: `../packages/docs/betrieb.md`, Abschnitt 7 (sperren, `latest.json` aus der Sicherung
+Fehlerhafte Version: internes Betriebshandbuch (privates Repo `werklade/packages`; sperren, `latest.json` aus der Sicherung
 zurücksetzen, APT). Danach eine höhere, korrigierte Version mit diesem Ablauf veröffentlichen.
