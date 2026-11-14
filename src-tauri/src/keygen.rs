@@ -18,8 +18,10 @@ use std::{
     },
 };
 
-const FAILED: &str = "Schlüsseloperation fehlgeschlagen.";
-const CLOSED: &str = "Schlüsseldialog ist geschlossen.";
+use crate::ui_error::{ui_code, ui_err};
+
+const FAILED: &str = ui_code("KEYGEN_FAILED");
+const CLOSED: &str = ui_code("KEYGEN_CLOSED");
 
 // Volatile writes keep the wipe from being removed as a dead store.
 struct SecretBytes(Vec<u8>);
@@ -98,12 +100,15 @@ impl TryRng for OsRandom {
                 ) -> i32;
             }
             let length = u32::try_from(bytes.len())
-                .map_err(|_| std::io::Error::other("RNG buffer too large"))?;
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
             // SAFETY: system-preferred RNG takes a writable buffer of exactly length bytes.
             let status =
                 unsafe { BCryptGenRandom(std::ptr::null_mut(), bytes.as_mut_ptr(), length, 2) };
             if status < 0 {
-                Err(std::io::Error::other("OS random source unavailable"))
+                // Internal only: generation errors reach the UI as KEYGEN_FAILED.
+                Err(std::io::Error::other(format!(
+                    "BCryptGenRandom {status:#010x}"
+                )))
             } else {
                 Ok(())
             }
@@ -119,7 +124,7 @@ fn generate(
     passphrase: SecretBytes,
 ) -> Result<(Generated, String), String> {
     if comment.len() > 1024 || comment.chars().any(char::is_control) || passphrase.0.len() > 4096 {
-        return Err("Kommentar oder Passphrase ist ungültig.".into());
+        return Err(ui_err("KEYGEN_INVALID_INPUT").into());
     }
     let mut rng = UnwrapErr(OsRandom);
     let mut key = match kind {
@@ -127,7 +132,7 @@ fn generate(
         "rsa" if matches!(bits, 3072 | 4096) => {
             RsaKeypair::random(&mut rng, bits).and_then(|pair| PrivateKey::new(pair.into(), ""))
         }
-        _ => return Err("Ungültiger Schlüsseltyp oder ungültige RSA-Länge.".into()),
+        _ => return Err(ui_err("KEYGEN_INVALID_TYPE").into()),
     }
     .map_err(|_| FAILED.to_owned())?;
     key.set_comment(comment);
@@ -181,7 +186,7 @@ pub fn keygen_begin(state: tauri::State<'_, Arc<KeygenState>>) -> Result<KeygenS
     })
     .unwrap_or_else(|| "localhost".into());
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-        .ok_or("Home-Verzeichnis fehlt.")?;
+        .ok_or(ui_code("HOME_NOT_FOUND"))?;
     let id = state.begin()?;
     Ok(KeygenStart {
         id,
@@ -249,17 +254,18 @@ fn write_key(path: &Path, bytes: &[u8], private: bool, overwrite: bool) -> Resul
             .file_type()
             .is_symlink()
     {
-        return Err("Symbolische Links werden nicht überschrieben.".into());
+        return Err(ui_err("KEYGEN_SYMLINK").into());
     }
     let mut file = options.open(path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::AlreadyExists {
-            "EXISTS".to_owned()
+        String::from(if error.kind() == std::io::ErrorKind::AlreadyExists {
+            let name = path.file_name().unwrap_or(path.as_os_str());
+            ui_err("EXISTS").arg("name", name.to_string_lossy())
         } else {
-            "Schlüsseldatei konnte nicht geöffnet werden.".to_owned()
-        }
+            ui_err("KEYGEN_OPEN_FAILED").detail(error)
+        })
     })?;
     if !file.metadata().map_err(|_| FAILED)?.is_file() {
-        return Err("Ziel ist keine reguläre Datei.".into());
+        return Err(ui_err("SFTP_TARGET_NOT_FILE").into());
     }
     #[cfg(unix)]
     {
@@ -278,7 +284,7 @@ fn write_key(path: &Path, bytes: &[u8], private: bool, overwrite: bool) -> Resul
     }
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
-        .map_err(|_| "Schlüsseldatei konnte nicht vollständig gespeichert werden.".to_owned())
+        .map_err(|error| ui_err("KEYGEN_WRITE_FAILED").detail(error).into())
 }
 
 #[tauri::command]
@@ -299,7 +305,7 @@ pub fn keygen_save(
         let home =
             std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).ok_or(FAILED)?;
         if parent != Path::new(&home).join(".ssh") {
-            return Err("Zielverzeichnis existiert nicht.".into());
+            return Err(ui_err("KEYGEN_DIR_MISSING").into());
         }
         let builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
@@ -402,7 +408,31 @@ mod tests {
     }
     #[test]
     fn invalid_requests_are_rejected() {
-        assert!(generate("rsa", 1024, "".into(), SecretBytes(Vec::new())).is_err());
-        assert!(generate("ed25519", 0, "bad\ncomment".into(), SecretBytes(Vec::new())).is_err());
+        let code = |result: Result<(Generated, String), String>| result.err();
+        assert_eq!(
+            code(generate("rsa", 1024, "".into(), SecretBytes(Vec::new()))).as_deref(),
+            Some("KEYGEN_INVALID_TYPE")
+        );
+        assert_eq!(
+            code(generate(
+                "ed25519",
+                0,
+                "bad\ncomment".into(),
+                SecretBytes(Vec::new())
+            ))
+            .as_deref(),
+            Some("KEYGEN_INVALID_INPUT")
+        );
+    }
+    #[test]
+    fn existing_file_reports_exists_with_name() {
+        let dir = std::env::temp_dir().join(format!("werkterm-keygen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("id_test");
+        std::fs::write(&path, b"old").unwrap();
+        let error = write_key(&path, b"new", true, false).unwrap_err();
+        assert_eq!(error, r#"EXISTS: {"args":{"name":"id_test"}}"#);
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

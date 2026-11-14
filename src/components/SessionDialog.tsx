@@ -1,4 +1,5 @@
 import { keyringErrorText } from "../lib/keyringErrors";
+import { errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
 import { defaultSerial, validateSession, type SerialConfig } from "../lib/sessions";
 import { useEffect, useId, useRef, useState } from "react";
@@ -27,7 +28,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const [serial, setSerial] = useState<SerialConfig>(session?.serial ?? { ...defaultSerial });
   const [baudCustom, setBaudCustom] = useState(() => !standardBauds.includes(serial.baud));
   const [ports, setPorts] = useState<{ name: string; description: string }[]>([]);
-  const refreshPorts = () => { void invoke<{ name: string; description: string }[]>("serial_ports").then(setPorts, reason => setError(String(reason))); };
+  const refreshPorts = () => { void invoke<{ name: string; description: string }[]>("serial_ports").then(setPorts, reason => setError(errorText(reason))); };
   useEffect(() => { if (kind === "serial") refreshPorts(); }, [kind]);
   const [logAlways, setLogAlways] = useState(session?.log_always ?? false);
   const [name, setName] = useState(session?.name ?? "");
@@ -107,7 +108,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {kind === "telnet" && <p role="note" className="session-hint">{t("session.telnetWarning")}</p>}
         {kind === "serial" && <>
           <label>{t("session.port")}<div className="session-path-field"><input required list={`${id}-ports`} value={serial.device} placeholder={t("session.serial.device.placeholder")} onChange={e => setSerial({ ...serial, device: e.target.value })}/><button type="button" onClick={refreshPorts}>{t("session.refresh")}</button></div></label>
-          <datalist id={`${id}-ports`}>{ports.map(port => <option key={port.name} value={port.name}>{port.description}</option>)}</datalist>
+          <datalist id={`${id}-ports`}>{ports.map(port => <option key={port.name} value={port.name}>{port.description || t("serial.unknownType")}</option>)}</datalist>
           <label>{t("session.baud")}<select value={baudCustom ? "custom" : String(serial.baud)} onChange={e => { const custom = e.target.value === "custom"; setBaudCustom(custom); if (!custom) setSerial({ ...serial, baud: Number(e.target.value) }); }}>
             {standardBauds.map(n => <option key={n} value={n}>{n}</option>)}<option value="custom">{t("session.baud.otherRate")}</option></select></label>
           {baudCustom && <label>{t("session.baud.custom")}<input required type="number" min={1} max={4294967295} value={serial.baud} onChange={e => setSerial({ ...serial, baud: Number(e.target.value) })}/></label>}

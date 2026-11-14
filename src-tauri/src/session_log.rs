@@ -9,6 +9,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
+use crate::ui_error::{ui_code, ui_err};
+
+const LOCKED: &str = ui_code("LOG_LOCKED");
+
 #[derive(Clone, Copy, Default)]
 enum Escape {
     #[default]
@@ -92,7 +96,7 @@ fn create_log(folder: &Path, name: &str, timestamp: &str) -> std::io::Result<(Fi
             _ => b.is_ascii_digit(),
         })
     {
-        return Err(std::io::Error::other("Ungültiger Protokollzeitstempel"));
+        return Err(std::io::Error::other("invalid log timestamp"));
     }
     std::fs::create_dir_all(folder)?;
     let base = format!("{}_{timestamp}", clean_name(name));
@@ -115,7 +119,7 @@ fn create_log(folder: &Path, name: &str, timestamp: &str) -> std::io::Result<(Fi
             Err(e) => return Err(e),
         }
     }
-    Err(std::io::Error::other("Zu viele gleichnamige Protokolle"))
+    Err(std::io::Error::other("too many logs with the same name"))
 }
 const QUEUE_CAPACITY: usize = 1024;
 const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
@@ -151,7 +155,7 @@ fn default_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     path.document_dir()
         .or_else(|_| path.home_dir())
         .map(|dir| dir.join("Werkterm-Logs"))
-        .map_err(|e| e.to_string())
+        .map_err(|e| ui_err("LOG_DIR_UNAVAILABLE").detail(e).into())
 }
 static LOGS: OnceLock<Mutex<Logs>> = OnceLock::new();
 fn logs() -> &'static Mutex<Logs> {
@@ -196,7 +200,7 @@ fn spawn_writer(
         .name("session-log".into())
         .spawn(move || {
             let result = write_stream(&mut *writer, &receiver, strip, &token)
-                .map_err(|error| format!("Protokoll gestoppt: {error}"));
+                .map_err(|error| String::from(ui_err("LOG_STOPPED").detail(error)));
             if let Err(error) = &result
                 && !token.swap(true, Ordering::AcqRel)
             {
@@ -204,7 +208,7 @@ fn spawn_writer(
             }
             result
         })
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| String::from(ui_err("LOG_START_FAILED").detail(error)))?;
     Ok(Log {
         sender,
         aborted,
@@ -222,8 +226,8 @@ impl Logs {
         let log = self.active.get(&id)?;
         let message = match log.sender.try_send(data.to_vec()) {
             Ok(()) => return None,
-            Err(TrySendError::Full(_)) => "Protokoll gestoppt: Ziel zu langsam",
-            Err(TrySendError::Disconnected(_)) => "Protokoll gestoppt: Writer beendet",
+            Err(TrySendError::Full(_)) => ui_code("LOG_TOO_SLOW"),
+            Err(TrySendError::Disconnected(_)) => ui_code("LOG_WRITER_ENDED"),
         };
         log.aborted.store(true, Ordering::Release);
         if let Some(worker) = self.retire(id) {
@@ -238,7 +242,7 @@ impl Logs {
 pub fn output(app: &tauri::AppHandle, id: u32, data: &[u8]) {
     let error = match logs().lock() {
         Ok(mut logs) => logs.enqueue(id, data),
-        Err(_) => Some("Protokollsperre beschädigt"),
+        Err(_) => Some(LOCKED),
     };
     if let Some(error) = error {
         report_error(app, id, error);
@@ -250,7 +254,7 @@ pub fn finish(app: &tauri::AppHandle, id: u32) {
     }
 }
 pub fn stop(id: u32) -> Result<(), String> {
-    let mut logs = logs().lock().map_err(|_| "Protokollsperre beschädigt")?;
+    let mut logs = logs().lock().map_err(|_| LOCKED)?;
     if let Some(worker) = logs.retire(id) {
         logs.retired.push(worker);
     }
@@ -293,17 +297,13 @@ pub async fn session_log_start(
             None => default_log_dir(&app)?,
         };
         if !folder.is_absolute() {
-            return Err("Protokollordner muss ein absoluter Pfad sein".into());
+            return Err(ui_err("LOG_DIR_NOT_ABSOLUTE").into());
         }
-        if logs()
-            .lock()
-            .map_err(|_| "Protokollsperre beschädigt")?
-            .active
-            .contains_key(&id)
-        {
-            return Err("Protokoll läuft bereits".into());
+        if logs().lock().map_err(|_| LOCKED)?.active.contains_key(&id) {
+            return Err(ui_err("LOG_RUNNING").into());
         }
-        let (file, path) = create_log(&folder, &name, &timestamp).map_err(|e| e.to_string())?;
+        let (file, path) = create_log(&folder, &name, &timestamp)
+            .map_err(|e| String::from(ui_err("LOG_CREATE_FAILED").detail(e)))?;
         let log = spawn_writer(
             Box::new(BufWriter::new(file)),
             strip,
@@ -321,35 +321,32 @@ pub async fn session_log_start(
                 report_error(&app, id, error);
             },
         )?;
-        let mut logs = logs().lock().map_err(|_| "Protokollsperre beschädigt")?;
+        let mut logs = logs().lock().map_err(|_| LOCKED)?;
         logs.reap();
         if logs.active.contains_key(&id) {
             drop(logs);
             drop(log.sender);
-            return Err("Protokoll läuft bereits".into());
+            return Err(ui_err("LOG_RUNNING").into());
         }
         logs.active.insert(id, log);
         Ok(path.to_string_lossy().into_owned())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 #[tauri::command]
 pub async fn session_log_stop(id: u32) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let worker = logs()
-            .lock()
-            .map_err(|_| "Protokollsperre beschädigt")?
-            .retire(id);
+        let worker = logs().lock().map_err(|_| LOCKED)?.retire(id);
         if let Some(worker) = worker {
             worker
                 .join()
-                .map_err(|_| "Protokoll-Thread abgebrochen".to_string())??;
+                .map_err(|_| String::from(ui_err("LOG_THREAD_FAILED")))??;
         }
         Ok(())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 #[tauri::command]
 pub async fn session_log_open_folder(
@@ -363,16 +360,17 @@ pub async fn session_log_open_folder(
             None => default_log_dir(&app)?,
         };
         if !path.is_absolute() {
-            return Err("Protokollordner muss ein absoluter Pfad sein".into());
+            return Err(ui_err("LOG_DIR_NOT_ABSOLUTE").into());
         }
-        std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-        let path = path.canonicalize().map_err(|e| e.to_string())?;
+        let io = |e: std::io::Error| String::from(ui_err("FILE_ACCESS_FAILED").detail(e));
+        std::fs::create_dir_all(&path).map_err(io)?;
+        let path = path.canonicalize().map_err(io)?;
         app.opener()
             .open_path(path.to_string_lossy().into_owned(), None::<&str>)
-            .map_err(|e| e.to_string())
+            .map_err(|e| ui_err("LOG_OPEN_FOLDER_FAILED").detail(e).into())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[cfg(test)]
@@ -422,7 +420,7 @@ mod tests {
         release.send(()).unwrap();
         let (error, elapsed, mut registry) = result.expect("enqueue blocked on file I/O");
         task.join().unwrap();
-        assert_eq!(error, Some("Protokoll gestoppt: Ziel zu langsam"));
+        assert_eq!(error, Some("LOG_TOO_SLOW"));
         assert!(elapsed < Duration::from_secs(1));
         assert!(!registry.active.contains_key(&1));
         assert_eq!(registry.enqueue(1, b"ignored"), None);
@@ -508,7 +506,7 @@ mod tests {
         log.sender.send(vec![1]).unwrap();
         assert_eq!(
             received.recv_timeout(Duration::from_secs(2)).unwrap(),
-            "Protokoll gestoppt: disk failed"
+            r#"LOG_STOPPED: {"detail":"disk failed"}"#
         );
         assert!(log.worker.join().unwrap().is_err());
         assert!(matches!(

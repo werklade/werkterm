@@ -67,7 +67,7 @@ describe("TransferQueue", () => {
     const f = setup(); f.conflict.mockResolvedValue(answer);
     f.queue.enqueue([upload("a"), upload("b")]);
     f.queue.enqueue([upload("later")]);
-    f.attempt(0).work.reject("EXISTS:a"); await tick();
+    f.attempt(0).work.reject(`EXISTS: ${JSON.stringify({ args: { name: "a" } })}`); await tick();
     expect(f.conflict).toHaveBeenCalledWith("a", expect.any(AbortSignal));
     if (answer === "overwrite" || answer === "overwriteAll") {
       expect(f.attempt(1).overwrite).toBe(true);
@@ -124,7 +124,7 @@ describe("TransferQueue", () => {
   it("cancels an unanswered conflict and ignores its late answer", async () => {
     const f = setup(); const answer = deferred<ConflictResolution>(); f.conflict.mockReturnValue(answer.promise);
     f.queue.enqueue([upload("a"), upload("discard")]); f.queue.enqueue([upload("later")]);
-    f.attempt(0).work.reject("EXISTS:a"); await tick();
+    f.attempt(0).work.reject(`EXISTS: ${JSON.stringify({ args: { name: "a" } })}`); await tick();
     const signal = f.conflict.mock.calls[0]?.[1];
     f.queue.cancelCurrent(); await tick();
     expect(signal?.aborted).toBe(true); expect(f.attempt(1).name).toBe("/local/later");
@@ -136,7 +136,7 @@ describe("TransferQueue", () => {
     f.attempt(0).work.reject("permission denied"); await tick();
     expect(f.report).toHaveBeenCalledWith("permission denied");
     expect(f.finished).toHaveBeenCalledWith({ sessionId: 1, dir: "/remote", kind: "download", error: "permission denied" });
-    f.attempt(1).work.reject("DIRECTORY:folder"); await tick();
+    f.attempt(1).work.reject("DIRECTORY"); await tick();
     expect(f.report).toHaveBeenCalledWith("Ordner-Upload folgt später");
     f.attempt(2).work.resolve(); await tick();
   });
@@ -159,7 +159,7 @@ describe("TransferQueue", () => {
 it("ignores stale progress while waiting for a conflict and after a job completes", async () => {
   const f = setup(); const answer = deferred<ConflictResolution>(); f.conflict.mockReturnValue(answer.promise);
   f.queue.enqueue([upload("a"), upload("b")]);
-  f.attempt(0).work.reject("EXISTS:a"); await tick();
+  f.attempt(0).work.reject(`EXISTS: ${JSON.stringify({ args: { name: "a" } })}`); await tick();
   const previous = f.states[f.states.length - 1]?.text;
   f.attempt(0).channel({ transferId: 1, done: 100, total: 100 });
   expect(f.states[f.states.length - 1]?.text).toBe(previous);
@@ -173,7 +173,7 @@ it("ignores stale progress while waiting for a conflict and after a job complete
 it("cancels a session during a conflict without discarding other sessions in its batch", async () => {
   const f = setup(); f.conflict.mockReturnValue(new Promise(() => undefined));
   f.queue.enqueue([upload("a"), upload("discard"), upload("keep", 2)]);
-  f.attempt(0).work.reject("EXISTS:a"); await tick();
+  f.attempt(0).work.reject(`EXISTS: ${JSON.stringify({ args: { name: "a" } })}`); await tick();
   f.queue.cancelSession(1); await tick();
   expect(f.conflict.mock.calls[0]?.[1].aborted).toBe(true);
   expect(f.attempt(1).name).toBe("/local/keep");

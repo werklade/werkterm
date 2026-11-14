@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - AppStream metadata in the .deb, so software centers show Werkterm with description and license.
-- Interface language German or English: Settings > General > Language ("System language" by default; any system language other than English falls back to German). Stored per device. Menus, toolbar, sidebar, tabs, start page, keyboard-shortcut help and the settings tabs are translated, and so are all dialogs, the editor (including the search panel and folding), the file browser, sessions, tunnels, macros, tools, data folder and update dialogs. Messages from the backend (connection and file errors) are still German and follow in a later step.
+- Interface language German or English: Settings > General > Language ("System language" by default; any system language other than English falls back to German). Stored per device. Menus, toolbar, sidebar, tabs, start page, keyboard-shortcut help and the settings tabs are translated, and so are all dialogs, the editor (including the search panel and folding), the file browser, sessions, tunnels, macros, tools, data folder and update dialogs. Messages from the backend (connection, file, session, tunnel, update and device errors) are sent as codes and shown in the interface language; technical details from libraries and the operating system (for example "os error 2") stay in their original English wording.
 
 ### Changed
 
@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The settings dialog opens on the new General tab.
 - German texts follow one style: no "bitte", no direct address, consistent terms (for example Sprungserver instead of "Jump host", Übertragung instead of "Transfer", Im Editor öffnen, Aktualisieren, Fingerabdruck); English leftovers such as "Refresh" or "Follow Terminal Folder" are German now.
 - Sizes and counts use the decimal and thousands separators of the interface language (German "1,5 KB", "100.000").
+- Session logs of Telnet and serial connections record connection notices as language-neutral codes (for example `[SERIAL_REMOVED device=/dev/ttyUSB0]`) instead of German text.
+- When several tunnels fail to start automatically, every failure is reported with its tunnel name instead of one combined text.
+- Errors in damaged data files (macros, sessions, tunnels, recent list) only name line and column, so no values from the file (such as typed text) appear in the status line.
 
 ### Removed
 

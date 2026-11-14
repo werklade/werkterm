@@ -1,4 +1,5 @@
 use crate::telnet::{Message, Output};
+use crate::ui_error::{UiError, ui_err};
 use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
@@ -19,7 +20,7 @@ pub fn serial_permission_fix_options(device: String) -> Result<serde_json::Value
     #[cfg(not(target_os = "linux"))]
     {
         let _ = device;
-        Err("Nur unter Linux verfügbar".into())
+        Err(ui_err("LINUX_ONLY").into())
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,7 +52,7 @@ impl Default for SerialConfig {
 impl SerialConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.device.trim().is_empty() || self.device.chars().any(char::is_control) {
-            return Err("Serielles Gerät fehlt oder ist ungültig".into());
+            return Err(ui_err("SERIAL_DEVICE_INVALID").into());
         }
         if self.baud == 0
             || !(5..=8).contains(&self.data_bits)
@@ -60,7 +61,7 @@ impl SerialConfig {
             || !matches!(self.flow.as_str(), "none" | "software" | "hardware")
             || !matches!(self.enter.as_str(), "cr" | "lf" | "crlf")
         {
-            return Err("Ungültige serielle Parameter".into());
+            return Err(ui_err("SERIAL_INVALID_PARAMS").into());
         }
         Ok(())
     }
@@ -159,28 +160,50 @@ pub fn error_text(device: &str, kind: serialport::ErrorKind) -> String {
             #[cfg(target_os = "linux")]
             {
                 match permission::inspect(device) {
-                    Ok(info) => format!(
-                        "SERIAL_PERMISSION:{}",
-                        serde_json::to_string(&info).expect("permission serialization")
-                    ),
+                    Ok(info) => {
+                        // The dialog data travels as string args next to {device}.
+                        let value = serde_json::to_value(&info).expect("permission serialization");
+                        let text = |name: &str| match &value[name] {
+                            serde_json::Value::String(text) => text.clone(),
+                            other => other.to_string(),
+                        };
+                        let mut error =
+                            UiError::new("SERIAL_PERMISSION").arg("device", text("device"));
+                        for name in [
+                            "group",
+                            "username",
+                            "guessed",
+                            "already_member",
+                            "os_id",
+                            "os_id_like",
+                        ] {
+                            error = error.arg(name, text(name));
+                        }
+                        error.into()
+                    }
                     Err(error) => error,
                 }
             }
             #[cfg(not(target_os = "linux"))]
-            format!("Keine Berechtigung für {device}")
+            UiError::new("SERIAL_PERMISSION")
+                .arg("device", device)
+                .into()
         }
         serialport::ErrorKind::Io(
             std::io::ErrorKind::ResourceBusy
             | std::io::ErrorKind::AlreadyExists
             | std::io::ErrorKind::AddrInUse,
-        ) => "Gerät wird bereits verwendet".into(),
+        ) => ui_err("SERIAL_BUSY").arg("device", device).into(),
         serialport::ErrorKind::NoDevice
         | serialport::ErrorKind::Io(
             std::io::ErrorKind::NotFound
             | std::io::ErrorKind::BrokenPipe
             | std::io::ErrorKind::UnexpectedEof,
-        ) => format!("Gerät {device} nicht verfügbar oder entfernt"),
-        _ => format!("Serieller Fehler bei {device}: {kind:?}"),
+        ) => ui_err("SERIAL_UNAVAILABLE").arg("device", device).into(),
+        _ => ui_err("SERIAL_ERROR")
+            .arg("device", device)
+            .detail(format!("{kind:?}"))
+            .into(),
     }
 }
 /// serialport maps Linux EBUSY and advisory lock failures to NoDevice.
@@ -192,7 +215,7 @@ fn open_error(device: &str, error: &serialport::Error) -> String {
             .iter()
             .any(|word| detail.contains(word))
     {
-        "Gerät wird bereits verwendet".into()
+        ui_err("SERIAL_BUSY").arg("device", device).into()
     } else {
         error_text(device, error.kind())
     }
@@ -243,7 +266,8 @@ pub fn port_type(kind: &serialport::SerialPortType) -> String {
         .to_owned(),
         serialport::SerialPortType::PciPort => "PCI".into(),
         serialport::SerialPortType::BluetoothPort => "Bluetooth".into(),
-        serialport::SerialPortType::Unknown => "Unbekannt".into(),
+        // Empty: the frontend shows its translated "unknown" label.
+        serialport::SerialPortType::Unknown => String::new(),
     }
 }
 #[tauri::command]
@@ -254,8 +278,8 @@ pub async fn serial_ports() -> Result<Vec<Port>, String> {
             return Ok(vec![]);
         }
         let ports = std::panic::catch_unwind(serialport::available_ports)
-            .map_err(|_| "Serielle Ports konnten nicht ermittelt werden".to_owned())?
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| String::from(ui_err("SERIAL_PORTS_FAILED")))?
+            .map_err(|e| String::from(ui_err("SERIAL_PORTS_FAILED").detail(e)))?;
         let mut ports: Vec<_> = ports
             .into_iter()
             .map(|p| Port {
@@ -279,7 +303,7 @@ pub async fn serial_ports() -> Result<Vec<Port>, String> {
         Ok(ports)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(e)))?
 }
 #[tauri::command]
 pub async fn serial_connect(
@@ -312,7 +336,7 @@ pub async fn serial_connect(
             while !read_stop.load(Ordering::Acquire) {
                 match reader.read(&mut buffer) {
                     Ok(0) => {
-                        read_output.error(format!("Gerät {device} entfernt"));
+                        read_output.error(ui_err("SERIAL_REMOVED").arg("device", &device));
                         break;
                     }
                     Ok(n) => read_output.data(buffer[..n].to_vec()),
@@ -380,7 +404,7 @@ pub async fn serial_connect(
         Ok(id)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(e)))?
 }
 #[cfg(test)]
 mod tests {
@@ -509,26 +533,31 @@ mod tests {
             port_type(&serialport::SerialPortType::BluetoothPort),
             "Bluetooth"
         );
-        assert_eq!(port_type(&serialport::SerialPortType::Unknown), "Unbekannt");
+        assert_eq!(port_type(&serialport::SerialPortType::Unknown), "");
         assert_eq!(
             error_text(
                 "x",
                 serialport::ErrorKind::Io(std::io::ErrorKind::ResourceBusy)
             ),
-            "Gerät wird bereits verwendet"
+            r#"SERIAL_BUSY: {"args":{"device":"x"}}"#
         );
-        assert!(error_text("x", serialport::ErrorKind::NoDevice).contains("entfernt"));
-        assert!(
-            error_text(
-                "x",
-                serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied)
-            )
-            .contains(if cfg!(target_os = "linux") {
-                "SERIAL_PERMISSION:"
-            } else {
-                "Berechtigung"
-            })
+        assert_eq!(
+            error_text("x", serialport::ErrorKind::NoDevice),
+            r#"SERIAL_UNAVAILABLE: {"args":{"device":"x"}}"#
         );
+        assert_eq!(
+            error_text("x", serialport::ErrorKind::InvalidInput),
+            r#"SERIAL_ERROR: {"args":{"device":"x"},"detail":"InvalidInput"}"#
+        );
+        // serde_json sorts the args, so check the parsed payload instead of a prefix.
+        let permission = error_text(
+            "x",
+            serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied),
+        );
+        let (code, payload) = permission.split_once(": ").unwrap();
+        assert_eq!(code, "SERIAL_PERMISSION");
+        let payload: serde_json::Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(payload["args"]["device"], "x");
     }
     #[test]
     fn usb_description_and_busy_error_preserve_context() {
@@ -548,14 +577,14 @@ mod tests {
                     "EBUSY: Device or resource busy"
                 )
             ),
-            "Gerät wird bereits verwendet"
+            r#"SERIAL_BUSY: {"args":{"device":"/dev/ttyUSB0"}}"#
         );
-        assert!(
-            open_error(
+        assert_eq!(
+            crate::ui_error::code_of(&open_error(
                 "COM3",
                 &serialport::Error::new(serialport::ErrorKind::NoDevice, "not found")
-            )
-            .contains("entfernt")
+            )),
+            Some("SERIAL_UNAVAILABLE")
         );
     }
     #[test]

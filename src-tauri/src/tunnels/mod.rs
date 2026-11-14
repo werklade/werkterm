@@ -1,3 +1,4 @@
+use crate::ui_error::{code_of, ui_code, ui_err};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -67,19 +68,17 @@ fn validate_fields(t: &Tunnel) -> Result<(), String> {
         || (t.kind != Kind::Dynamic
             && (!host_valid(&t.target_host) || t.target_port.is_none_or(|p| p == 0)))
     {
-        return Err(
-            "Name, Adresse oder Port ist ungültig (Ports: 1–65535; Remote-Port auch 0)".into(),
-        );
+        return Err(ui_err("TUNNEL_INVALID_FIELDS").into());
     }
     // Local binds use only literals or localhost: DNS must not turn a permitted bind into a public bind.
     if t.kind != Kind::Remote
         && !t.bind_address.eq_ignore_ascii_case("localhost")
         && t.bind_address.parse::<IpAddr>().is_err()
     {
-        return Err("Lokale Bind-Adresse muss eine IP-Adresse oder localhost sein".into());
+        return Err(ui_err("TUNNEL_LOCAL_BIND_INVALID").into());
     }
     if t.kind == Kind::Dynamic && (!t.target_host.is_empty() || t.target_port.is_some()) {
-        return Err("Dynamische Tunnel haben kein festes Ziel".into());
+        return Err(ui_err("TUNNEL_DYNAMIC_TARGET").into());
     }
     Ok(())
 }
@@ -89,7 +88,7 @@ fn validate(t: &Tunnel, sessions: &[crate::sessions::SavedSession]) -> Result<()
         .iter()
         .any(|s| s.id == t.session_id && s.kind == "ssh")
     {
-        return Err("SSH-Sitzung existiert nicht".into());
+        return Err(ui_err("TUNNEL_SESSION_MISSING").into());
     }
     Ok(())
 }
@@ -100,17 +99,18 @@ fn load(path: &Path) -> Result<Vec<Tunnel>, String> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(_) => return Err("Tunneldatei konnte nicht gelesen werden".into()),
+        Err(e) => return Err(ui_err("TUNNELS_READ_FAILED").detail(e).into()),
     };
-    let file: File = serde_json::from_slice(&bytes).map_err(|_| "Tunneldatei ist beschädigt")?;
+    let file: File = serde_json::from_slice(&bytes)
+        .map_err(|e| String::from(ui_err("TUNNELS_CORRUPT").json_position(&e)))?;
     if file.version != 1 {
-        return Err("Tunneldatei hat eine unbekannte Version".into());
+        return Err(ui_err("TUNNELS_UNKNOWN_VERSION").into());
     }
     let mut ids = HashSet::new();
     for t in &file.tunnels {
         validate_fields(t)?;
         if t.id.is_empty() || !ids.insert(&t.id) {
-            return Err("Tunneldatei enthält ungültige IDs".into());
+            return Err(ui_err("TUNNELS_INVALID_IDS").into());
         }
     }
     Ok(file.tunnels)
@@ -121,10 +121,10 @@ fn write_atomic(path: &Path, tunnels: Vec<Tunnel>) -> Result<(), String> {
         version: 1,
         tunnels,
     })
-    .map_err(|_| "Tunnel konnten nicht serialisiert werden")?;
-    let parent = path.parent().ok_or("Ungültiger Tunnelpfad")?;
+    .map_err(|e| String::from(ui_err("TUNNELS_SERIALIZE_FAILED").detail(e)))?;
+    let parent = path.parent().ok_or(ui_code("INVALID_PATH"))?;
     std::fs::create_dir_all(parent)
-        .map_err(|_| "Konfigurationsordner konnte nicht angelegt werden")?;
+        .map_err(|e| String::from(ui_err("CONFIG_DIR_CREATE_FAILED").detail(e)))?;
     let temp = parent.join(format!(".tunnels-{}.tmp", crate::sessions::new_id()));
     let result = (|| -> std::io::Result<()> {
         let mut options = std::fs::OpenOptions::new();
@@ -143,7 +143,7 @@ fn write_atomic(path: &Path, tunnels: Vec<Tunnel>) -> Result<(), String> {
     if result.is_err() {
         let _ = std::fs::remove_file(temp);
     }
-    result.map_err(|_| "Tunneldatei konnte nicht atomar gespeichert werden".into())
+    result.map_err(|e| ui_err("TUNNELS_SAVE_FAILED").detail(e).into())
 }
 pub(crate) fn protect_session(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     protect(id, &load(&path(app)?)?)
@@ -157,10 +157,9 @@ fn protect(id: &str, tunnels: &[Tunnel]) -> Result<(), String> {
     if names.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "Sitzung wird von SSH-Tunneln verwendet: {}",
-            names.join(", ")
-        ))
+        Err(ui_err("SESSION_USED_BY_TUNNELS")
+            .arg("names", names.join(", "))
+            .into())
     }
 }
 #[derive(Clone, Default, Serialize)]
@@ -316,18 +315,18 @@ async fn socks_target(stream: &mut TcpStream) -> Result<(String, u16), String> {
                 stream
                     .write_all(&[5, 0])
                     .await
-                    .map_err(|_| "SOCKS-Antwort fehlgeschlagen")?;
+                    .map_err(|e| String::from(ui_err("SOCKS_REPLY_FAILED").detail(e)))?;
                 break;
             }
             Err(_) => {
                 let _ = stream.write_all(&[5, 0xff]).await;
-                return Err("SOCKS5: no auth erforderlich".into());
+                return Err(ui_err("SOCKS_AUTH_UNSUPPORTED").into());
             }
             Ok(None) => {
                 let byte = stream
                     .read_u8()
                     .await
-                    .map_err(|_| "Unvollständiger SOCKS-Gruß")?;
+                    .map_err(|e| String::from(ui_err("SOCKS_GREETING_INCOMPLETE").detail(e)))?;
                 bytes.push(byte);
             }
         }
@@ -338,13 +337,13 @@ async fn socks_target(stream: &mut TcpStream) -> Result<(String, u16), String> {
             Ok(Some(target)) => return Ok(target),
             Err(code) => {
                 let _ = socks_reply(stream, code).await;
-                return Err("SOCKS-Anforderung abgelehnt".into());
+                return Err(ui_err("SOCKS_REQUEST_REJECTED").into());
             }
             Ok(None) => bytes.push(
                 stream
                     .read_u8()
                     .await
-                    .map_err(|_| "Unvollständige SOCKS-Anforderung")?,
+                    .map_err(|e| String::from(ui_err("SOCKS_REQUEST_INCOMPLETE").detail(e)))?,
             ),
         }
     }
@@ -506,7 +505,7 @@ async fn run_once(
     let session = sessions
         .iter()
         .find(|s| s.id == t.session_id)
-        .ok_or("SSH-Sitzung fehlt")?
+        .ok_or(ui_code("TUNNEL_SESSION_MISSING"))?
         .clone();
     let jumps = crate::sessions::resolve_jump_chain(&session, sessions)?
         .into_iter()
@@ -523,9 +522,11 @@ async fn run_once(
                 .await
                 .map_err(|e| {
                     if e.kind() == std::io::ErrorKind::AddrInUse {
-                        format!("Port {} ist bereits belegt", t.bind_port)
+                        String::from(
+                            ui_err("TUNNEL_PORT_IN_USE").arg("port", t.bind_port.to_string()),
+                        )
                     } else {
-                        format!("Tunnel konnte nicht gebunden werden: {e}")
+                        String::from(ui_err("TUNNEL_BIND_FAILED").detail(e))
                     }
                 })?,
         )
@@ -541,19 +542,19 @@ async fn run_once(
     let (handle, _jumps, _socket) =
         crate::ssh::tunnel_transport(session, jumps, prompter, cancel.clone(), sender).await?;
     if rejected.load(Ordering::Relaxed) {
-        return Err("Anmeldung abgebrochen".into());
+        return Err(ui_err("SSH_LOGIN_CANCELED").into());
     }
     let handle = Arc::new(handle);
     let port = if t.kind == Kind::Remote {
         let allocated = tokio::select! {
             _ = cancel.changed() => return Ok(()),
             result = tokio::time::timeout(Duration::from_secs(15), handle.tcpip_forward(t.bind_address.clone(), u32::from(t.bind_port))) => {
-                result.map_err(|_| "Zeitüberschreitung bei Remote-Weiterleitung")?
-                    .map_err(|_| format!("Remote-Weiterleitung abgelehnt: Port {} ist bereits belegt oder die Serverrichtlinie verbietet die Weiterleitung", t.bind_port))?
+                result.map_err(|_| String::from(ui_err("TUNNEL_REMOTE_TIMEOUT")))?
+                    .map_err(|_| String::from(ui_err("TUNNEL_REMOTE_REJECTED").arg("port", t.bind_port.to_string())))?
             }
         };
         if t.bind_port == 0 && !(1..=65535).contains(&allocated) {
-            return Err("Server hat einen ungültigen Tunnel-Port geliefert".into());
+            return Err(ui_err("TUNNEL_INVALID_PORT").into());
         }
         if t.bind_port == 0 {
             allocated
@@ -573,7 +574,7 @@ async fn run_once(
         }
         tokio::select! {
             _=cancel.changed()=>break Ok(()),
-            _=tick.tick()=> { if handle.is_closed() { break Err("SSH-Verbindung getrennt".into()); } },
+            _=tick.tick()=> { if handle.is_closed() { break Err(ui_err("TUNNEL_DISCONNECTED").into()); } },
             Some(_)=tasks.join_next(), if !tasks.is_empty()=> {},
             incoming=async { listener.as_ref().unwrap().accept().await }, if listener.is_some()=> {
                 match incoming { Ok((stream,_))=> { if let Some(active) = connections.try_acquire() {
@@ -582,7 +583,7 @@ async fn run_once(
                         let _active = active;
                         local_connection(stream, handle, t, counters).await;
                     });
-                } }, Err(e)=>break Err(format!("Tunnel-Listener: {e}")) }
+                } }, Err(e)=>break Err(ui_err("TUNNEL_LISTENER_FAILED").detail(e).into()) }
             },
             Some((forward, active))=forwarded.recv()=> {
                 if !matches_forward(t,port,&forward.address,forward.port) { drop(forward); continue; }
@@ -613,6 +614,14 @@ async fn run_once(
     .await;
     outcome
 }
+/// No automatic reconnect after a cancellation, a host key problem or an occupied port.
+fn is_final_error(error: &str) -> bool {
+    crate::ssh::is_final_connect_error(error)
+        || matches!(
+            code_of(error),
+            Some("TUNNEL_PORT_IN_USE" | "TUNNEL_REMOTE_REJECTED" | "TUNNEL_LOGIN_CANCELED")
+        )
+}
 impl TunnelManager {
     async fn start(
         self: &Arc<Self>,
@@ -626,12 +635,9 @@ impl TunnelManager {
             .await?
             .into_iter()
             .find(|saved| saved.id == t.id)
-            .ok_or("Tunnel existiert nicht")?;
+            .ok_or(ui_code("TUNNEL_NOT_FOUND"))?;
         if !is_loopback(&t.bind_address) && !allow_public {
-            return Err(
-                "Andere Geräte im Netzwerk können diesen Tunnel nutzen. Bestätigung erforderlich."
-                    .into(),
-            );
+            return Err(ui_err("TUNNEL_PUBLIC_CONFIRM").into());
         }
         let sessions = crate::sessions::sessions_list(app.clone()).await?;
         validate(&t, &sessions)?;
@@ -691,15 +697,13 @@ impl TunnelManager {
                             attempt = 0;
                         }
                         let error = if rejected.load(Ordering::Relaxed) {
-                            "SSH-Anmeldung oder Hostkey-Bestätigung abgebrochen".into()
+                            ui_err("TUNNEL_LOGIN_CANCELED").into()
                         } else {
                             error
                         };
                         if rejected.load(Ordering::Relaxed)
                             || !t.reconnect
-                            || error.contains("abgebrochen")
-                            || error.contains("Hostkey")
-                            || error.contains("belegt")
+                            || is_final_error(&error)
                         {
                             set_state(&state, "error", Some(error));
                             break;
@@ -757,7 +761,7 @@ impl TunnelManager {
             .values()
             .any(|r| !r.done.is_finished())
         {
-            return Err("Tunnel vor dem Wechsel stoppen".into());
+            return Err(ui_err("TUNNELS_STOP_FIRST").into());
         }
         Ok(operation)
     }
@@ -783,7 +787,7 @@ pub async fn tunnel_save(
 ) -> Result<Tunnel, String> {
     let _operation = manager.operations.lock().await;
     if tunnel.allow_public && !public_confirmed {
-        return Err("Öffentliche Freigabe muss bestätigt werden".into());
+        return Err(ui_err("TUNNEL_PUBLIC_UNCONFIRMED").into());
     }
     if manager
         .running
@@ -792,13 +796,13 @@ pub async fn tunnel_save(
         .get(&tunnel.id)
         .is_some_and(|r| !r.done.is_finished())
     {
-        return Err("Tunnel vor dem Bearbeiten stoppen".into());
+        return Err(ui_err("TUNNEL_STOP_TO_EDIT").into());
     }
     let _guard = crate::sessions::STORAGE_LOCK.lock().await;
     let sessions = crate::sessions::load(&crate::sessions::config_path(&app)?)?;
     validate(&tunnel, &sessions)?;
     if !is_loopback(&tunnel.bind_address) && (!public_confirmed || !tunnel.allow_public) {
-        return Err("Öffentliche Bind-Adresse muss bestätigt werden".into());
+        return Err(ui_err("TUNNEL_PUBLIC_BIND_UNCONFIRMED").into());
     }
     if tunnel.id.is_empty() {
         tunnel.id = crate::sessions::new_id();
@@ -899,7 +903,7 @@ pub async fn tunnel_start(
         .await?
         .into_iter()
         .find(|t| t.id == id)
-        .ok_or("Tunnel existiert nicht")?;
+        .ok_or(ui_code("TUNNEL_NOT_FOUND"))?;
     manager
         .start(
             app.clone(),
@@ -953,6 +957,7 @@ pub async fn tunnel_autostart(
         .filter(|t| t.autostart)
     {
         let allowed = is_loopback(&t.bind_address) || t.allow_public;
+        let name = t.name.clone();
         if let Err(error) = manager
             .start(
                 app.clone(),
@@ -962,14 +967,30 @@ pub async fn tunnel_autostart(
             )
             .await
         {
-            errors.push(error);
+            errors.push((name, error));
         }
     }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
+    autostart_result(errors)
+}
+/// One `TUNNEL_START_FAILED {name, error}` per failed tunnel, all reported together. The
+/// `errors` arg is a JSON array of wire-format errors; the frontend translates each entry.
+fn autostart_result(failures: Vec<(String, String)>) -> Result<(), String> {
+    if failures.is_empty() {
+        return Ok(());
     }
+    let errors: Vec<String> = failures
+        .into_iter()
+        .map(|(name, error)| {
+            ui_err("TUNNEL_START_FAILED")
+                .arg("name", name)
+                .arg("error", error)
+                .into()
+        })
+        .collect();
+    Err(ui_err("TUNNEL_AUTOSTART_FAILED")
+        .arg("count", errors.len().to_string())
+        .arg("errors", serde_json::Value::from(errors).to_string())
+        .into())
 }
 #[cfg(test)]
 mod tests;

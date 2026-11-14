@@ -1,4 +1,7 @@
 use super::{SshManager, ssh_error};
+#[cfg(unix)]
+use crate::ui_error::UiError;
+use crate::ui_error::ui_err;
 use russh_sftp::{client::SftpSession, protocol::FileAttributes};
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +23,7 @@ pub struct Options {
 }
 pub fn validate_mode(mode: u32) -> Result<(), String> {
     if mode & !0o7777 != 0 {
-        Err("Ungültige Rechte".into())
+        Err(ui_err("INVALID_MODE").into())
     } else {
         Ok(())
     }
@@ -32,7 +35,7 @@ impl Options {
             validate_mode(mode)?;
         }
         if self.dir_mode.is_some() != self.file_mode.is_some() {
-            return Err("Ungültige Rechte".into());
+            return Err(ui_err("INVALID_MODE").into());
         }
         Ok(())
     }
@@ -75,9 +78,9 @@ pub fn mode_to_rwx(mode: u32) -> Result<String, String> {
 }
 pub fn rwx_to_mode(value: &str) -> Result<u32, String> {
     if value.len() != 9 {
-        return Err("Ungültige Rechte".into());
+        return Err(ui_err("INVALID_MODE").into());
     }
-    super::lsparse::mode_bits(&format!("-{value}")).map_err(|_| "Ungültige Rechte".into())
+    super::lsparse::mode_bits(&format!("-{value}")).map_err(|_| ui_err("INVALID_MODE").into())
 }
 #[derive(Default, Serialize)]
 pub struct ChmodResult {
@@ -126,42 +129,45 @@ impl Tree for SftpSession {
     }
 }
 #[cfg(unix)]
+fn local_error(error: std::io::Error) -> String {
+    UiError::new("FILE_ACCESS_FAILED").detail(error).into()
+}
+#[cfg(unix)]
 struct LocalTree;
 #[cfg(unix)]
 impl Tree for LocalTree {
     async fn kind(&self, path: &str) -> Result<(bool, bool), String> {
-        let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        let meta = std::fs::symlink_metadata(path).map_err(local_error)?;
         Ok((meta.is_dir(), meta.is_symlink()))
     }
     async fn children(&self, path: &str) -> Result<Vec<String>, String> {
         std::fs::read_dir(path)
-            .map_err(|e| e.to_string())?
+            .map_err(local_error)?
             .map(|entry| {
                 entry
-                    .map_err(|e| e.to_string())?
+                    .map_err(local_error)?
                     .path()
                     .into_os_string()
                     .into_string()
-                    .map_err(|_| "Ungültiger UTF-8-Pfad".into())
+                    .map_err(|_| ui_err("INVALID_UTF8_PATH").into())
             })
             .collect()
     }
     async fn chmod(&self, path: &str, mode: u32) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         if std::fs::symlink_metadata(path)
-            .map_err(|e| e.to_string())?
+            .map_err(local_error)?
             .is_symlink()
         {
-            return Err("Symlink wird übersprungen".into());
+            return Err(ui_err("SYMLINK_SKIPPED").into());
         }
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-            .map_err(|e| e.to_string())
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).map_err(local_error)
     }
 }
 #[cfg(unix)]
 fn local_path(path: &str) -> Result<String, String> {
     if !std::path::Path::new(path).is_absolute() {
-        return Err("Pfad muss absolut sein".into());
+        return Err(ui_err("PATH_NOT_ABSOLUTE").into());
     }
     super::actions::action_path(path)
 }
@@ -175,7 +181,7 @@ pub async fn local_chmod(path: String, options: Options) -> Result<ChmodResult, 
     #[cfg(not(unix))]
     {
         let _ = path;
-        Err("Unix-Rechte sind hier nicht änderbar".into())
+        Err(ui_err("UNIX_PERMISSIONS_UNAVAILABLE").into())
     }
 }
 #[tauri::command]
@@ -203,7 +209,7 @@ pub async fn local_count_entries(path: String) -> Result<u64, String> {
     #[cfg(not(unix))]
     {
         let _ = path;
-        Err("Unix-Rechte sind hier nicht änderbar".into())
+        Err(ui_err("UNIX_PERMISSIONS_UNAVAILABLE").into())
     }
 }
 async fn apply(tree: &impl Tree, path: String, options: Options) -> ChmodResult {

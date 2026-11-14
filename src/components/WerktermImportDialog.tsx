@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { importWerktermSessions, previewWerktermImport, sessionTarget, type ImportResult, type WerktermImportPreview } from "../lib/sessions";
 import { useT } from "../i18n";
+import { errorText } from "../lib/backendError";
 import { useModal } from "./useModal";
 import "./SessionDialog.css";
 import "./ImportDialog.css";
@@ -57,7 +58,7 @@ export function WerktermImportDialog({ onClose, onImported }: Props) {
               setSelected(previous => { const next = new Set(previous); if (checked) next.add(session.id); else next.delete(session.id); return next; });
             }} /></td><td>{session.name}{preview.duplicateOf[index] && <span className="import-duplicate-label">{t("import.exists")}</span>}</td><td>{session.folder || "—"}</td><td>{sessionTarget(session)}</td>
           </tr>)}</tbody></table></div>
-        {preview.warnings.length > 0 && <ul className="import-warnings">{preview.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+        {preview.warnings.length > 0 && <ul className="import-warnings">{preview.warnings.map((warning, index) => <li key={index}>{errorText(warning)}</li>)}</ul>}
       </>}
       {error && <p role="alert" className="session-error">{error}</p>}
       <div className="dialog-actions">{preview && <button type="button" disabled={busy} onClick={() => { setPreview(null); setError(""); }}>{t("import.back")}</button>}

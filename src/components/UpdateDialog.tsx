@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
+import { errorText } from "../lib/backendError";
 import { writeClipboardText } from "../lib/clipboard";
 import { t } from "../i18n";
 import { updateCheck, updateInfo } from "../lib/update";
@@ -16,7 +17,7 @@ export interface UpdateDialogProps {
   onClose(): void;
 }
 
-const message = (reason: unknown): string => reason instanceof Error ? reason.message : String(reason);
+const message = (reason: unknown): string => errorText(reason);
 
 /**
  * Opening the dialog is the user's action that starts the check (update_info is local, update_check is the

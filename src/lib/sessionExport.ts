@@ -1,3 +1,4 @@
+import { errorText } from "./backendError";
 import { save } from "@tauri-apps/plugin-dialog";
 import { t, tp } from "../i18n";
 import { exportSessions } from "./sessions";
@@ -10,6 +11,6 @@ export async function chooseSessionExport(ids: string[], onStatus: (message: str
     const count = await exportSessions(ids, path);
     onStatus(tp("session.export.done", count, { path }));
   } catch (reason) {
-    onStatus(typeof reason === "string" ? reason : reason instanceof Error ? reason.message : t("session.export.failed"));
+    onStatus(typeof reason === "string" || reason instanceof Error ? errorText(reason) : t("session.export.failed"));
   }
 }

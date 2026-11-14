@@ -5,6 +5,8 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::ui_error::ui_err;
+
 const MAX_SIZE: usize = 64 * 1024;
 const MAX_FILES: usize = 200;
 const ELEMENTS: &str = "svg g path circle ellipse rect line polyline polygon defs linearGradient radialGradient stop clipPath mask title desc use";
@@ -42,6 +44,14 @@ fn make_id(name: &str) -> String {
     )
 }
 
+fn svg_invalid(detail: &str) -> String {
+    ui_err("SVG_INVALID").detail(detail).into()
+}
+
+fn io(error: std::io::Error) -> String {
+    ui_err("FILE_ACCESS_FAILED").detail(error).into()
+}
+
 fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -57,7 +67,9 @@ fn decode(value: &str) -> Result<String, String> {
     while let Some(index) = rest.find('&') {
         result.push_str(&rest[..index]);
         rest = &rest[index + 1..];
-        let end = rest.find(';').ok_or("Ungültige XML-Entität.")?;
+        let end = rest
+            .find(';')
+            .ok_or_else(|| svg_invalid("unterminated entity"))?;
         let entity = &rest[..end];
         let c = match entity {
             "amp" => '&',
@@ -72,7 +84,7 @@ fn decode(value: &str) -> Result<String, String> {
                     entity.strip_prefix('#').and_then(|n| n.parse().ok())
                 };
                 code.and_then(char::from_u32)
-                    .ok_or("Unbekannte XML-Entität.")?
+                    .ok_or_else(|| svg_invalid("unknown entity"))?
             }
         };
         result.push(c);
@@ -83,7 +95,7 @@ fn decode(value: &str) -> Result<String, String> {
         .chars()
         .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
     {
-        return Err("Ungültiges XML-Zeichen.".into());
+        return Err(svg_invalid("invalid character"));
     }
     Ok(result)
 }
@@ -150,7 +162,7 @@ impl<'a> Parser<'a> {
             .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':'))
             .count();
         if len == 0 {
-            return Err("Ungültiger XML-Name.".into());
+            return Err(svg_invalid("invalid name"));
         }
         let name = &self.rest[..len];
         self.rest = &self.rest[len..];
@@ -158,7 +170,7 @@ impl<'a> Parser<'a> {
     }
     fn element(&mut self, depth: usize) -> Result<(String, String), String> {
         if depth > 64 || !self.rest.starts_with('<') {
-            return Err("Ungültige SVG-Struktur.".into());
+            return Err(svg_invalid("invalid structure"));
         }
         self.rest = &self.rest[1..];
         let name = self.name()?.to_owned();
@@ -180,15 +192,15 @@ impl<'a> Parser<'a> {
                 break;
             }
             if self.rest.len() == before {
-                return Err("XML-Attribute müssen getrennt sein.".into());
+                return Err(svg_invalid("attributes must be separated"));
             }
             let key = self.name()?.to_owned();
             if !seen.insert(key.clone()) {
-                return Err("Doppeltes XML-Attribut.".into());
+                return Err(svg_invalid("duplicate attribute"));
             }
             self.whitespace();
             if !self.rest.starts_with('=') {
-                return Err("Ungültiges XML-Attribut.".into());
+                return Err(svg_invalid("invalid attribute"));
             }
             self.rest = &self.rest[1..];
             self.whitespace();
@@ -197,14 +209,14 @@ impl<'a> Parser<'a> {
                 .chars()
                 .next()
                 .filter(|c| matches!(c, '\'' | '"'))
-                .ok_or("XML-Attribut ohne Anführungszeichen.")?;
+                .ok_or_else(|| svg_invalid("unquoted attribute"))?;
             self.rest = &self.rest[1..];
             let end = self
                 .rest
                 .find(quote)
-                .ok_or("Unvollständiges XML-Attribut.")?;
+                .ok_or_else(|| svg_invalid("incomplete attribute"))?;
             if self.rest[..end].contains('<') {
-                return Err("Ungültiges XML-Attribut.".into());
+                return Err(svg_invalid("invalid attribute"));
             }
             let value = decode(&self.rest[..end])?.replace(['\t', '\n', '\r'], " ");
             self.rest = &self.rest[end + 1..];
@@ -221,11 +233,11 @@ impl<'a> Parser<'a> {
                     self.rest = &self.rest[2..];
                     let close = self.name()?;
                     if close != name {
-                        return Err("Nicht passende XML-Endmarke.".into());
+                        return Err(svg_invalid("mismatched end tag"));
                     }
                     self.whitespace();
                     if !self.rest.starts_with('>') {
-                        return Err("Ungültige XML-Endmarke.".into());
+                        return Err(svg_invalid("invalid end tag"));
                     }
                     self.rest = &self.rest[1..];
                     break;
@@ -233,15 +245,18 @@ impl<'a> Parser<'a> {
                     let end = self
                         .rest
                         .find("-->")
-                        .ok_or("Unvollständiger XML-Kommentar.")?;
+                        .ok_or_else(|| svg_invalid("incomplete comment"))?;
                     if self.rest[4..end].contains("--") {
-                        return Err("Ungültiger XML-Kommentar.".into());
+                        return Err(svg_invalid("invalid comment"));
                     }
                     self.rest = &self.rest[end + 3..];
                 } else if self.rest.starts_with('<') {
                     output.push_str(&self.element(depth + 1)?.1);
                 } else {
-                    let end = self.rest.find('<').ok_or("SVG-Endmarke fehlt.")?;
+                    let end = self
+                        .rest
+                        .find('<')
+                        .ok_or_else(|| svg_invalid("missing end tag"))?;
                     output.push_str(&escape(&decode(&self.rest[..end])?));
                     self.rest = &self.rest[end..];
                 }
@@ -254,17 +269,20 @@ impl<'a> Parser<'a> {
 
 pub fn sanitize_svg(source: &str) -> Result<String, String> {
     if source.len() > MAX_SIZE {
-        return Err("SVG ist größer als 64 KB.".into());
+        return Err(ui_err("SVG_TOO_LARGE").arg("limit", "64 KB").into());
     }
     let upper = source.to_ascii_uppercase();
     if upper.contains("<!DOCTYPE") || upper.contains("<!ENTITY") {
-        return Err("DOCTYPE und Entitäten sind nicht erlaubt.".into());
+        return Err(ui_err("SVG_DOCTYPE").into());
     }
     let mut parser = Parser {
         rest: source.trim_start_matches('\u{feff}').trim(),
     };
     if parser.rest.starts_with("<?xml ") {
-        let end = parser.rest.find("?>").ok_or("Ungültige XML-Deklaration.")?;
+        let end = parser
+            .rest
+            .find("?>")
+            .ok_or_else(|| svg_invalid("invalid XML declaration"))?;
         parser.rest = &parser.rest[end + 2..];
         parser.whitespace();
     }
@@ -272,19 +290,19 @@ pub fn sanitize_svg(source: &str) -> Result<String, String> {
         let end = parser
             .rest
             .find("-->")
-            .ok_or("Unvollständiger XML-Kommentar.")?;
+            .ok_or_else(|| svg_invalid("incomplete comment"))?;
         if parser.rest[4..end].contains("--") {
-            return Err("Ungültiger XML-Kommentar.".into());
+            return Err(svg_invalid("invalid comment"));
         }
         parser.rest = &parser.rest[end + 3..];
         parser.whitespace();
     }
     let (name, result) = parser.element(0)?;
     if name != "svg" || !parser.rest.trim().is_empty() {
-        return Err("Eine SVG-Wurzel wird erwartet.".into());
+        return Err(ui_err("SVG_ROOT_EXPECTED").into());
     }
     if result.len() > MAX_SIZE {
-        return Err("Bereinigtes SVG ist größer als 64 KB.".into());
+        return Err(ui_err("SVG_TOO_LARGE").arg("limit", "64 KB").into());
     }
     Ok(result)
 }
@@ -311,38 +329,37 @@ fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 fn set_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     if !safe_name(id, 64) {
-        return Err("Ungültige Icon-Set-ID.".into());
+        return Err(ui_err("ICON_SET_INVALID_ID").into());
     }
     let path = root.join(id);
     if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err("Verknüpfte Icon-Sets sind nicht erlaubt.".into());
+        return Err(ui_err("ICON_SET_SYMLINK").into());
     }
     Ok(path)
 }
 fn read_svg(path: &Path) -> Result<String, String> {
-    if !fs::symlink_metadata(path)
-        .map_err(|e| e.to_string())?
-        .is_file()
-    {
-        return Err("Keine reguläre SVG-Datei.".into());
+    if !fs::symlink_metadata(path).map_err(io)?.is_file() {
+        return Err(ui_err("SVG_NOT_FILE").into());
     }
     let mut bytes = Vec::new();
     fs::File::open(path)
-        .map_err(|e| e.to_string())?
+        .map_err(io)?
         .take(MAX_SIZE as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    sanitize_svg(std::str::from_utf8(&bytes).map_err(|_| "SVG muss UTF-8 sein.")?)
+        .map_err(io)?;
+    sanitize_svg(std::str::from_utf8(&bytes).map_err(|_| String::from(ui_err("SVG_NOT_UTF8")))?)
 }
 fn load_set(path: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut icons = BTreeMap::new();
-    for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
+    for entry in fs::read_dir(path).map_err(io)? {
+        let path = entry.map_err(io)?.path();
         if path.extension().and_then(|v| v.to_str()) != Some("svg") {
             continue;
         }
         if icons.len() >= MAX_FILES {
-            return Err("Zu viele Icons im Set.".into());
+            return Err(ui_err("ICON_SET_TOO_MANY")
+                .arg("max", MAX_FILES.to_string())
+                .into());
         }
         if let Some(name) = path
             .file_stem()
@@ -359,7 +376,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|e| format!("Icon-Vorgang fehlgeschlagen: {e}"))?
+        .map_err(|e| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(e)))?
 }
 
 #[tauri::command]
@@ -370,8 +387,8 @@ pub async fn icon_sets_list(app: tauri::AppHandle) -> Result<Vec<StoredIconSet>,
             return Ok(Vec::new());
         }
         let mut sets = Vec::new();
-        for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(&root).map_err(io)? {
+            let entry = entry.map_err(io)?;
             let id = entry.file_name().to_string_lossy().into_owned();
             if !safe_name(&id, 64) {
                 continue;
@@ -423,62 +440,76 @@ fn import_set(
     known: &[String],
 ) -> Result<ImportResult, String> {
     if known.len() > MAX_FILES || known.iter().any(|v| !safe_name(v, 40)) {
-        return Err("Ungültige Icon-Namen.".into());
+        return Err(ui_err("ICON_NAMES_INVALID").into());
     }
     let name: String = name.trim().chars().take(60).collect();
     if name.is_empty() {
-        return Err("Bitte einen Namen eingeben.".into());
+        return Err(ui_err("ICON_SET_NAME_EMPTY").into());
     }
     let mut warnings = Vec::new();
     let mut icons = BTreeMap::new();
     let mut count = 0;
-    for entry in
-        fs::read_dir(folder).map_err(|e| format!("Icon-Ordner konnte nicht gelesen werden: {e}"))?
+    for entry in fs::read_dir(folder)
+        .map_err(|e| String::from(ui_err("ICON_FOLDER_READ_FAILED").detail(e)))?
     {
-        let path = entry.map_err(|e| e.to_string())?.path();
+        let path = entry.map_err(io)?.path();
         if path.extension().and_then(|v| v.to_str()) != Some("svg") {
             continue;
         }
         count += 1;
         if count > MAX_FILES {
-            warnings.push("Weitere SVG-Dateien übersprungen: maximal 200 Dateien.".into());
+            warnings.push(
+                ui_err("ICON_IMPORT_LIMIT")
+                    .arg("max", MAX_FILES.to_string())
+                    .into(),
+            );
             break;
         }
         let stem = path.file_stem().and_then(|v| v.to_str()).unwrap_or("");
         if !known.iter().any(|v| v == stem) {
-            warnings.push(format!(
-                "{}: unbekannter Icon-Name.",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            ));
+            warnings.push(
+                ui_err("ICON_UNKNOWN_NAME")
+                    .arg(
+                        "name",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                    )
+                    .into(),
+            );
             continue;
         }
         match read_svg(&path) {
             Ok(svg) => {
                 icons.insert(stem.to_owned(), svg);
             }
-            Err(e) => warnings.push(format!("{stem}: {e}")),
+            Err(e) => warnings.push(
+                ui_err("ICON_FILE_SKIPPED")
+                    .arg("name", stem)
+                    .arg("error", e)
+                    .into(),
+            ),
         }
     }
     if icons.is_empty() {
-        return Err(format!(
-            "Keine gültigen Icons gefunden. {}",
-            warnings.join(" ")
-        ));
+        return Err(match warnings.into_iter().next() {
+            Some(first) => ui_err("ICON_NONE_VALID").arg("error", first).into(),
+            None => ui_err("ICON_NONE_FOUND").into(),
+        });
     }
-    fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root).map_err(io)?;
     let id = make_id(&name);
     let destination = set_path(root, &id)?;
     let staging = root.join(format!(".import-{}", suffix()));
-    fs::create_dir(&staging).map_err(|e| e.to_string())?;
+    fs::create_dir(&staging).map_err(io)?;
     let result = (|| {
         for (name, svg) in icons {
             write_new(&staging.join(format!("{name}.svg")), svg.as_bytes())?;
         }
         write_new(
             &staging.join("meta.json"),
-            &serde_json::to_vec(&serde_json::json!({"name": name})).map_err(|e| e.to_string())?,
+            &serde_json::to_vec(&serde_json::json!({"name": name}))
+                .map_err(|e| String::from(ui_err("ICON_SET_SAVE_FAILED").detail(e)))?,
         )?;
-        fs::rename(&staging, destination).map_err(|e| e.to_string())?;
+        fs::rename(&staging, destination).map_err(io)?;
         Ok(ImportResult { id, warnings })
     })();
     if result.is_err() {
@@ -491,10 +522,10 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|e| e.to_string())?;
+        .map_err(io)?;
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
-        .map_err(|e| e.to_string())
+        .map_err(io)
 }
 #[tauri::command]
 pub async fn icon_sets_import(
@@ -512,7 +543,7 @@ pub async fn icon_sets_delete(app: tauri::AppHandle, id: String) -> Result<(), S
     blocking(move || match fs::remove_dir_all(set_path(&root, &id)?) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("Icon-Set konnte nicht gelöscht werden: {e}")),
+        Err(e) => Err(ui_err("ICON_SET_DELETE_FAILED").detail(e).into()),
     })
     .await
 }
@@ -523,7 +554,7 @@ pub async fn icon_sets_export_template(
 ) -> Result<ExportResult, String> {
     blocking(move || {
         if icons.len() > MAX_FILES || icons.keys().any(|v| !safe_name(v, 40)) {
-            return Err("Ungültige Icon-Namen.".into());
+            return Err(ui_err("ICON_NAMES_INVALID").into());
         }
         let mut result = ExportResult {
             written: 0,
@@ -536,13 +567,15 @@ pub async fn icon_sets_export_template(
                 Ok(mut file) => {
                     file.write_all(svg.as_bytes())
                         .and_then(|()| file.sync_all())
-                        .map_err(|e| format!("Vorlage konnte nicht geschrieben werden: {e}"))?;
+                        .map_err(|e| {
+                            String::from(ui_err("ICON_TEMPLATE_WRITE_FAILED").detail(e))
+                        })?;
                     result.written += 1;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     result.skipped.push(name)
                 }
-                Err(e) => return Err(format!("Vorlage konnte nicht erstellt werden: {e}")),
+                Err(e) => return Err(ui_err("ICON_TEMPLATE_WRITE_FAILED").detail(e).into()),
             }
         }
         Ok(result)
@@ -638,6 +671,17 @@ mod tests {
         let imported =
             import_set(&output, &input, "Test", &["home".into(), "save".into()]).unwrap();
         assert_eq!(imported.warnings.len(), 2);
+        assert!(
+            imported
+                .warnings
+                .contains(&r#"ICON_UNKNOWN_NAME: {"args":{"name":"unknown.svg"}}"#.to_owned())
+        );
+        assert!(
+            imported
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("ICON_FILE_SKIPPED:") && w.contains("SVG_TOO_LARGE"))
+        );
         let loaded = load_set(&set_path(&output, &imported.id).unwrap()).unwrap();
         assert_eq!(loaded.len(), 1);
         assert!(loaded.contains_key("home"));

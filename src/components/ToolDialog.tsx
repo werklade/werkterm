@@ -1,4 +1,5 @@
 import { writeClipboardText } from "../lib/clipboard";
+import { errorCode } from "../lib/backendError";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { join } from "@tauri-apps/api/path";
@@ -123,7 +124,7 @@ function KeygenTool({ onCopy }: { onCopy(value: string): void }) {
       const args = { id: start.id, path, private: privateKey, overwrite: false };
       try { await invoke("keygen_save", args); }
       catch (error: unknown) {
-        if (String(error) !== "EXISTS") throw error;
+        if (errorCode(error) !== "EXISTS") throw error;
         const accepted = await new Promise<boolean>(resolve => { overwriteAnswer.current = resolve; setOverwriteOpen(true); });
         if (!accepted) return;
         if (!mounted.current) return;

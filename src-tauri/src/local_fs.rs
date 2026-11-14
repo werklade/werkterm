@@ -1,4 +1,5 @@
 use crate::ssh::{DirEntry, DirListing};
+use crate::ui_error::{UiError, ui_err};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -13,7 +14,7 @@ pub fn wsl_unc_path(distro: &str, path: &str) -> Result<PathBuf, String> {
         || path.contains('\\')
         || path.contains('\0')
     {
-        return Err("Ungültige WSL-Distribution oder ungültiger Linux-Pfad".to_owned());
+        return Err(ui_err("WSL_INVALID_PATH").into());
     }
     let mut parts = Vec::new();
     for part in path.split('/') {
@@ -22,7 +23,7 @@ pub fn wsl_unc_path(distro: &str, path: &str) -> Result<PathBuf, String> {
             ".." => {
                 parts.pop();
             }
-            value if value.contains(':') => return Err("Ungültiger Linux-Pfad".to_owned()),
+            value if value.contains(':') => return Err(ui_err("WSL_INVALID_PATH").into()),
             value => parts.push(value),
         }
     }
@@ -48,7 +49,7 @@ fn display_local_path(path: &str) -> String {
 pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirListing, String> {
     let (directory, display_path) = if let Some(distro) = wsl_distro {
         if !cfg!(windows) {
-            return Err("WSL ist nur unter Windows verfügbar".to_owned());
+            return Err(ui_err("WSL_WINDOWS_ONLY").into());
         }
         let directory = wsl_unc_path(&distro, &path)?;
         (directory, path)
@@ -56,28 +57,28 @@ pub fn list_local_dir(path: String, wsl_distro: Option<String>) -> Result<DirLis
         let directory = if path.is_empty() {
             std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
                 .map(PathBuf::from)
-                .ok_or_else(|| "Home-Verzeichnis ist nicht gesetzt".to_owned())?
+                .ok_or_else(|| String::from(ui_err("HOME_NOT_FOUND")))?
         } else {
             PathBuf::from(path)
         };
         let directory = directory
             .canonicalize()
-            .map_err(|error| format!("Verzeichnis kann nicht aufgelöst werden: {error}"))?;
+            .map_err(|error| String::from(UiError::new("LOCAL_FS_RESOLVE").detail(error)))?;
         let display_path = display_local_path(&directory.to_string_lossy());
         (directory, display_path)
     };
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(&directory)
-        .map_err(|error| format!("Verzeichnis kann nicht gelesen werden: {error}"))?
+        .map_err(|error| String::from(UiError::new("LOCAL_FS_READ_DIR").detail(error)))?
     {
-        let entry = entry
-            .map_err(|error| format!("Verzeichniseintrag kann nicht gelesen werden: {error}"))?;
+        let entry =
+            entry.map_err(|error| String::from(UiError::new("LOCAL_FS_READ_DIR").detail(error)))?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if name == "." || name == ".." {
             continue;
         }
         let metadata = std::fs::symlink_metadata(entry.path())
-            .map_err(|error| format!("Dateiinformationen können nicht gelesen werden: {error}"))?;
+            .map_err(|error| String::from(UiError::new("LOCAL_FS_METADATA").detail(error)))?;
         let kind = if metadata.is_symlink() {
             "symlink"
         } else if metadata.is_dir() {
@@ -172,7 +173,7 @@ mod tests {
             ("Ubuntu", "/a\\b"),
             ("Ubuntu", "/a:b"),
         ] {
-            assert!(wsl_unc_path(distro, path).is_err());
+            assert_eq!(wsl_unc_path(distro, path).unwrap_err(), "WSL_INVALID_PATH");
         }
     }
 
@@ -213,15 +214,19 @@ mod tests {
 pub fn save_text_file(path: String, contents: String) -> Result<(), String> {
     let path = PathBuf::from(path);
     if !path.is_absolute() {
-        return Err("Export path must be absolute".into());
+        return Err(ui_err("PATH_NOT_ABSOLUTE").into());
     }
-    std::fs::write(path, contents.as_bytes()).map_err(|error| error.to_string())
+    std::fs::write(path, contents.as_bytes())
+        .map_err(|error| UiError::new("FILE_ACCESS_FAILED").detail(error).into())
 }
 
 #[cfg(test)]
 mod export_tests {
     #[test]
     fn rejects_relative_export_path() {
-        assert!(super::save_text_file("relative.txt".into(), "text".into()).is_err());
+        assert_eq!(
+            super::save_text_file("relative.txt".into(), "text".into()).unwrap_err(),
+            "PATH_NOT_ABSOLUTE"
+        );
     }
 }

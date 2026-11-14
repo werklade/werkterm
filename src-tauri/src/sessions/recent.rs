@@ -7,6 +7,8 @@ use std::{
     sync::Mutex,
 };
 use tauri::Manager;
+
+use crate::ui_error::{UiError, ui_err};
 static LOCK: Mutex<()> = Mutex::new(());
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -48,19 +50,26 @@ fn path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
         .map(|dir| dir.join(name))
-        .map_err(|e| e.to_string())
+        .map_err(|e| ui_err("CONFIG_DIR_UNAVAILABLE").detail(e).into())
+}
+fn io(error: std::io::Error) -> String {
+    ui_err("FILE_ACCESS_FAILED").detail(error).into()
+}
+fn locked<T>(error: std::sync::PoisonError<T>) -> String {
+    UiError::new("HISTORY_LOCKED").detail(error).into()
 }
 fn read(path: &Path) -> Result<Vec<Recent>, String> {
     match fs::read(path) {
         Ok(bytes) => {
-            let history: History = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+            let history: History = serde_json::from_slice(&bytes)
+                .map_err(|e| String::from(ui_err("HISTORY_CORRUPT").json_position(&e)))?;
             if history.version != 1 {
-                return Err("Unbekannte Verlaufsversion".into());
+                return Err(ui_err("HISTORY_UNKNOWN_VERSION").into());
             }
             Ok(history.items)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(io(e)),
     }
 }
 // Only malformed content is recovered; filesystem errors remain visible.
@@ -68,16 +77,16 @@ fn recover_corrupt(path: &Path, valid: impl FnOnce(&[u8]) -> bool) -> Result<(),
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(io(e)),
     };
     if !valid(&bytes) {
         let backup = path.with_extension("json.bak");
         match fs::remove_file(&backup) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(io(e)),
         }
-        fs::rename(path, backup).map_err(|e| e.to_string())?;
+        fs::rename(path, backup).map_err(io)?;
     }
     Ok(())
 }
@@ -88,9 +97,12 @@ fn save_tabs(path: &Path, tabs: &[LastTab]) -> Result<(), String> {
     atomic(path, &tabs)
 }
 fn atomic(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    let parent = path.parent().ok_or("Ungültiger Pfad")?;
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec_pretty(value)
+        .map_err(|e| String::from(ui_err("HISTORY_SERIALIZE_FAILED").detail(e)))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| String::from(ui_err("INVALID_PATH")))?;
+    fs::create_dir_all(parent).map_err(io)?;
     let temp = path.with_extension(format!(
         "json.{}.{}.tmp",
         std::process::id(),
@@ -111,13 +123,13 @@ fn atomic(path: &Path, value: &impl Serialize) -> Result<(), String> {
     if created && result.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    result.map_err(|e| e.to_string())
+    result.map_err(io)
 }
 fn validate_target(target: &str) -> Result<(), String> {
     if let Some(value) = target.strip_prefix("telnet://") {
         let parsed = format!("history@{value}").parse::<crate::ssh::SshTarget>()?;
         if parsed.port == 0 {
-            return Err("Ungültiges Telnet-Ziel".into());
+            return Err(ui_err("TELNET_INVALID_TARGET").into());
         }
         return Ok(());
     }
@@ -125,14 +137,16 @@ fn validate_target(target: &str) -> Result<(), String> {
         let (device, baud) = value.rsplit_once('@').unwrap_or((value, "115200"));
         return crate::serial::SerialConfig {
             device: device.into(),
-            baud: baud.parse().map_err(|_| "Ungültige Baudrate")?,
+            baud: baud
+                .parse()
+                .map_err(|_| String::from(ui_err("SERIAL_INVALID_BAUD")))?,
             ..Default::default()
         }
         .validate();
     }
     let parsed = target.parse::<crate::ssh::SshTarget>()?;
     if parsed.user.contains([':', '/', '\\']) || target.chars().any(char::is_control) {
-        return Err("Ungültiges Verbindungsziel".into());
+        return Err(ui_err("CONNECTION_INVALID_TARGET").into());
     }
     Ok(())
 }
@@ -158,18 +172,18 @@ fn prepend(items: &mut Vec<Recent>, item: Recent) {
 }
 #[tauri::command]
 pub fn recent_list(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
-    let _guard = LOCK.lock().map_err(|e| e.to_string())?;
+    let _guard = LOCK.lock().map_err(locked)?;
     Ok(read(&path(&app, "recent.json")?).unwrap_or_default())
 }
 #[tauri::command]
 pub fn recent_add(app: tauri::AppHandle, item: Recent) -> Result<(), String> {
-    let _guard = LOCK.lock().map_err(|e| e.to_string())?;
+    let _guard = LOCK.lock().map_err(locked)?;
     let path = path(&app, "recent.json")?;
     add(&path, item)
 }
 #[tauri::command]
 pub fn recent_clear(app: tauri::AppHandle) -> Result<(), String> {
-    let _guard = LOCK.lock().map_err(|e| e.to_string())?;
+    let _guard = LOCK.lock().map_err(locked)?;
     atomic(
         &path(&app, "recent.json")?,
         &History {
@@ -180,7 +194,7 @@ pub fn recent_clear(app: tauri::AppHandle) -> Result<(), String> {
 }
 #[tauri::command]
 pub fn last_tabs_list(app: tauri::AppHandle) -> Result<Vec<LastTab>, String> {
-    let _guard = LOCK.lock().map_err(|e| e.to_string())?;
+    let _guard = LOCK.lock().map_err(locked)?;
     Ok(fs::read(path(&app, "last-tabs.json")?)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -188,7 +202,7 @@ pub fn last_tabs_list(app: tauri::AppHandle) -> Result<Vec<LastTab>, String> {
 }
 #[tauri::command]
 pub fn last_tabs_save(app: tauri::AppHandle, tabs: Vec<LastTab>) -> Result<(), String> {
-    let _guard = LOCK.lock().map_err(|e| e.to_string())?;
+    let _guard = LOCK.lock().map_err(locked)?;
     for tab in &tabs {
         if let LastTab::Quick { target } = tab {
             validate_target(target)?;

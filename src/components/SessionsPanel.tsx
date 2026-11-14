@@ -1,5 +1,6 @@
 import { keyringErrorText } from "../lib/keyringErrors";
 import { tp, useT } from "../i18n";
+import { errorText } from "../lib/backendError";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { buildSessionTree, collectFolderSessions, deleteSessions, selectSessions, jumpHostHint, searchSessions, sessionLabel, type SavedSession, type SessionFolder } from "../lib/sessions";
 import { KindIcon } from "./KindIcon";
@@ -126,10 +127,10 @@ export function SessionsPanel({ sessions, onConnect, onEdit, onReload, onStatus,
         onReload();
         if (result.deleted.length) onDeleted?.(result.deleted);
         setSelection(previous => ({ ...previous, ids: previous.ids.filter(id => !result.deleted.includes(id)) }));
-        onStatus([result.blocked.length ? t("sessions.deletedBlocked", { deleted: result.deleted.length, blocked: result.blocked.length, items: result.blocked.map(item => `${item.name} (${item.reason})`).join(", ") }) : tp("sessions.deleted", result.deleted.length), ...result.warnings.map(keyringErrorText)].join("; "));
+        onStatus([result.blocked.length ? t("sessions.deletedBlocked", { deleted: result.deleted.length, blocked: result.blocked.length, items: result.blocked.map(item => `${item.name} (${errorText(item.reason)})`).join(", ") }) : tp("sessions.deleted", result.deleted.length), ...result.warnings.map(keyringErrorText)].join("; "));
       }).catch(reason => { onReload(); onStatus(keyringErrorText(reason)); });
     } }} />}
-    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([tp("sessions.imported", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? [])].join("; ")); }} />}
-    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([tp("sessions.imported", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? [])].join("; ")); }} />}
+    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([tp("sessions.imported", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? []).map(errorText)].join("; ")); }} />}
+    {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); onReload(); onStatus([tp("sessions.imported", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? []).map(errorText)].join("; ")); }} />}
   </div>;
 }

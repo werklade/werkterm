@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { errorText } from "../lib/backendError";
 import { useModal } from "./useModal";
 import { t, useT } from "../i18n";
 import {
@@ -47,7 +48,7 @@ function offer(p: UpdateDialogViewProps, info: UpdateInfo, update: AvailableUpda
       <pre className="update-notes" tabIndex={0} aria-labelledby="update-notes-title">{update.notes}</pre>
     </>}
     {action === "install" && restartHints(info.installKind).map(hint => <p key={hint} className="update-note">{hint}</p>)}
-    {action === "blocked" && <><p className="update-note">{info.blockedReason?.trim() || blockedFallback()}</p><p className="update-note">{downloadNote()}</p>{copyField(p, updateDownloadUrl)}</>}
+    {action === "blocked" && <><p className="update-note">{info.blockedReason?.trim() ? errorText(info.blockedReason.trim()) : blockedFallback()}</p><p className="update-note">{downloadNote()}</p>{copyField(p, updateDownloadUrl)}</>}
     {action === "apt" && <><p className="update-note">{aptNote()}</p>{copyField(p, aptCommand)}<p className="update-note">{aptRepoNote()}</p></>}
     {action === "download" && <><p className="update-note">{downloadNote()}</p>{copyField(p, updateDownloadUrl)}</>}
     {p.copyNote && <p role={p.copyFailed ? "alert" : "status"} className={p.copyFailed ? "update-error" : "update-note"}>{p.copyNote}</p>}

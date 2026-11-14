@@ -1,4 +1,5 @@
 use super::{SshManager, ssh_error};
+use crate::ui_error::{ui_code, ui_err};
 use russh_sftp::{
     client::{SftpSession, error::Error},
     protocol::{FileAttributes, OpenFlags, StatusCode},
@@ -22,7 +23,7 @@ pub(super) struct Transfers {
 }
 
 const BLOCK_SIZE: usize = 64 * 1024;
-const CANCELLED: &str = "CANCELLED: Übertragung abgebrochen";
+const CANCELLED: &str = ui_code("CANCELLED");
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +35,7 @@ pub struct TransferProgress {
 
 pub fn validate_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\0']) {
-        Err("Ungültiger Name".into())
+        Err(ui_err("INVALID_NAME").into())
     } else {
         Ok(())
     }
@@ -51,7 +52,7 @@ pub fn remote_join(parent: &str, name: &str) -> Result<String, String> {
 }
 fn validate_path(path: &str) -> Result<(), String> {
     if path.contains('\0') {
-        Err("Ungültiger Pfad".into())
+        Err(ui_err("INVALID_PATH").into())
     } else {
         Ok(())
     }
@@ -59,7 +60,7 @@ fn validate_path(path: &str) -> Result<(), String> {
 pub(super) fn action_path(path: &str) -> Result<String, String> {
     validate_path(path)?;
     if path.is_empty() || path.split('/').any(|part| part == "." || part == "..") {
-        return Err("Ungültiger Pfad".into());
+        return Err(ui_err("INVALID_PATH").into());
     }
     Ok(if path.trim_matches('/').is_empty() {
         "/".into()
@@ -146,12 +147,12 @@ impl SshManager {
         let sudo = session.sudo_sftp.lock().await;
         sudo.clone()
             .or_else(|| session.sftp.get().cloned())
-            .ok_or_else(|| "Nur mit SFTP verfügbar".into())
+            .ok_or_else(|| ui_err("SFTP_ONLY").into())
     }
     async fn begin_transfer(&self, transfer_id: u32) -> Result<watch::Receiver<bool>, String> {
         let mut transfers = self.transfers.lock().await;
         if transfers.active.contains_key(&transfer_id) {
-            return Err("Transfer-ID bereits aktiv".into());
+            return Err(ui_err("TRANSFER_ID_IN_USE").into());
         }
         let (sender, receiver) = watch::channel(transfers.pending_cancel.remove(&transfer_id));
         transfers.active.insert(transfer_id, sender);
@@ -183,7 +184,7 @@ impl SshManager {
             let mut remote = sftp.open(remote_path).await.map_err(ssh_error)?;
             let metadata = remote.metadata().await.map_err(ssh_error)?;
             if !metadata.is_regular() {
-                return Err("Nur Dateien können heruntergeladen werden".into());
+                return Err(ui_err("SFTP_DOWNLOAD_NOT_FILE").into());
             }
             check_cancel(&cancel)?;
             let mut local = tokio::fs::OpenOptions::new()
@@ -250,7 +251,7 @@ impl SshManager {
         let name = local_path
             .file_name()
             .and_then(|name| name.to_str())
-            .ok_or("Ungültiger Name")?;
+            .ok_or(ui_code("INVALID_NAME"))?;
         let target = remote_join(&remote_dir, name)?;
         let sftp = self.action_sftp(id).await?;
         let mut cancel = self.begin_transfer(transfer_id).await?;
@@ -261,34 +262,30 @@ impl SshManager {
                 .map_err(ssh_error)?
                 .is_dir()
             {
-                return Err("DIRECTORY: Ordner-Upload folgt später".into());
+                return Err(ui_err("DIRECTORY").into());
             }
             let mut local = tokio::fs::File::open(&local_path)
                 .await
                 .map_err(ssh_error)?;
             let local_meta = local.metadata().await.map_err(ssh_error)?;
             if local_meta.is_dir() {
-                return Err("DIRECTORY: Ordner-Upload folgt später".into());
+                return Err(ui_err("DIRECTORY").into());
             }
             if !local_meta.is_file() {
-                return Err("Nur reguläre Dateien können hochgeladen werden".into());
+                return Err(ui_err("SFTP_UPLOAD_NOT_FILE").into());
             }
             let previous = existing(&sftp, &target).await?;
             if previous.is_some() && !overwrite {
-                return Err(format!("EXISTS: {name}"));
+                return Err(ui_err("EXISTS").arg("name", name).into());
             }
             if previous
                 .as_ref()
                 .is_some_and(|meta| !meta.is_regular() || meta.is_symlink())
             {
-                return Err("Ziel ist keine reguläre Datei".into());
+                return Err(ui_err("SFTP_TARGET_NOT_FILE").into());
             }
             let permissions = match &previous {
-                Some(meta) => {
-                    meta.permissions
-                        .ok_or("Dateirechte konnten nicht ermittelt werden")?
-                        & 0o7777
-                }
+                Some(meta) => meta.permissions.ok_or(ui_code("PERMISSIONS_UNKNOWN"))? & 0o7777,
                 None => 0o644,
             };
             check_cancel(&cancel)?;
@@ -313,7 +310,7 @@ impl SshManager {
                 Ok(file) => file,
                 Err(error) => {
                     if !overwrite && existing(&sftp, &target).await?.is_some() {
-                        return Err(format!("EXISTS: {name}"));
+                        return Err(ui_err("EXISTS").arg("name", name).into());
                     }
                     return Err(ssh_error(error));
                 }
@@ -439,7 +436,7 @@ impl SshManager {
             || path.trim_matches('/').is_empty()
             || path.split('/').any(|part| part == "." || part == "..")
         {
-            return Err("Ungültiger Löschpfad".into());
+            return Err(ui_err("INVALID_DELETE_PATH").into());
         }
         let sftp = self.action_sftp(id).await?;
         let mut pending = vec![(path, false)];
@@ -472,7 +469,7 @@ mod tests {
     #[test]
     fn names_reject_traversal_and_separators() {
         for name in ["", ".", "..", "a/b", "a\0b"] {
-            assert_eq!(validate_name(name), Err("Ungültiger Name".into()));
+            assert_eq!(validate_name(name), Err("INVALID_NAME".into()));
         }
         for name in ["file.txt", "a b", "ä", "a\\b"] {
             assert!(validate_name(name).is_ok());

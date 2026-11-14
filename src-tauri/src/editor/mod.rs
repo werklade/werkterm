@@ -1,4 +1,5 @@
 use crate::ssh::SshManager;
+use crate::ui_error::{UiError, code_of, ui_code, ui_err};
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,7 +15,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 const MAX_SIZE: u64 = 10 * 1024 * 1024;
-const TOO_LARGE: &str = "TOO_LARGE: Datei größer als 10 MB";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,12 +43,11 @@ pub struct DecodedText {
 pub fn decode(bytes: &[u8]) -> Result<DecodedText, String> {
     check_size(bytes.len() as u64)?;
     if bytes.iter().take(8192).any(|byte| *byte == 0) {
-        return Err("BINARY: Binärdatei".into());
+        return Err(ui_err("BINARY").into());
     }
     let bom = bytes.starts_with(&[0xef, 0xbb, 0xbf]);
     let raw = if bom { &bytes[3..] } else { bytes };
-    let text =
-        std::str::from_utf8(raw).map_err(|_| "ENCODING: Nur UTF-8 wird unterstützt".to_owned())?;
+    let text = std::str::from_utf8(raw).map_err(|_| String::from(ui_err("ENCODING")))?;
     let mut counts = EolCounts::default();
     let mut index = 0;
     while index < raw.len() {
@@ -89,7 +88,7 @@ pub fn encode(text: &str, eol_target: EolKind, bom: bool) -> Result<Vec<u8>, Str
         EolKind::Lf => "\n",
         EolKind::CrLf => "\r\n",
         EolKind::Cr => "\r",
-        _ => return Err("Ungültiges Ziel-Zeilenende".into()),
+        _ => return Err(ui_err("EDITOR_INVALID_EOL").into()),
     };
     let normalized = normalize(text);
     let text = normalized.replace('\n', separator);
@@ -103,13 +102,13 @@ pub fn encode(text: &str, eol_target: EolKind, bom: bool) -> Result<Vec<u8>, Str
 }
 fn check_size(size: u64) -> Result<(), String> {
     if size > MAX_SIZE {
-        Err(TOO_LARGE.into())
+        Err(ui_err("TOO_LARGE").into())
     } else {
         Ok(())
     }
 }
 fn io_error(error: impl std::fmt::Display) -> String {
-    format!("Dateizugriff fehlgeschlagen: {error}")
+    UiError::new("FILE_ACCESS_FAILED").detail(error).into()
 }
 
 pub enum DocumentSource {
@@ -151,7 +150,7 @@ impl Documents {
         let entry = self
             .entries
             .remove(&doc_id)
-            .ok_or("Dokument wurde nicht gefunden")?;
+            .ok_or(ui_code("EDITOR_NOT_FOUND"))?;
         if let Some(path) = entry.cache_path {
             match fs::remove_file(&path) {
                 Ok(()) => {}
@@ -280,7 +279,7 @@ fn cache_dir(_: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(io_error)?
         .as_ref()
         .map(|cache| cache.path.clone())
-        .ok_or("Editor-Cache ist nicht initialisiert".into())
+        .ok_or(ui_err("EDITOR_CACHE_MISSING").into())
 }
 pub fn clear_cache() {
     if let Ok(mut cache) = INSTANCE_CACHE.lock()
@@ -308,11 +307,12 @@ fn local_identity(meta: &fs::Metadata) -> LocalIdentity {
     }
 }
 fn write_failed(path: Option<&Path>) -> String {
-    format!(
-        "WRITE_FAILED: Speichern fehlgeschlagen – die Datei ist möglicherweise unvollständig. Ihr Inhalt ist im Editor erhalten; bitte erneut speichern. Sicherung: {}",
-        path.map(|path| path.display().to_string())
-            .unwrap_or_else(|| "nicht verfügbar".into())
-    )
+    match path {
+        Some(path) => UiError::new("WRITE_FAILED")
+            .arg("backup", path.display().to_string())
+            .into(),
+        None => ui_err("WRITE_FAILED_NO_BACKUP").into(),
+    }
 }
 fn file_name(path: &str) -> String {
     // POSIX remote names must not be interpreted as Windows drive prefixes.
@@ -348,15 +348,13 @@ fn local_stamp(meta: &fs::Metadata) -> SaveResult {
 }
 fn remote_stamp(meta: &FileAttributes) -> Result<SaveResult, String> {
     Ok(SaveResult {
-        size: meta
-            .size
-            .ok_or("Dateigröße konnte nicht ermittelt werden")?,
+        size: meta.size.ok_or(ui_code("FILE_SIZE_UNKNOWN"))?,
         mtime: meta.mtime.map(u64::from),
     })
 }
 fn check_conflict(entry: &DocumentEntry, current: &SaveResult, force: bool) -> Result<(), String> {
     if !force && (entry.mtime != current.mtime || entry.size != current.size) {
-        Err("CONFLICT: Datei wurde zwischenzeitlich geändert".into())
+        Err(ui_err("CONFLICT").into())
     } else {
         Ok(())
     }
@@ -365,7 +363,7 @@ fn read_local(path: &Path) -> Result<(Vec<u8>, fs::Metadata), String> {
     let mut file = fs::File::open(path).map_err(io_error)?;
     let meta = file.metadata().map_err(io_error)?;
     if !meta.is_file() {
-        return Err("Nur reguläre Dateien können bearbeitet werden".into());
+        return Err(ui_err("EDITOR_NOT_FILE").into());
     }
     check_size(meta.len())?;
     let mut bytes = Vec::new();
@@ -403,7 +401,7 @@ async fn load(
             let sftp = ssh.editor_sftp(*session_id, *sudo).await?;
             let meta = sftp.metadata(path.clone()).await.map_err(io_error)?;
             if !meta.is_regular() {
-                return Err("Nur reguläre Dateien können bearbeitet werden".into());
+                return Err(ui_err("EDITOR_NOT_FILE").into());
             }
             let stamp = remote_stamp(&meta)?;
             check_size(stamp.size)?;
@@ -462,7 +460,7 @@ fn next_id(docs: &mut Documents) -> Result<u32, String> {
     docs.next_id = docs
         .next_id
         .checked_add(1)
-        .ok_or("Keine Dokument-IDs mehr verfügbar")?;
+        .ok_or(ui_code("EDITOR_IDS_EXHAUSTED"))?;
     Ok(docs.next_id)
 }
 
@@ -475,7 +473,7 @@ pub async fn editor_open_remote(
     path: String,
 ) -> Result<EditorDocument, String> {
     if path.is_empty() || path.contains('\0') {
-        return Err("Ungültiger Pfad".into());
+        return Err(ui_err("INVALID_PATH").into());
     }
     let mut docs = docs.documents.lock().await;
     let doc_id = next_id(&mut docs)?;
@@ -519,7 +517,7 @@ pub async fn editor_open_local(
     let local_path = match wsl_distro {
         Some(distro) => {
             if !cfg!(windows) {
-                return Err("WSL ist nur unter Windows verfügbar".into());
+                return Err(ui_err("WSL_WINDOWS_ONLY").into());
             }
             crate::local_fs::wsl_unc_path(&distro, &path)?
         }
@@ -553,7 +551,7 @@ pub async fn editor_reload(
     let entry = docs
         .entries
         .get_mut(&doc_id)
-        .ok_or("Dokument wurde nicht gefunden")?;
+        .ok_or(ui_code("EDITOR_NOT_FOUND"))?;
     load(entry, doc_id, &ssh).await
 }
 #[tauri::command]
@@ -575,7 +573,7 @@ pub async fn editor_save(
     let entry = docs
         .entries
         .get_mut(&doc_id)
-        .ok_or("Dokument wurde nicht gefunden")?;
+        .ok_or(ui_code("EDITOR_NOT_FOUND"))?;
     save_entry(entry, &ssh, &bytes, force).await
 }
 
@@ -615,9 +613,7 @@ async fn save_entry(
                 let written = async {
                     let before = remote.metadata().await.map_err(io_error)?;
                     check_conflict(entry, &remote_stamp(&before)?, force)?;
-                    let permissions = before
-                        .permissions
-                        .ok_or("Dateirechte konnten nicht ermittelt werden")?;
+                    let permissions = before.permissions.ok_or(ui_code("PERMISSIONS_UNKNOWN"))?;
                     remote.write_all(bytes).await.map_err(io_error)?;
                     remote.flush().await.map_err(io_error)?;
                     remote
@@ -644,7 +640,7 @@ async fn save_entry(
     }
     .await;
     let stamp = result.map_err(|error| {
-        if error.starts_with("CONFLICT:") || error.starts_with("SUDO_INACTIVE:") {
+        if matches!(code_of(&error), Some("CONFLICT" | "SUDO_INACTIVE")) {
             error
         } else {
             write_failed(entry.cache_path.as_deref())
@@ -665,7 +661,7 @@ fn check_local_conflict(
         && (entry.local_modified != metadata.modified().ok()
             || entry.local_identity.as_ref() != Some(&local_identity(metadata)))
     {
-        return Err("CONFLICT: Datei wurde zwischenzeitlich geändert".into());
+        return Err(ui_err("CONFLICT").into());
     }
     Ok(())
 }
@@ -787,25 +783,19 @@ mod tests {
     }
     #[test]
     fn encoding_binary_limits_and_defensive_normalization() {
-        assert_eq!(
-            decode(LATIN1).unwrap_err(),
-            "ENCODING: Nur UTF-8 wird unterstützt"
-        );
-        assert_eq!(decode(BINARY).unwrap_err(), "BINARY: Binärdatei");
-        assert_eq!(
-            decode(&[0xef, 0xbb, 0xbf, 0xe4]).unwrap_err(),
-            "ENCODING: Nur UTF-8 wird unterstützt"
-        );
+        assert_eq!(decode(LATIN1).unwrap_err(), "ENCODING");
+        assert_eq!(decode(BINARY).unwrap_err(), "BINARY");
+        assert_eq!(decode(&[0xef, 0xbb, 0xbf, 0xe4]).unwrap_err(), "ENCODING");
         assert_eq!(
             decode(&vec![b'a'; MAX_SIZE as usize + 1]).unwrap_err(),
-            TOO_LARGE
+            "TOO_LARGE"
         );
         assert!(decode(&vec![b'a'; MAX_SIZE as usize]).is_ok());
         let mut bytes = vec![b'a'; 8193];
         bytes[8192] = 0;
         assert!(decode(&bytes).is_ok());
         bytes[8191] = 0;
-        assert_eq!(decode(&bytes).unwrap_err(), "BINARY: Binärdatei");
+        assert_eq!(decode(&bytes).unwrap_err(), "BINARY");
         assert_eq!(
             encode("a\r\nb\rc\n", EolKind::CrLf, true).unwrap(),
             b"\xef\xbb\xbfa\r\nb\r\nc\r\n"
@@ -936,7 +926,7 @@ mod tests {
             save_entry(&mut entry, &ssh, b"replacement", false)
                 .await
                 .unwrap_err(),
-            "CONFLICT: Datei wurde zwischenzeitlich geändert"
+            "CONFLICT"
         );
         assert_eq!(fs::read(&file.path).unwrap(), b"externally changed");
         save_entry(&mut entry, &ssh, b"forced", true).await.unwrap();
@@ -966,7 +956,7 @@ mod tests {
         };
         assert_eq!(
             load(&mut entry, 1, &ssh).await.unwrap_err(),
-            "SESSION_CLOSED: SSH-Sitzung beendet"
+            "SESSION_CLOSED"
         );
         assert_eq!(
             save_entry(&mut entry, &ssh, b"text", false)
@@ -998,14 +988,14 @@ mod tests {
             save_entry(&mut entry, &ssh, b"unsaved edits", false)
                 .await
                 .unwrap_err(),
-            "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv"
+            "SUDO_INACTIVE"
         );
         assert_eq!(entry.baseline, baseline);
         assert_eq!(entry.permissions, Some(0o640));
         assert_eq!(entry.mtime, Some(17));
         assert_eq!(
             load(&mut entry, 1, &ssh).await.unwrap_err(),
-            "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv"
+            "SUDO_INACTIVE"
         );
     }
     #[tokio::test]
@@ -1028,7 +1018,7 @@ mod tests {
             save_entry(&mut entry, &ssh, b"new", false)
                 .await
                 .unwrap_err(),
-            "CONFLICT: Datei wurde zwischenzeitlich geändert"
+            "CONFLICT"
         );
         assert_eq!(fs::read(&file.path).unwrap(), CRLF);
     }
@@ -1055,8 +1045,9 @@ mod tests {
         let path = Path::new("known-backup");
         assert_eq!(
             write_failed(Some(path)),
-            "WRITE_FAILED: Speichern fehlgeschlagen – die Datei ist möglicherweise unvollständig. Ihr Inhalt ist im Editor erhalten; bitte erneut speichern. Sicherung: known-backup"
+            r#"WRITE_FAILED: {"args":{"backup":"known-backup"}}"#
         );
+        assert_eq!(write_failed(None), "WRITE_FAILED_NO_BACKUP");
     }
     #[tokio::test]
     async fn opened_handle_conflict_never_writes_and_short_save_truncates() {
@@ -1067,7 +1058,7 @@ mod tests {
         let mut opened = fs::OpenOptions::new().write(true).open(&file.path).unwrap();
         fs::write(&file.path, b"external content").unwrap();
         let error = save_local_handle(&entry, &mut opened, b"must not write", false).unwrap_err();
-        assert!(error.starts_with("CONFLICT:"));
+        assert_eq!(error, "CONFLICT");
         assert_eq!(fs::read(&file.path).unwrap(), b"external content");
         assert_eq!(fs::read(entry.cache_path.as_ref().unwrap()).unwrap(), CRLF);
         // A fresh handle starts at byte zero and truncates only after writing.
@@ -1174,7 +1165,7 @@ mod tests {
             save_entry(&mut entry, &ssh, b"bad", false)
                 .await
                 .unwrap_err()
-                .starts_with("CONFLICT:")
+                == "CONFLICT"
         );
         assert_eq!(fs::read(&file.path).unwrap(), CRLF);
     }

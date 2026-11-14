@@ -1,3 +1,4 @@
+use crate::ui_error::{UiError, ui_code, ui_err};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -42,20 +43,26 @@ pub struct ShellSpec {
 pub enum PtyError {
     UnknownSession(u32),
     InvalidSize,
-    UnsupportedShell(String),
+    /// Code of the reason why the shell cannot be started.
+    UnsupportedShell(&'static str),
     Poisoned,
     IdExhausted,
-    Operation(String),
+    Operation(UiError),
 }
 
 impl fmt::Display for PtyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownSession(id) => write!(f, "Unbekannte PTY-Sitzung: {id}"),
-            Self::InvalidSize => f.write_str("PTY-Abmessungen müssen größer als null sein"),
-            Self::UnsupportedShell(message) | Self::Operation(message) => f.write_str(message),
-            Self::Poisoned => f.write_str("PTY-Sitzungssperre ist beschädigt"),
-            Self::IdExhausted => f.write_str("PTY-Sitzungsnummern sind ausgeschöpft"),
+            Self::UnknownSession(id) => write!(
+                f,
+                "{}",
+                UiError::new("PTY_UNKNOWN_SESSION").arg("id", id.to_string())
+            ),
+            Self::InvalidSize => write!(f, "{}", ui_err("TERMINAL_SIZE_ZERO")),
+            Self::UnsupportedShell(code) => f.write_str(code),
+            Self::Operation(error) => write!(f, "{error}"),
+            Self::Poisoned => write!(f, "{}", ui_err("PTY_LOCKED")),
+            Self::IdExhausted => write!(f, "{}", ui_err("PTY_IDS_EXHAUSTED")),
         }
     }
 }
@@ -63,7 +70,7 @@ impl fmt::Display for PtyError {
 impl std::error::Error for PtyError {}
 
 fn operation(error: impl fmt::Display) -> PtyError {
-    PtyError::Operation(error.to_string())
+    PtyError::Operation(UiError::new("PTY_FAILED").detail(error))
 }
 
 const POWERSHELL_OSC7: &str = r#"$Global:WerktermOriginalPrompt = $function:prompt; function Global:prompt { $p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath; if ($p) { $uri = [System.Uri]::new($p); $u = $uri.AbsolutePath; $h = $env:COMPUTERNAME; if ($uri.IsUnc) { $u = '//' + $uri.Host + $u }; if (-not $u.StartsWith('/')) { $u = '/' + $u }; [Console]::Write(([char]27 + ']7;file://' + $h + $u + [char]7)) }; if ($Global:WerktermOriginalPrompt) { & $Global:WerktermOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " } }"#;
@@ -98,9 +105,7 @@ pub fn resolve_shell(
             ("wsl.exe".to_owned(), vec![])
         }
         (Platform::Windows, ShellKind::Wsl) => {
-            return Err(PtyError::UnsupportedShell(
-                "wsl.exe wurde nicht im PATH gefunden".to_owned(),
-            ));
+            return Err(PtyError::UnsupportedShell(ui_code("PTY_WSL_NOT_FOUND")));
         }
         (Platform::Unix, ShellKind::Local) => (
             env_shell
@@ -109,9 +114,7 @@ pub fn resolve_shell(
             vec![],
         ),
         (Platform::Unix, ShellKind::Wsl) => {
-            return Err(PtyError::UnsupportedShell(
-                "WSL ist nur unter Windows verfügbar".to_owned(),
-            ));
+            return Err(PtyError::UnsupportedShell(ui_code("WSL_WINDOWS_ONLY")));
         }
     };
     let env = Vec::new();
@@ -167,14 +170,14 @@ struct UnixControl {
 }
 
 #[cfg(unix)]
-fn signal_shell_group(pid: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> {
+fn signal_shell_group(pid: libc::pid_t, signal: libc::c_int) -> Result<(), PtyError> {
     // The unreaped child owns this PID. Never target our own or an unrelated group.
     unsafe {
         if pid <= 1 || libc::getpgid(pid) != pid || libc::getpgrp() == pid {
-            return Err(std::io::Error::other("Invalid PTY shell process group"));
+            return Err(PtyError::Operation(ui_err("PTY_INVALID_GROUP")));
         }
         if libc::kill(-pid, signal) == -1 {
-            return Err(std::io::Error::last_os_error());
+            return Err(operation(std::io::Error::last_os_error()));
         }
     }
     Ok(())
@@ -276,7 +279,7 @@ impl PtyManager {
             let fd = pair
                 .master
                 .as_raw_fd()
-                .ok_or_else(|| operation("Missing PTY FD"))?;
+                .ok_or_else(|| PtyError::Operation(ui_err("PTY_NO_FD")))?;
             // Duplicate ownership: dropping the session cannot invalidate the reader FD.
             let owned = unsafe { BorrowedFd::borrow_raw(fd) }
                 .try_clone_to_owned()
@@ -422,9 +425,7 @@ impl PtyManager {
             let _ = child.wait();
             let removed = self.sessions()?.remove(&id);
             drop(removed);
-            return Err(PtyError::Operation(
-                "PTY-Warteprozess wurde getrennt".to_owned(),
-            ));
+            return Err(PtyError::Operation(ui_err("PTY_WAITER_LOST")));
         }
         Ok(id)
     }
@@ -718,7 +719,7 @@ mod tests {
             resolve_shell(ShellKind::Wsl, Platform::Unix, None, false, |_| true)
                 .unwrap_err()
                 .to_string(),
-            "WSL ist nur unter Windows verfügbar"
+            "WSL_WINDOWS_ONLY"
         );
     }
 
@@ -1001,7 +1002,7 @@ pub fn apply_start_command(
         return Ok(());
     }
     if !cfg!(target_os = "linux") {
-        return Err("Systemwerkzeuge sind nur unter Linux verfügbar".into());
+        return Err(ui_err("SYSTEM_TOOLS_LINUX_ONLY").into());
     }
     match command {
         StartCommand::Root => {

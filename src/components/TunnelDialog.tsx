@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../i18n";
 import { useModal } from "./useModal";
@@ -12,7 +13,7 @@ export function TunnelDialog({ sessions, tunnels, statuses, reload, start, onClo
   const t = useT();
   const [deleting, setDeleting] = useState<Tunnel | null>(null);
   const dialog = useModal(); const [editing, setEditing] = useState<Tunnel | null>(null); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  const perform = async (operation: () => Promise<unknown>) => { setBusy(true); setError(""); try { await operation(); await reload(); } catch (e) { setError(String(e)); } finally { setBusy(false); } };
+  const perform = async (operation: () => Promise<unknown>) => { setBusy(true); setError(""); try { await operation(); await reload(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); } };
   const patch = (values: Partial<Tunnel>) => setEditing(current => current ? { ...current, ...values } : current);
   const validation = editing ? validateTunnel(editing, sessions) : "";
   return <dialog ref={dialog} className="ssh-dialog tunnel-dialog" aria-modal="true" aria-labelledby="tunnels-title" onCancel={e => { e.preventDefault(); onClose(); }}>

@@ -1,3 +1,4 @@
+use crate::ui_error::{UiError, code_of, ui_err};
 use crate::{local_fs::wsl_unc_path, ssh::SshManager};
 use russh_sftp::{
     client::{RawSftpSession, SftpSession, error::Error as SftpError},
@@ -58,11 +59,11 @@ pub struct Comparison {
 }
 
 fn err(e: impl std::fmt::Display) -> String {
-    e.to_string()
+    UiError::new("FILE_ACCESS_FAILED").detail(e).into()
 }
 fn check(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
-        Err("Vergleich abgebrochen".into())
+        Err(ui_err("FOLDER_DIFF_CANCELLED").into())
     } else {
         Ok(())
     }
@@ -71,15 +72,15 @@ impl Source {
     fn local(&self) -> Result<PathBuf, String> {
         match &self.wsl_distro {
             Some(d) if cfg!(windows) => wsl_unc_path(d, &self.path),
-            Some(_) => Err("WSL ist nur unter Windows verfügbar".into()),
+            Some(_) => Err(ui_err("WSL_WINDOWS_ONLY").into()),
             None => Ok(PathBuf::from(&self.path)),
         }
     }
     async fn sftp(&self, ssh: &SshManager) -> Result<Option<Arc<SftpSession>>, String> {
         match self.session_id {
             Some(id) => ssh.editor_sftp(id, false).await.map(Some).map_err(|e| {
-                if e == "Nur mit SFTP verfügbar" {
-                    "Ordnervergleich benötigt SFTP".into()
+                if code_of(&e) == Some("SFTP_ONLY") {
+                    ui_err("FOLDER_DIFF_SFTP").into()
                 } else {
                     e
                 }
@@ -104,7 +105,7 @@ fn local_list(
 ) -> Result<Listing, String> {
     let root = source.local()?;
     if !fs::symlink_metadata(&root).map_err(err)?.is_dir() {
-        return Err("Quelle ist kein Ordner (Symlinks werden nicht verfolgt)".into());
+        return Err(ui_err("FOLDER_DIFF_NOT_DIR").into());
     }
     let mut result = Listing::default();
     let mut stack = vec![(PathBuf::new(), 0)];
@@ -169,7 +170,7 @@ async fn list(
     };
     let root = sftp.lstat(source.path.clone()).await.map_err(err)?.attrs;
     if root.is_symlink() || !root.is_dir() {
-        return Err("Quelle ist kein Ordner (Symlinks werden nicht verfolgt)".into());
+        return Err(ui_err("FOLDER_DIFF_NOT_DIR").into());
     }
     let mut result = Listing::default();
     let mut stack = vec![(String::new(), 0)];
@@ -197,7 +198,7 @@ async fn list(
                         continue;
                     }
                     if name.contains('/') || name.contains('\0') {
-                        return Err("Ungültiger SFTP-Dateiname".into());
+                        return Err(ui_err("SFTP_INVALID_NAME").into());
                     }
                     if result.entries.len() >= MAX_ENTRIES {
                         result.truncated = true;
@@ -273,7 +274,7 @@ async fn reader(source: &Source, sftp: Option<&SftpSession>, path: &str) -> Resu
             .map_err(err)?
             .is_regular()
         {
-            return Err("Dateityp wurde verändert".into());
+            return Err(ui_err("FOLDER_DIFF_TYPE_CHANGED").into());
         }
         Ok(Reader::Remote(Box::new(
             sftp.open(path).await.map_err(err)?,
@@ -281,7 +282,7 @@ async fn reader(source: &Source, sftp: Option<&SftpSession>, path: &str) -> Resu
     } else {
         let path = source.local()?.join(path);
         if !fs::symlink_metadata(&path).map_err(err)?.is_file() {
-            return Err("Dateityp wurde verändert".into());
+            return Err(ui_err("FOLDER_DIFF_TYPE_CHANGED").into());
         }
         Ok(Reader::Local(fs::File::open(path).map_err(err)?))
     }
@@ -322,7 +323,7 @@ async fn equal(
         progress.bytes += (n + m) as u64;
         let _ = channel.send(progress.clone());
         if n != length || m != length {
-            return Err("Datei wurde während des Vergleichs verändert".into());
+            return Err(ui_err("FOLDER_DIFF_FILE_CHANGED").into());
         }
         if left[..n] != right[..m] {
             return Ok(false);
@@ -332,7 +333,7 @@ async fn equal(
     check(cancel)?;
     // Detect growth beyond the listed size without reading unbounded input.
     if a.block(&mut left[..1]).await? != 0 || b.block(&mut right[..1]).await? != 0 {
-        return Err("Datei wurde während des Vergleichs verändert".into());
+        return Err(ui_err("FOLDER_DIFF_FILE_CHANGED").into());
     }
     Ok(true)
 }
@@ -400,7 +401,7 @@ pub async fn folder_diff_compare(
     {
         let mut jobs = JOBS.lock().unwrap();
         if jobs.contains_key(&token) {
-            return Err("Vergleich läuft bereits".into());
+            return Err(ui_err("FOLDER_DIFF_RUNNING").into());
         }
         jobs.insert(token.clone(), cancel.clone());
     }
@@ -459,7 +460,7 @@ pub async fn folder_diff_compare(
     };
     tokio::select! {
         result = operation => result,
-        _ = async { while !cancel.load(Ordering::Relaxed) { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } } => Err("Vergleich abgebrochen".into()),
+        _ = async { while !cancel.load(Ordering::Relaxed) { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } } => Err(ui_err("FOLDER_DIFF_CANCELLED").into()),
     }
 }
 

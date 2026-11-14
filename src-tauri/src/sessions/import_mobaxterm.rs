@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{ImportCandidate, ImportGateway, ImportPreview, SavedSession};
+use crate::ui_error::ui_err;
 
 pub struct ImportBases {
     pub home: PathBuf,
@@ -119,10 +120,12 @@ pub fn warn_unmapped_gateways(preview: &mut ImportPreview, sessions: &[SavedSess
                 })
                 .count();
             if existing + imported != 1 {
-                preview.warnings.push(format!(
-                    "Gateway {} für {} nicht zugeordnet",
-                    gateway.host, candidate.name
-                ));
+                preview.warnings.push(
+                    ui_err("IMPORT_GATEWAY_UNMAPPED")
+                        .arg("host", &gateway.host)
+                        .arg("name", &candidate.name)
+                        .into(),
+                );
             }
         }
     }
@@ -160,7 +163,11 @@ pub fn parse(text: &str, bases: &ImportBases) -> Result<ImportPreview, String> {
         let mut parts = value.split('#');
         if parts.next() != Some("") || parts.next() != Some("109") {
             result.skipped += 1;
-            result.warnings.push(format!("Nicht belegtes MobaXterm-Sitzungsformat für {name} wurde übersprungen (Telnet/Seriell werden nicht geraten)"));
+            result.warnings.push(
+                ui_err("MOBAXTERM_FORMAT_SKIPPED")
+                    .arg("name", name.trim())
+                    .into(),
+            );
             continue;
         }
         let Some(payload) = parts.next() else {
@@ -169,9 +176,11 @@ pub fn parse(text: &str, bases: &ImportBases) -> Result<ImportPreview, String> {
         };
         if payload.split('%').next() != Some("0") {
             result.skipped += 1;
-            result.warnings.push(format!(
-                "Nicht belegter MobaXterm-Sitzungstyp für {name} wurde übersprungen"
-            ));
+            result.warnings.push(
+                ui_err("MOBAXTERM_TYPE_SKIPPED")
+                    .arg("name", name.trim())
+                    .into(),
+            );
             continue;
         }
         let fields: Vec<_> = payload.split('%').skip(1).collect();
@@ -188,7 +197,7 @@ pub fn parse(text: &str, bases: &ImportBases) -> Result<ImportPreview, String> {
             result.skipped += 1;
             result
                 .warnings
-                .push("Ungültiger MobaXterm-SSH-Eintrag wurde übersprungen".into());
+                .push(ui_err("MOBAXTERM_INVALID_ENTRY").into());
             continue;
         }
         let optional = |index: usize| {
@@ -203,10 +212,12 @@ pub fn parse(text: &str, bases: &ImportBases) -> Result<ImportPreview, String> {
                 result.gateways.insert(key.clone(), gateway);
             }
             Ok(None) => (),
-            Err(host) => result.warnings.push(format!(
-                "Gateway {host} für {} nicht zugeordnet (unbekanntes Format)",
-                name.trim()
-            )),
+            Err(host) => result.warnings.push(
+                ui_err("IMPORT_GATEWAY_FORMAT")
+                    .arg("host", host)
+                    .arg("name", name.trim())
+                    .into(),
+            ),
         }
         result.candidates.push(ImportCandidate {
             key,
@@ -274,11 +285,11 @@ mod tests {
         assert!(preview.warnings.is_empty());
         preview.candidates.pop();
         warn_unmapped_gateways(&mut preview, &[]);
-        assert_eq!(
-            preview.warnings,
-            ["Gateway gateway.test für Target nicht zugeordnet"]
-        );
+        assert_eq!(preview.warnings, [UNMAPPED]);
     }
+
+    const UNMAPPED: &str =
+        r#"IMPORT_GATEWAY_UNMAPPED: {"args":{"host":"gateway.test","name":"Target"}}"#;
 
     #[test]
     fn rejects_uncertain_gateway_formats_without_guessing_defaults() {
@@ -296,7 +307,7 @@ mod tests {
                 preview
                     .warnings
                     .iter()
-                    .any(|w| w.contains("nicht zugeordnet"))
+                    .any(|w| w.starts_with("IMPORT_GATEWAY_FORMAT:"))
             );
         }
         let preview = parse(&gateway_fixture("", "22", ""), &bases()).unwrap();
@@ -312,10 +323,7 @@ mod tests {
         );
         let mut preview = parse(&text, &bases()).unwrap();
         warn_unmapped_gateways(&mut preview, &[]);
-        assert_eq!(
-            preview.warnings,
-            ["Gateway gateway.test für Target nicht zugeordnet"]
-        );
+        assert_eq!(preview.warnings, [UNMAPPED]);
     }
 
     #[test]

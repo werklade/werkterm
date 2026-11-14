@@ -1,6 +1,7 @@
 use super::DirEntry;
+use crate::ui_error::ui_code;
 
-pub const UNSUPPORTED: &str = "Server unterstützt weder SFTP noch GNU ls (--time-style)";
+pub const UNSUPPORTED: &str = ui_code("SSH_LS_UNSUPPORTED");
 
 fn token(input: &mut &str) -> Result<String, String> {
     *input = input.trim_start();

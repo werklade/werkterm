@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { errorText } from "../lib/backendError";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { currentLocale, t as translate, tp, useT, type TextKey } from "../i18n";
 import { backendSource, categories, categoryLabel, mergeFolders, selectRows, swapPair, type FolderPair, type FolderResult, type FolderRow, type SortColumn } from "../lib/folderDiff";
@@ -29,7 +30,7 @@ export function FolderDiffView({ initial, onOpen, onTitle }: { initial: FolderPa
     cancelJob.current = abort;
     setBusy(true); setError(""); setData(null); setProgress({ bytes: 0, files: 0, total: 0 });
     const channel = new Channel<Progress>(); channel.onmessage = p => { registered = true; if (cancelled) abort(); if (alive) setProgress(p); };
-    void invoke<FolderResult>("folder_diff_compare", { left: backendSource(pair.sources[0]), right: backendSource(pair.sources[1]), ...pair.options, token, onProgress: channel }).then(result => { if (alive) setData(result); }).catch(reason => { if (alive) setError(String(reason)); }).finally(() => { if (alive) { setBusy(false); cancelJob.current = () => {}; } });
+    void invoke<FolderResult>("folder_diff_compare", { left: backendSource(pair.sources[0]), right: backendSource(pair.sources[1]), ...pair.options, token, onProgress: channel }).then(result => { if (alive) setData(result); }).catch(reason => { if (alive) setError(errorText(reason)); }).finally(() => { if (alive) { setBusy(false); cancelJob.current = () => {}; } });
     return () => { alive = false; abort(); };
   }, [pair, reload]);
   const rows = useMemo(() => data ? mergeFolders(data) : [], [data]);
@@ -37,7 +38,7 @@ export function FolderDiffView({ initial, onOpen, onTitle }: { initial: FolderPa
   const counts = useMemo(() => { const result = Object.fromEntries(categories.map(c => [c, 0])); for (const row of rows) result[row.result]++; return result; }, [rows]);
   const start = Math.max(0, Math.min(Math.floor(scroll / 32) - 5, selected.length - 1));
   const visible = selected.slice(start, start + Math.ceil(height / 32) + 12);
-  const open = (row: FolderRow) => { if (row.left?.kind !== "file" || row.right?.kind !== "file") return; void onOpen(pair.sources.map(source => ({ ...source, path: childPath(source.path, row.path) })) as [DiffSource, DiffSource]).catch(reason => setError(String(reason))); };
+  const open = (row: FolderRow) => { if (row.left?.kind !== "file" || row.right?.kind !== "file") return; void onOpen(pair.sources.map(source => ({ ...source, path: childPath(source.path, row.path) })) as [DiffSource, DiffSource]).catch(reason => setError(errorText(reason))); };
   return <section className="folder-diff" aria-label={t("folderDiff.title")}>
     <div className="folder-diff-toolbar"><button disabled={busy} onClick={() => setReload(n => n + 1)}>{t("diff.reload")}</button><button disabled={busy} onClick={() => { const swapped = swapPair(pair); setPair(swapped); onTitle?.(swapped.sources); }}>{t("diff.swap")}</button>
       <label><input type="checkbox" disabled={busy} checked={pair.options.recursive} onChange={e => setPair({ ...pair, options: { ...pair.options, recursive: e.target.checked } })} />{t("diff.recursive")}</label>

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { BrowserTab } from "../components/FileBrowser";
 import type { EditorDocument } from "./editorTypes";
 import { t } from "../i18n";
+import { errorCode, errorText } from "./backendError";
 export interface DiffSource { tab: BrowserTab; path: string }
 export interface DiffPair { sources: [DiffSource, DiffSource]; documents: [EditorDocument, EditorDocument] }
 export const fileName = (path: string) => path.split(/[\\/]/).pop() || path;
@@ -37,10 +38,9 @@ export function comparisonSources(marked: DiffSource | null, next: DiffSource): 
 }
 export const sourceLabel = ({ tab, path }: DiffSource) => `${tab.kind === "ssh" ? tab.target ?? tab.title : tab.kind === "wsl" ? `WSL (${tab.cwd?.host ?? ""})` : t("diff.source.local")}:${path}`;
 export function diffError(reason: unknown) {
-  const message = reason instanceof Error ? reason.message : String(reason);
-  const code = message.split(":")[0];
+  const code = errorCode(reason);
   if (code === "BINARY" || code === "TOO_LARGE" || code === "ENCODING" || code === "SESSION_CLOSED") return t(`diff.error.${code}`);
-  return t("diff.error.failed", { message });
+  return t("diff.error.failed", { message: errorText(reason) });
 }
 export async function loadDiffDocument({ tab, path }: DiffSource): Promise<EditorDocument> {
   if (tab.exited || (tab.kind === "ssh" && tab.sessionId === undefined)) throw new Error("SESSION_CLOSED:");

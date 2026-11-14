@@ -397,11 +397,11 @@ pub async fn ssh_monitor_start(
         let _ = task.done.await;
     }
     if session.monitor_closed.load(Ordering::Acquire) {
-        return Err("SSH-Sitzung beendet".into());
+        return Err(crate::ui_error::ui_err("SSH_SESSION_ENDED").into());
     }
     let mut channel = tokio::time::timeout(PHASE_TIMEOUT, session.handle.channel_open_session())
         .await
-        .map_err(|_| "Monitoring: Zeitüberschreitung")?
+        .map_err(|_| crate::ui_error::ui_code("MONITOR_TIMEOUT"))?
         .map_err(ssh_error)?;
     let setup = tokio::time::timeout(PHASE_TIMEOUT, async {
         channel
@@ -413,11 +413,11 @@ pub async fn ssh_monitor_start(
     .await;
     if !matches!(setup, Ok(Ok(()))) {
         let _ = tokio::time::timeout(PHASE_TIMEOUT, channel.close()).await;
-        return Err("Monitoring-Kanal abgelehnt".into());
+        return Err(crate::ui_error::ui_err("MONITOR_REJECTED").into());
     }
     if session.monitor_closed.load(Ordering::Acquire) {
         let _ = tokio::time::timeout(PHASE_TIMEOUT, channel.close()).await;
-        return Err("SSH-Sitzung beendet".into());
+        return Err(crate::ui_error::ui_err("SSH_SESSION_ENDED").into());
     }
     let (stop, mut stopped) = oneshot::channel();
     let done = tokio::spawn(async move {

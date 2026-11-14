@@ -1,3 +1,4 @@
+import { errorText } from "./backendError";
 import { t } from "../i18n";
 import { cachedSettingsText, interpretLoaded, mergeSettings, normalizeSettings, saveSettings, serializeSettings, type Settings } from "./settings";
 import { isSettingsConflict, settingsLoadRaw, settingsSaveRaw, type FileStamp, type LoadedSettingsFile } from "./dataDir";
@@ -93,7 +94,7 @@ export class SettingsSync {
   async load(options: { migrate?: boolean } = {}): Promise<Settings | null> {
     if (this.locked) return null;
     let file: LoadedSettingsFile | null;
-    try { file = await this.io.load(); } catch (reason) { return this.fail(String(reason)); }
+    try { file = await this.io.load(); } catch (reason) { return this.fail(errorText(reason)); }
     return this.adopt(file, options.migrate ?? false);
   }
 
@@ -101,7 +102,7 @@ export class SettingsSync {
   async reloadExternal(): Promise<Settings | null> {
     if (this.locked || this.hasPending()) return null;
     let file: LoadedSettingsFile | null;
-    try { file = await this.io.load(); } catch (reason) { return this.fail(String(reason)); }
+    try { file = await this.io.load(); } catch (reason) { return this.fail(errorText(reason)); }
     if (this.locked || this.hasPending()) return null;
     return this.adopt(file, false);
   }
@@ -149,7 +150,7 @@ export class SettingsSync {
       this.hooks.onSaved?.(stamp);
     } catch (reason) {
       if (isSettingsConflict(reason)) await this.resolveConflict(json, mine);
-      else this.writeFailed(json, String(reason));
+      else this.writeFailed(json, errorText(reason));
     }
   }
 
@@ -172,7 +173,7 @@ export class SettingsSync {
       this.hooks.onSaved?.(stamp);
       if (!newerQueued) { this.latest = merged; this.io.writeCache(merged); this.hooks.onMerged?.(merged); }
     } catch (reason) {
-      this.writeFailed(json, isSettingsConflict(reason) ? conflictReason() : String(reason));
+      this.writeFailed(json, isSettingsConflict(reason) ? conflictReason() : errorText(reason));
     }
   }
 

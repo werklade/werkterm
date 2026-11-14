@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 
+use crate::ui_error::{ui_code, ui_err};
+
 const KEYS: [&str; 19] = [
     "black",
     "red",
@@ -95,12 +97,12 @@ pub fn parse_colors(input: &str) -> Value {
 pub async fn import_mobaxterm_colors(path: Option<String>) -> Result<Value, String> {
     let path = match path {
         Some(path) => PathBuf::from(path),
-        None => default_path().ok_or("Bitte MobaXterm.ini auswählen.")?,
+        None => default_path().ok_or(ui_code("COLORS_SELECT_FILE"))?,
     };
     // Keep file contents and paths out of errors: the file may contain credentials.
     // MobaXterm may store the file in a Windows code page; colors are ASCII, so a lossy
     // decode is enough and other sections never matter.
-    let bytes = std::fs::read(path).map_err(|_| "Farbdatei konnte nicht gelesen werden.")?;
+    let bytes = std::fs::read(path).map_err(|_| String::from(ui_err("COLORS_READ_FAILED")))?;
     Ok(parse_colors(&String::from_utf8_lossy(&bytes)))
 }
 fn default_path() -> Option<PathBuf> {

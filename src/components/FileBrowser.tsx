@@ -1,4 +1,5 @@
 import type { DiffSource } from "../lib/diff";
+import { errorCode } from "../lib/backendError";
 import { useEffect, useRef, useState } from "react";
 import { PermissionsDialog } from "./PermissionsDialog";
 import { SecretDialog } from "./SecretDialog";
@@ -277,7 +278,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
         } else {
           try { await enableSudo(targetId); }
           catch (reason: unknown) {
-            if (!String(reason).startsWith("SUDO_PASSWORD:")) throw reason;
+            if (errorCode(reason) !== "SUDO_PASSWORD") throw reason;
             const target = parseQuickConnect(tab?.target ?? "");
             const label = target ? `${target.user}@${target.host}` : tab?.title ?? t("browser.sshSession");
             let secret = await ask<string | null>(answer => ({ type: "sudo", label, answer }));

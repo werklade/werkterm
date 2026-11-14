@@ -12,6 +12,8 @@ use std::{
 };
 use tauri::Manager;
 
+use crate::ui_error::{ui_code, ui_err};
+
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 pub(crate) static STORAGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -139,23 +141,23 @@ pub fn default_keepalive_max() -> u32 {
 }
 pub fn validate(session: &SavedSession) -> Result<(), String> {
     if session.keepalive_interval > 3600 || !(1..=100).contains(&session.keepalive_max) {
-        return Err("Keepalive: Intervall 0–3600, Maximum 1–100".into());
+        return Err(ui_err("SESSION_KEEPALIVE_RANGE").into());
     }
     if !matches!(session.kind.as_str(), "ssh" | "telnet" | "serial") {
-        return Err("Unbekannter Sitzungstyp".into());
+        return Err(ui_err("SESSION_UNKNOWN_KIND").into());
     }
     if session.name.trim().is_empty() {
-        return Err("Sitzungsname darf nicht leer sein".into());
+        return Err(ui_err("SESSION_NAME_EMPTY").into());
     }
     if session.kind != "ssh" {
         if session.auth != SessionAuth::Default || session.jump_session_id.is_some() {
-            return Err("Anmeldung und Jump host sind nur für SSH erlaubt".into());
+            return Err(ui_err("SESSION_SSH_ONLY_OPTIONS").into());
         }
         if session.kind == "serial" {
             return session
                 .serial
                 .as_ref()
-                .ok_or("Serielle Parameter fehlen")?
+                .ok_or(ui_code("SESSION_SERIAL_MISSING"))?
                 .validate();
         }
     }
@@ -165,20 +167,20 @@ pub fn validate(session: &SavedSession) -> Result<(), String> {
             .chars()
             .any(|ch| ch.is_whitespace() || ch.is_control())
     {
-        return Err("Host darf nicht leer sein oder Leerzeichen enthalten".into());
+        return Err(ui_err("SESSION_HOST_INVALID").into());
     }
     if session.port == 0 {
-        return Err("Port muss zwischen 1 und 65535 liegen".into());
+        return Err(ui_err("SESSION_PORT_INVALID").into());
     }
     if session
         .source
         .as_deref()
         .is_some_and(|s| s != "mobaxterm" && s != "windterm")
     {
-        return Err("Unbekannte Sitzungsquelle".into());
+        return Err(ui_err("SESSION_UNKNOWN_SOURCE").into());
     }
     if matches!(&session.auth, SessionAuth::KeyFile { path } if path.trim().is_empty()) {
-        return Err("Schlüsselpfad darf nicht leer sein".into());
+        return Err(ui_err("SESSION_KEY_PATH_EMPTY").into());
     }
     Ok(())
 }
@@ -194,18 +196,18 @@ pub fn resolve_jump_chain<'a>(
     let mut chain = Vec::new();
     while let Some(id) = next {
         if !seen.insert(id) {
-            return Err("Jump-host-Kette enthält einen Zyklus".into());
+            return Err(ui_err("JUMP_CYCLE").into());
         }
         let hop = sessions
             .iter()
             .find(|s| s.id == id)
-            .ok_or_else(|| "Jump host wurde nicht gefunden".to_owned())?;
+            .ok_or_else(|| String::from(ui_err("JUMP_NOT_FOUND")))?;
         if hop.kind != "ssh" {
-            return Err(format!("Jump host {} ist keine SSH-Sitzung", hop.name));
+            return Err(ui_err("JUMP_NOT_SSH").arg("name", &hop.name).into());
         }
         chain.push(hop);
         if chain.len() > 5 {
-            return Err("Jump-host-Kette darf höchstens 5 Hops enthalten".into());
+            return Err(ui_err("JUMP_TOO_MANY").arg("max", "5").into());
         }
         next = hop.jump_session_id.as_deref();
     }
@@ -233,10 +235,9 @@ pub fn validate_delete(id: &str, sessions: &[SavedSession]) -> Result<(), String
     if names.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "Sitzung wird als Jump host verwendet von: {}",
-            names.join(", ")
-        ))
+        Err(ui_err("SESSION_USED_AS_JUMP")
+            .arg("names", names.join(", "))
+            .into())
     }
 }
 
@@ -245,7 +246,7 @@ pub fn validate_target(
     target: &crate::ssh::SshTarget,
 ) -> Result<(), String> {
     if session.kind != "ssh" {
-        return Err("Gespeicherte Sitzung ist keine SSH-Sitzung".into());
+        return Err(ui_err("SESSION_NOT_SSH").into());
     }
     if !session.host.eq_ignore_ascii_case(&target.host)
         || session.port != target.port
@@ -254,7 +255,7 @@ pub fn validate_target(
             .as_ref()
             .is_some_and(|user| user != &target.user)
     {
-        return Err("SSH-Ziel stimmt nicht mit der gespeicherten Sitzung überein".into());
+        return Err(ui_err("SESSION_TARGET_MISMATCH").into());
     }
     Ok(())
 }
@@ -263,18 +264,18 @@ pub fn load(path: &Path) -> Result<Vec<SavedSession>, String> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err("Sitzungsdatei konnte nicht gelesen werden".into()),
+        Err(error) => return Err(ui_err("SESSIONS_READ_FAILED").detail(error).into()),
     };
-    let file: SessionFile =
-        serde_json::from_slice(&bytes).map_err(|_| "Sitzungsdatei ist beschädigt".to_owned())?;
+    let file: SessionFile = serde_json::from_slice(&bytes)
+        .map_err(|error| String::from(ui_err("SESSIONS_CORRUPT").json_position(&error)))?;
     if file.version != 1 {
-        return Err("Sitzungsdatei hat eine unbekannte Version".into());
+        return Err(ui_err("SESSIONS_UNKNOWN_VERSION").into());
     }
     let mut ids = std::collections::HashSet::new();
     for session in &file.sessions {
         validate(session)?;
         if session.id.is_empty() || !ids.insert(&session.id) {
-            return Err("Sitzungsdatei enthält ungültige IDs".into());
+            return Err(ui_err("SESSIONS_INVALID_IDS").into());
         }
     }
     validate_jump_hosts(&file.sessions)?;
@@ -289,12 +290,12 @@ fn write_atomic(path: &Path, sessions: Vec<SavedSession>) -> Result<(), String> 
         version: 1,
         sessions,
     })
-    .map_err(|_| "Sitzungen konnten nicht serialisiert werden".to_owned())?;
+    .map_err(|error| String::from(ui_err("SESSIONS_SERIALIZE_FAILED").detail(error)))?;
     let parent = path
         .parent()
-        .ok_or_else(|| "Ungültiger Sitzungspfad".to_owned())?;
+        .ok_or_else(|| String::from(ui_err("INVALID_PATH")))?;
     fs::create_dir_all(parent)
-        .map_err(|_| "Konfigurationsordner konnte nicht angelegt werden".to_owned())?;
+        .map_err(|error| String::from(ui_err("CONFIG_DIR_CREATE_FAILED").detail(error)))?;
     let temp = parent.join(format!(".sessions-{}.tmp", new_id()));
     let result = (|| {
         let mut options = fs::OpenOptions::new();
@@ -313,7 +314,7 @@ fn write_atomic(path: &Path, sessions: Vec<SavedSession>) -> Result<(), String> 
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    result.map_err(|_| "Sitzungsdatei konnte nicht atomar gespeichert werden".into())
+    result.map_err(|error| ui_err("SESSIONS_SAVE_FAILED").detail(error).into())
 }
 
 pub(crate) fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -323,13 +324,13 @@ pub(crate) fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 async fn read_file(path: PathBuf) -> Result<Vec<SavedSession>, String> {
     tauri::async_runtime::spawn_blocking(move || load(&path))
         .await
-        .map_err(|_| "Sitzungen konnten nicht geladen werden".to_owned())?
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 async fn persist(path: PathBuf, sessions: Vec<SavedSession>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || write_atomic(&path, sessions))
         .await
-        .map_err(|_| "Sitzungen konnten nicht gespeichert werden".to_owned())?
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 pub async fn find(app: &tauri::AppHandle, id: &str) -> Result<SavedSession, String> {
@@ -338,7 +339,7 @@ pub async fn find(app: &tauri::AppHandle, id: &str) -> Result<SavedSession, Stri
         .await?
         .into_iter()
         .find(|s| s.id == id)
-        .ok_or_else(|| "Gespeicherte Sitzung wurde nicht gefunden".into())
+        .ok_or_else(|| ui_err("SESSION_NOT_FOUND").into())
 }
 
 pub async fn jump_chain(
@@ -368,7 +369,7 @@ pub async fn sessions_save(
     if session.kind != "ssh" {
         session.auth = SessionAuth::Default;
         if password.as_ref().is_some_and(|value| !value.is_empty()) {
-            return Err("Passwörter werden nur für SSH gespeichert".into());
+            return Err(ui_err("SESSION_PASSWORD_SSH_ONLY").into());
         }
     }
     validate(&session)?;
@@ -417,7 +418,7 @@ pub async fn sessions_delete(app: tauri::AppHandle, id: String) -> Result<(), St
     if delete_secret {
         crate::secrets::delete_password(format!("session:{id}"))
             .await
-            .map_err(|error| format!("Sitzung wurde gelöscht; Schlüsselbund: {error}"))?;
+            .map_err(|error| String::from(ui_err("SESSION_DELETED_KEYRING").arg("error", error)))?;
     }
     Ok(())
 }
@@ -476,7 +477,7 @@ fn plan_delete_many(
             result.blocked.push(DeleteBlocked {
                 id: session.id.clone(),
                 name: session.name.clone(),
-                reason: "als Jump host verwendet".into(),
+                reason: ui_err("SESSION_IS_JUMP_HOST").into(),
             });
         }
     }
@@ -507,7 +508,7 @@ where
             if let Err(error) = delete_secret(format!("session:{id}")).await {
                 result
                     .warnings
-                    .push(format!("Sitzung wurde gelöscht; Schlüsselbund: {error}"));
+                    .push(ui_err("SESSION_DELETED_KEYRING").arg("error", error).into());
             }
         }
     }
@@ -583,9 +584,7 @@ async fn persist_with_secret(
     if let Err(error) = changed {
         // A provider may report failure after having partially changed state.
         if restore_secret(account, previous).await.is_err() {
-            return Err(format!(
-                "{error}; vorheriger Schlüsselbund-Eintrag konnte nicht wiederhergestellt werden"
-            ));
+            return Err(ui_err("KEYRING_RESTORE_FAILED").arg("error", error).into());
         }
         return Err(error);
     }
@@ -603,7 +602,7 @@ where
 {
     if let Err(error) = persistence.await {
         if restore().await.is_err() {
-            return Err("Sitzungsdatei wurde nicht gespeichert; Schlüsselbund konnte nicht wiederhergestellt werden".into());
+            return Err(ui_err("SESSIONS_SAVE_RESTORE_FAILED").into());
         }
         return Err(error);
     }
@@ -635,7 +634,7 @@ pub fn sessions_import_default_path(source: String) -> Result<Option<String>, St
             }
         }
         "windterm" => Ok(None),
-        _ => Err("Unbekannte Importquelle".into()),
+        _ => Err(ui_err("IMPORT_UNKNOWN_SOURCE").into()),
     }
 }
 
@@ -656,7 +655,7 @@ pub fn mark_duplicates(preview: &mut ImportPreview, sessions: &[SavedSession]) {
 fn home_dir() -> Result<PathBuf, String> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
-        .ok_or_else(|| "Home-Verzeichnis nicht gefunden".into())
+        .ok_or_else(|| ui_err("HOME_NOT_FOUND").into())
 }
 
 pub fn expand_home(path: &str, home: &Path) -> PathBuf {
@@ -704,8 +703,8 @@ pub async fn sessions_import_preview(
         .unwrap_or_else(|_| home.join("Documents"));
     let mut preview = tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(path);
-        let bytes =
-            fs::read(&path).map_err(|_| "Importdatei konnte nicht gelesen werden".to_owned())?;
+        let bytes = fs::read(&path)
+            .map_err(|error| String::from(ui_err("IMPORT_READ_FAILED").detail(error)))?;
         match source.as_str() {
             "mobaxterm" => import_mobaxterm::parse(
                 &decode_ini(&bytes),
@@ -719,33 +718,38 @@ pub async fn sessions_import_preview(
             ),
             "windterm" => {
                 let text = std::str::from_utf8(&bytes)
-                    .map_err(|_| "Importdatei ist kein UTF-8".to_owned())?;
-                let value: serde_json::Value = import_windterm::parse_json(text)
-                    .map_err(|_| "WindTerm-Datei ist beschädigt".to_owned())?;
+                    .map_err(|_| String::from(ui_err("IMPORT_NOT_UTF8")))?;
+                let value: serde_json::Value =
+                    import_windterm::parse_json(text).map_err(|error| {
+                        String::from(ui_err("WINDTERM_CORRUPT").json_position(&error))
+                    })?;
                 let sessions_path = if value.is_object() {
                     let directory = value
                         .get("path")
                         .and_then(serde_json::Value::as_str)
-                        .ok_or_else(|| "profiles.config enthält keinen Profilpfad".to_owned())?;
+                        .ok_or_else(|| String::from(ui_err("WINDTERM_NO_PROFILE_PATH")))?;
                     windterm_sessions_path(directory, &path, &home)?
                 } else {
                     path
                 };
-                let text = fs::read_to_string(&sessions_path)
-                    .map_err(|_| "WindTerm-Sitzungen konnten nicht gelesen werden".to_owned())?;
+                let text = fs::read_to_string(&sessions_path).map_err(|error| {
+                    String::from(ui_err("WINDTERM_SESSIONS_READ_FAILED").detail(error))
+                })?;
                 let keys_path = sessions_path.with_file_name("onekeys.config");
                 let keys = match fs::read_to_string(keys_path) {
                     Ok(text) => Some(text),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(_) => return Err("OneKey-Datei konnte nicht gelesen werden".into()),
+                    Err(error) => {
+                        return Err(ui_err("WINDTERM_ONEKEY_READ_FAILED").detail(error).into());
+                    }
                 };
                 import_windterm::parse(&text, keys.as_deref(), &home)
             }
-            _ => Err("Unbekannte Importquelle".into()),
+            _ => Err(ui_err("IMPORT_UNKNOWN_SOURCE").into()),
         }
     })
     .await
-    .map_err(|_| "Importvorschau fehlgeschlagen".to_owned())??;
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))??;
     let _guard = STORAGE_LOCK.lock().await;
     let sessions = read_file(config_path(&app)?).await?;
     mark_duplicates(&mut preview, &sessions);
@@ -763,7 +767,7 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                 .split(':')
                 .next()
                 .filter(|source| *source == "mobaxterm" || *source == "windterm")
-                .ok_or_else(|| "Unbekannte Importquelle".to_owned())?
+                .ok_or_else(|| String::from(ui_err("IMPORT_UNKNOWN_SOURCE")))?
                 .to_owned();
             let session = SavedSession {
                 kind: default_kind(),
@@ -824,7 +828,7 @@ fn export_bytes(sessions: &[SavedSession], ids: &[String]) -> Result<(Vec<u8>, u
         .collect();
     let count = sessions.len();
     if count == 0 {
-        return Err("Keine Sitzungen für den Export gefunden".into());
+        return Err(ui_err("EXPORT_EMPTY").into());
     }
     let bytes = serde_json::to_vec_pretty(&WerktermExport {
         format: "werkterm-sessions",
@@ -836,7 +840,7 @@ fn export_bytes(sessions: &[SavedSession], ids: &[String]) -> Result<(Vec<u8>, u
             .to_string(),
         sessions,
     })
-    .map_err(|_| "Sitzungen konnten nicht serialisiert werden".to_owned())?;
+    .map_err(|error| String::from(ui_err("SESSIONS_SERIALIZE_FAILED").detail(error)))?;
     Ok((bytes, count))
 }
 
@@ -864,7 +868,7 @@ fn export_to_path(path: &Path, sessions: &[SavedSession], ids: &[String]) -> Res
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    result.map_err(|_| "Sitzungsdatei konnte nicht atomar exportiert werden".to_owned())?;
+    result.map_err(|error| String::from(ui_err("EXPORT_WRITE_FAILED").detail(error)))?;
     Ok(count)
 }
 
@@ -883,40 +887,40 @@ fn same_werkterm_target(left: &SavedSession, right: &SavedSession) -> bool {
 }
 
 fn werkterm_preview(bytes: &[u8], local: &[SavedSession]) -> Result<WerktermImportPreview, String> {
-    let file: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|_| "Sitzungsdatei ist beschädigt".to_owned())?;
+    let file: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|error| String::from(ui_err("SESSIONS_CORRUPT").json_position(&error)))?;
     if file.get("format").and_then(serde_json::Value::as_str) != Some("werkterm-sessions") {
-        return Err("Keine Werkterm-Sitzungsdatei".into());
+        return Err(ui_err("EXPORT_NOT_WERKTERM").into());
     }
     let version = file
         .get("version")
         .and_then(serde_json::Value::as_u64)
-        .ok_or("Sitzungsdatei hat eine ungültige Formatversion")?;
+        .ok_or(ui_code("EXPORT_INVALID_VERSION"))?;
     if version > 1 {
-        return Err(format!(
-            "Sitzungsdatei aus neuerer Werkterm-Version (Format {version})"
-        ));
+        return Err(ui_err("EXPORT_NEWER_VERSION")
+            .arg("version", version.to_string())
+            .into());
     }
     if version != 1 {
-        return Err("Sitzungsdatei hat eine ungültige Formatversion".into());
+        return Err(ui_err("EXPORT_INVALID_VERSION").into());
     }
     let entries = file
         .get("sessions")
         .and_then(serde_json::Value::as_array)
-        .ok_or("Sitzungsdatei enthält keine Sitzungsliste")?;
+        .ok_or(ui_code("EXPORT_NO_SESSIONS"))?;
     let mut preview = WerktermImportPreview::default();
     let mut seen = std::collections::HashSet::new();
     for entry in entries {
         let name = entry
             .get("name")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("Unbenannte Sitzung");
+            .unwrap_or("?");
         let session = serde_json::from_value::<SavedSession>(entry.clone())
-            .map_err(|_| "Ungültige Sitzungsdaten".to_owned())
+            .map_err(|_| String::from(ui_err("SESSION_DATA_INVALID")))
             .and_then(|session| {
                 validate(&session)?;
                 if session.id.is_empty() || !seen.insert(session.id.clone()) {
-                    return Err("Ungültige oder doppelte Sitzungs-ID".into());
+                    return Err(ui_err("SESSION_ID_INVALID").into());
                 }
                 Ok(session)
             });
@@ -930,9 +934,12 @@ fn werkterm_preview(bytes: &[u8], local: &[SavedSession]) -> Result<WerktermImpo
                 );
                 preview.sessions.push(session);
             }
-            Err(error) => preview
-                .warnings
-                .push(format!("{name}: {error} (übersprungen)")),
+            Err(error) => preview.warnings.push(
+                ui_err("IMPORT_SESSION_SKIPPED")
+                    .arg("name", name)
+                    .arg("error", error)
+                    .into(),
+            ),
         }
     }
     Ok(preview)
@@ -968,10 +975,11 @@ fn prepare_werkterm_import(
                 session.jump_session_id = Some(mapped.clone());
             } else if !local.iter().any(|saved| saved.id == *jump) {
                 session.jump_session_id = None;
-                result.warnings.push(format!(
-                    "{}: Jump-Host nicht gefunden, Verweis entfernt",
-                    session.name
-                ));
+                result.warnings.push(
+                    ui_err("IMPORT_JUMP_REMOVED")
+                        .arg("name", &session.name)
+                        .into(),
+                );
             }
         }
         match &session.auth {
@@ -980,16 +988,22 @@ fn prepare_werkterm_import(
                 passwords += 1;
             }
             SessionAuth::KeyFile { path } if !expand_home(path, home).exists() => {
-                result.warnings.push(format!(
-                    "{}: Schlüsseldatei {path} nicht gefunden",
-                    session.name
-                ))
+                result.warnings.push(
+                    ui_err("IMPORT_KEY_MISSING")
+                        .arg("name", &session.name)
+                        .arg("path", path)
+                        .into(),
+                )
             }
             _ => {}
         }
     }
     if passwords > 0 {
-        result.warnings.push(format!("{passwords} Sitzungen fragen beim Verbinden nach dem Passwort (Passwörter werden nicht exportiert)"));
+        result.warnings.push(
+            ui_err("IMPORT_PASSWORDS_ASK")
+                .arg("count", passwords.to_string())
+                .into(),
+        );
     }
     let mut combined = local.to_vec();
     combined.extend(imported);
@@ -1007,7 +1021,7 @@ pub async fn sessions_export(
     let sessions = read_file(config_path(&app)?).await?;
     tauri::async_runtime::spawn_blocking(move || export_to_path(Path::new(&path), &sessions, &ids))
         .await
-        .map_err(|_| "Sitzungsexport fehlgeschlagen".to_owned())?
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[tauri::command]
@@ -1018,12 +1032,12 @@ pub async fn sessions_export_preview(
     let _guard = STORAGE_LOCK.lock().await;
     let local = read_file(config_path(&app)?).await?;
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes =
-            fs::read(path).map_err(|_| "Importdatei konnte nicht gelesen werden".to_owned())?;
+        let bytes = fs::read(path)
+            .map_err(|error| String::from(ui_err("IMPORT_READ_FAILED").detail(error)))?;
         werkterm_preview(&bytes, &local)
     })
     .await
-    .map_err(|_| "Importvorschau fehlgeschlagen".to_owned())?
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[tauri::command]
@@ -1037,12 +1051,12 @@ pub async fn sessions_import_werkterm(
     let local = read_file(storage.clone()).await?;
     let home = home_dir()?;
     let (sessions, result) = tauri::async_runtime::spawn_blocking(move || {
-        let bytes =
-            fs::read(path).map_err(|_| "Importdatei konnte nicht gelesen werden".to_owned())?;
+        let bytes = fs::read(path)
+            .map_err(|error| String::from(ui_err("IMPORT_READ_FAILED").detail(error)))?;
         prepare_werkterm_import(&bytes, &local, &ids, &home)
     })
     .await
-    .map_err(|_| "Sitzungsimport fehlgeschlagen".to_owned())??;
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))??;
     persist(storage, sessions).await?;
     Ok(result)
 }
@@ -1067,7 +1081,7 @@ fn append_unique_imports(
         };
         *count = count
             .checked_add(1)
-            .ok_or_else(|| "Zu viele Importsitzungen".to_owned())?;
+            .ok_or_else(|| String::from(ui_err("IMPORT_TOO_MANY")))?;
     }
     Ok(result)
 }
@@ -1083,10 +1097,12 @@ fn apply_import_gateways(
             if matches.len() == 1 && matches[0] != *id {
                 sessions[index].jump_session_id = Some(matches[0].clone());
             } else {
-                warnings.push(format!(
-                    "Gateway {} für {} nicht zugeordnet",
-                    gateway.host, sessions[index].name
-                ));
+                warnings.push(
+                    ui_err("IMPORT_GATEWAY_UNMAPPED")
+                        .arg("host", &gateway.host)
+                        .arg("name", &sessions[index].name)
+                        .into(),
+                );
             }
         }
     }
@@ -1140,9 +1156,9 @@ fn is_windows_path(path: &str) -> bool {
 /// preferred, otherwise the newest other `default.v*` profile that contains the file is used.
 fn windterm_sessions_path(directory: &str, config: &Path, home: &Path) -> Result<PathBuf, String> {
     if !cfg!(windows) && is_windows_path(directory) {
-        return Err(format!(
-            "profiles.config verweist auf einen Windows-Pfad ({directory}). Bitte user.sessions aus dem WindTerm-Profil kopieren und direkt auswählen."
-        ));
+        return Err(ui_err("WINDTERM_WINDOWS_PATH")
+            .arg("path", directory)
+            .into());
     }
     let directory = expand_home(directory, home);
     let directory = if directory.is_absolute() {
@@ -1187,10 +1203,9 @@ fn windterm_sessions_path(directory: &str, config: &Path, home: &Path) -> Result
         .map(|profile| sessions(profile))
         .find(|candidate| candidate.is_file())
         .ok_or_else(|| {
-            format!(
-                "Im WindTerm-Profilordner {} wurde keine user.sessions gefunden. Bitte direkt user.sessions auswählen.",
-                profiles.display()
-            )
+            ui_err("WINDTERM_NO_SESSIONS")
+                .arg("path", profiles.display().to_string())
+                .into()
         })
 }
 
@@ -1205,7 +1220,7 @@ mod tests {
         let home = root.join("home");
         // Missing profile: clear message with the searched folder.
         let error = windterm_sessions_path("profile", &config, &home).unwrap_err();
-        assert!(error.contains("keine user.sessions"), "{error}");
+        assert_eq!(code_of(&error), Some("WINDTERM_NO_SESSIONS"), "{error}");
         // Only another version present: the newest one is used.
         for version in ["default.v9", "default.v12"] {
             let dir = root
@@ -1233,7 +1248,7 @@ mod tests {
         assert!(!is_windows_path("~/WindTerm"));
         if !cfg!(windows) {
             let error = windterm_sessions_path("C:/Users/x/WindTerm", &config, &home).unwrap_err();
-            assert!(error.contains("Windows-Pfad"), "{error}");
+            assert_eq!(code_of(&error), Some("WINDTERM_WINDOWS_PATH"), "{error}");
         }
     }
     #[test]
@@ -1250,7 +1265,9 @@ mod tests {
                     .unwrap_err();
             assert!(error.contains("production"));
             let error = protect_kind_change(&changed, std::slice::from_ref(&original), || {
-                Err("Sitzung wird von SSH-Tunneln verwendet: Database".into())
+                Err(ui_err("SESSION_USED_BY_TUNNELS")
+                    .arg("names", "Database")
+                    .into())
             })
             .unwrap_err();
             assert!(error.contains("Database"));
@@ -1317,6 +1334,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
     use super::*;
+    use crate::ui_error::code_of;
     #[test]
     fn legacy_session_files_default_to_ssh() {
         let mut value = serde_json::to_value(sample()).unwrap();
@@ -1405,16 +1423,14 @@ mod tests {
         );
         sessions[5].jump_session_id = Some("6".into());
         sessions.push(jump_sample("6", None));
-        assert!(
-            resolve_jump_chain(&sessions[0], &sessions)
-                .unwrap_err()
-                .contains("5 Hops")
+        assert_eq!(
+            resolve_jump_chain(&sessions[0], &sessions).unwrap_err(),
+            r#"JUMP_TOO_MANY: {"args":{"max":"5"}}"#
         );
         sessions[5].jump_session_id = Some("target".into());
-        assert!(
-            resolve_jump_chain(&sessions[0], &sessions)
-                .unwrap_err()
-                .contains("Zyklus")
+        assert_eq!(
+            resolve_jump_chain(&sessions[0], &sessions).unwrap_err(),
+            "JUMP_CYCLE"
         );
     }
 
@@ -1438,7 +1454,9 @@ mod tests {
         );
         let blocked = plan_delete_many(&sessions, &all, |id| {
             if id == "target" {
-                Err("Tunnel verwendet Sitzung".into())
+                Err(ui_err("SESSION_USED_BY_TUNNELS")
+                    .arg("names", "Tunnel")
+                    .into())
             } else {
                 Ok(())
             }
@@ -1630,20 +1648,24 @@ mod tests {
         file["format"] = serde_json::json!("other");
         assert_eq!(
             werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap_err(),
-            "Keine Werkterm-Sitzungsdatei"
+            "EXPORT_NOT_WERKTERM"
         );
         file["format"] = serde_json::json!("werkterm-sessions");
         file["version"] = serde_json::json!(2);
-        assert!(
-            werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[])
-                .unwrap_err()
-                .contains("Format 2")
+        assert_eq!(
+            werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap_err(),
+            r#"EXPORT_NEWER_VERSION: {"args":{"version":"2"}}"#
         );
         file["version"] = serde_json::json!(1);
         file["sessions"][0]["port"] = serde_json::json!(0);
         let preview = werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap();
         assert_eq!(preview.sessions.len(), 1);
-        assert!(preview.warnings[0].contains("Test"));
+        assert_eq!(
+            code_of(&preview.warnings[0]),
+            Some("IMPORT_SESSION_SKIPPED")
+        );
+        assert!(preview.warnings[0].contains(r#""name":"Test""#));
+        assert!(preview.warnings[0].contains("SESSION_PORT_INVALID"));
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1685,20 +1707,16 @@ mod tests {
             result
                 .warnings
                 .iter()
-                .any(|warning| warning.contains("Jump-Host nicht gefunden"))
+                .any(|warning| code_of(warning) == Some("IMPORT_JUMP_REMOVED"))
         );
         assert!(
             result
                 .warnings
                 .iter()
-                .any(|warning| warning.starts_with("5 Sitzungen fragen"))
+                .any(|warning| warning == r#"IMPORT_PASSWORDS_ASK: {"args":{"count":"5"}}"#)
         );
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("Schlüsseldatei ~/missing-key nicht gefunden"))
-        );
+        assert!(result.warnings.iter().any(|warning| warning
+            == r#"IMPORT_KEY_MISSING: {"args":{"name":"Test","path":"~/missing-key"}}"#));
         let (combined, result) =
             prepare_werkterm_import(&bytes, &[], &["internal".into()], &home).unwrap();
         assert_eq!(combined[0].jump_session_id, None);

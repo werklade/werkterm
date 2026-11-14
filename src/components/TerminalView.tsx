@@ -1,4 +1,6 @@
 import { keyringErrorText } from "../lib/keyringErrors";
+import { errorText } from "../lib/backendError";
+import { terminalNotice } from "../lib/terminalNotice";
 import { useT } from "../i18n";
 import { readClipboardText, writeClipboardText } from "../lib/clipboard";
 import { parseSerialPermission, serialFixCommands, type SerialPermission } from "../lib/serialPermission";
@@ -262,6 +264,8 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
       const onData = new Channel<ArrayBuffer>();
       onData.onmessage = buffer => {
         if (cancelled) return;
+        const notice = terminalNotice(buffer);
+        if (notice !== null) { terminal.write(notice); return; }
         terminal.element?.dispatchEvent(new Event("tux-activity"));
         terminal.write(new Uint8Array(buffer));
         promptCommand.receiveData();
@@ -385,7 +389,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
     const terminal = runtime.current?.terminal;
     if (!terminal) return;
     const text = all ? exportText(readTerminal(terminal.buffer.active, terminal.options.theme), /Windows/i.test(navigator.userAgent)) : terminal.getSelection();
-    if (all || text) void writeClipboardText(text).catch(error => onStatus(t("terminal.copyError", { message: String(error) })));
+    if (all || text) void writeClipboardText(text).catch(error => onStatus(t("terminal.copyError", { message: errorText(error) })));
     closeMenu();
   };
   const saveContent = async (format: "txt" | "html" | "rtf") => {
@@ -401,7 +405,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         await invoke("save_text_file", { path, contents });
         onStatus(t("terminal.saved", { path }));
       }
-    } catch (error) { onStatus(t("terminal.exportError", { message: String(error) })); }
+    } catch (error) { onStatus(t("terminal.exportError", { message: errorText(error) })); }
   };
   return <section style={paneStyle} onPointerDown={onFocusPane} onContextMenu={event => {
     event.preventDefault();
@@ -419,7 +423,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
       }
     }}>
       {exportMenu ? <>{(["txt", "html", "rtf"] as const).map(format => <button key={format} role="menuitem" onClick={() => { void saveContent(format); }}>{t("terminal.saveAs", { format: format.toUpperCase() })}</button>)}<button role="menuitem" onClick={() => setExportMenu(false)}>{t("terminal.back")}</button></> : <>
-        {kind === "serial" && <button role="menuitem" disabled={processExited || !connected} onClick={() => { void invoke("serial_break", { id: wireSession.current }).catch(error => onStatus(String(error))); closeMenu(); }}>{t("terminal.break")}</button>}
+        {kind === "serial" && <button role="menuitem" disabled={processExited || !connected} onClick={() => { void invoke("serial_break", { id: wireSession.current }).catch(error => onStatus(errorText(error))); closeMenu(); }}>{t("terminal.break")}</button>}
         <button role="menuitem" disabled={!runtime.current?.terminal.getSelection()} onClick={() => copy(false)}>{t("terminal.copy")}</button>
         <button role="menuitem" disabled={processExited} onClick={() => { closeMenu(); terminalPasteRequests.get(id)?.(); }}>{t("terminal.paste")}</button>
         <button role="menuitem" onClick={() => { runtime.current?.terminal.selectAll(); closeMenu(); }}>{t("terminal.selectAll")}</button>

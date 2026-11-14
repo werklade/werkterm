@@ -14,6 +14,8 @@ use std::{
 };
 use tauri::{Manager, State};
 
+use crate::ui_error::ui_err;
+
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 const LIMIT: usize = 1024 * 1024;
 const POINTER: &str = "data-location.json";
@@ -25,7 +27,7 @@ const FILES: [&str; 4] = [
 ];
 const DIRECTORIES: [&str; 2] = ["designs", "icon-sets"];
 /// Exact marker the frontend matches to detect a concurrent change of settings.json.
-const SETTINGS_CONFLICT: &str = "SETTINGS_CONFLICT";
+const SETTINGS_CONFLICT: &str = crate::ui_error::ui_code("SETTINGS_CONFLICT");
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,15 +87,15 @@ pub struct FileStamp {
 fn config(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
-        .map_err(|_| "Konfigurationsordner konnte nicht ermittelt werden".into())
+        .map_err(|e| ui_err("CONFIG_DIR_UNAVAILABLE").detail(e).into())
 }
 
 fn validate_path(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
-        return Err("Datenordner muss ein absoluter Pfad sein".into());
+        return Err(ui_err("DATA_DIR_NOT_ABSOLUTE").into());
     }
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err("Datenordner darf kein „..“ enthalten".into());
+        return Err(ui_err("DATA_DIR_PARENT").into());
     }
     Ok(())
 }
@@ -145,11 +147,11 @@ fn read_pointer(config: &Path) -> Result<Option<Option<PathBuf>>, String> {
     let bytes = match read_limited(&path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("Zeigerdatei konnte nicht gelesen werden: {e}")),
+        Err(e) => return Err(ui_err("POINTER_READ_FAILED").detail(e).into()),
     };
     match parse_pointer(&bytes) {
         Parsed::Valid(dir) => Ok(Some(dir)),
-        Parsed::UnknownVersion => Err("Zeigerdatei hat eine unbekannte Version".into()),
+        Parsed::UnknownVersion => Err(ui_err("POINTER_UNKNOWN_VERSION").into()),
         Parsed::Malformed => {
             back_up_pointer(config)?;
             Ok(None)
@@ -160,7 +162,7 @@ fn read_pointer(config: &Path) -> Result<Option<Option<PathBuf>>, String> {
 /// Moves the pointer to the first free `data-location.json.bak[.N]`; older backups stay.
 fn back_up_pointer(config: &Path) -> Result<(), String> {
     let path = config.join(POINTER);
-    let error = |e: std::io::Error| format!("Zeigerdatei konnte nicht gesichert werden: {e}");
+    let error = |e: std::io::Error| String::from(ui_err("POINTER_BACKUP_FAILED").detail(e));
     for index in 0..1000 {
         let name = if index == 0 {
             format!("{POINTER}.bak")
@@ -176,14 +178,14 @@ fn back_up_pointer(config: &Path) -> Result<(), String> {
             Err(e) => return Err(error(e)),
         }
     }
-    Err("Zeigerdatei konnte nicht gesichert werden: zu viele Sicherungen".into())
+    Err(ui_err("POINTER_BACKUP_LIMIT").into())
 }
 
 fn reset_pointer_at(config: &Path) -> Result<DataDirStatus, String> {
     match fs::symlink_metadata(config.join(POINTER)) {
         Ok(_) => back_up_pointer(config)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-        Err(e) => return Err(format!("Zeigerdatei konnte nicht gelesen werden: {e}")),
+        Err(e) => return Err(ui_err("POINTER_READ_FAILED").detail(e).into()),
     }
     status_at(config)
 }
@@ -214,9 +216,9 @@ fn status_at(config: &Path) -> Result<DataDirStatus, String> {
 
 fn resolve_at(config: &Path) -> Result<PathBuf, String> {
     match read_pointer(config)?.flatten() {
-        Some(path) if !path.is_dir() => {
-            Err(format!("Datenordner nicht erreichbar: {}", path.display()))
-        }
+        Some(path) if !path.is_dir() => Err(ui_err("DATA_DIR_UNREACHABLE")
+            .arg("path", path.display().to_string())
+            .into()),
         Some(path) => Ok(path),
         None => Ok(config.to_owned()),
     }
@@ -273,7 +275,7 @@ pub(crate) fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
 fn atomic(path: &Path, bytes: &[u8]) -> std::io::Result<fs::Metadata> {
     let parent = path
         .parent()
-        .ok_or_else(|| std::io::Error::other("Ungültiger Pfad"))?;
+        .ok_or_else(|| std::io::Error::other("invalid path"))?;
     fs::create_dir_all(parent)?;
     let temp = unique(parent, "save");
     let result = (|| {
@@ -405,7 +407,7 @@ fn copy_data(source: &Path, target: &Path) -> Result<(), String> {
         return Ok(());
     }
     if within(target, source) || within(source, target) {
-        return Err("Neuer Datenordner darf nicht im bisherigen liegen oder ihn enthalten".into());
+        return Err(ui_err("DATA_DIR_NESTED").into());
     }
     let entries = FILES
         .iter()
@@ -416,7 +418,7 @@ fn copy_data(source: &Path, target: &Path) -> Result<(), String> {
         let metadata = match fs::symlink_metadata(&input) {
             Ok(metadata) => metadata,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(format!("{name} konnte nicht gelesen werden: {e}")),
+            Err(e) => return Err(read_failed(name, e)),
         };
         let expected = if directory {
             metadata.is_dir()
@@ -424,8 +426,9 @@ fn copy_data(source: &Path, target: &Path) -> Result<(), String> {
             metadata.is_file()
         };
         if !metadata.is_symlink() && expected {
-            copy_entry(&input, &target.join(name))
-                .map_err(|e| format!("{name} konnte nicht kopiert werden: {e}"))?;
+            copy_entry(&input, &target.join(name)).map_err(|e| {
+                String::from(ui_err("DATA_FILE_COPY_FAILED").arg("name", name).detail(e))
+            })?;
         }
     }
     Ok(())
@@ -442,11 +445,11 @@ fn set_at(
     }
     let target = path.as_deref().unwrap_or(config);
     if within(target, cache) {
-        return Err("Datenordner darf nicht im App-Cache liegen".into());
+        return Err(ui_err("DATA_DIR_IN_CACHE").into());
     }
     let current = current_at(config)?;
     if !same(target, &current) && (within(target, &current) || within(&current, target)) {
-        return Err("Neuer Datenordner darf nicht im bisherigen liegen oder ihn enthalten".into());
+        return Err(ui_err("DATA_DIR_NESTED").into());
     }
     // An unreachable source fails before anything is created at the target.
     let source = if copy_current {
@@ -455,11 +458,11 @@ fn set_at(
         None
     };
     fs::create_dir_all(target)
-        .map_err(|e| format!("Datenordner konnte nicht angelegt werden: {e}"))?;
+        .map_err(|e| String::from(ui_err("DATA_DIR_CREATE_FAILED").detail(e)))?;
     if !target.is_dir() {
-        return Err("Datenordner ist kein Verzeichnis".into());
+        return Err(ui_err("DATA_DIR_NOT_DIR").into());
     }
-    writable(target).map_err(|e| format!("Datenordner ist nicht beschreibbar: {e}"))?;
+    writable(target).map_err(|e| String::from(ui_err("DATA_DIR_NOT_WRITABLE").detail(e)))?;
     if let Some(source) = source {
         copy_data(&source, target)?;
     }
@@ -469,20 +472,20 @@ fn set_at(
         version: 1,
         data_dir: stored,
     })
-    .map_err(|_| "Zeigerdatei konnte nicht serialisiert werden".to_owned())?;
+    .map_err(|e| String::from(ui_err("POINTER_SAVE_FAILED").detail(e)))?;
     atomic(&config.join(POINTER), &bytes)
-        .map_err(|e| format!("Zeigerdatei konnte nicht gespeichert werden: {e}"))?;
+        .map_err(|e| String::from(ui_err("POINTER_SAVE_FAILED").detail(e)))?;
     status_at(config)
 }
 
 fn validate_settings(json: &str) -> Result<(), String> {
     if json.len() > LIMIT {
-        return Err("Einstellungen sind größer als 1 MiB".into());
+        return Err(too_large());
     }
     let value = serde_json::from_str::<serde_json::Value>(json)
-        .map_err(|_| "Einstellungen sind kein gültiges JSON".to_owned())?;
+        .map_err(|e| String::from(ui_err("SETTINGS_INVALID_JSON").json_position(&e)))?;
     if !value.is_object() {
-        return Err("Einstellungen müssen ein JSON-Objekt sein".into());
+        return Err(ui_err("SETTINGS_NOT_OBJECT").into());
     }
     Ok(())
 }
@@ -500,7 +503,7 @@ fn stamp(metadata: &fs::Metadata) -> Stamp {
 
 /// Content and stamp come from the same handle; a change during reading is retried.
 fn load_settings(path: &Path) -> Result<Option<SettingsFile>, String> {
-    let error = |e: std::io::Error| format!("Einstellungen konnten nicht gelesen werden: {e}");
+    let error = |e: std::io::Error| String::from(ui_err("SETTINGS_READ_FAILED").detail(e));
     let mut file = match fs::File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -509,7 +512,7 @@ fn load_settings(path: &Path) -> Result<Option<SettingsFile>, String> {
     for _ in 0..3 {
         let before = stamp(&file.metadata().map_err(error)?);
         if before.size > LIMIT as u64 {
-            return Err("Einstellungen sind größer als 1 MiB".into());
+            return Err(too_large());
         }
         file.rewind().map_err(error)?;
         let mut bytes = Vec::new();
@@ -518,20 +521,31 @@ fn load_settings(path: &Path) -> Result<Option<SettingsFile>, String> {
             .read_to_end(&mut bytes)
             .map_err(error)?;
         if bytes.len() > LIMIT {
-            return Err("Einstellungen sind größer als 1 MiB".into());
+            return Err(too_large());
         }
         if stamp(&file.metadata().map_err(error)?) != before {
             continue;
         }
         let json =
-            String::from_utf8(bytes).map_err(|_| "Einstellungen sind kein gültiges UTF-8")?;
+            String::from_utf8(bytes).map_err(|_| String::from(ui_err("SETTINGS_NOT_UTF8")))?;
         return Ok(Some(SettingsFile {
             json,
             modified_ms: before.modified_ms,
             size: before.size,
         }));
     }
-    Err("Einstellungen ändern sich gerade, erneut laden".into())
+    Err(ui_err("SETTINGS_CHANGING").into())
+}
+
+fn too_large() -> String {
+    ui_err("SETTINGS_TOO_LARGE").arg("limit", "1 MiB").into()
+}
+
+fn read_failed(name: &str, error: std::io::Error) -> String {
+    ui_err("DATA_FILE_READ_FAILED")
+        .arg("name", name)
+        .detail(error)
+        .into()
 }
 
 /// `base == None` expects no file; otherwise the existing file must carry `base`.
@@ -541,14 +555,14 @@ fn save_settings(dir: &Path, json: &str, base: Option<Stamp>) -> Result<Stamp, S
     let current = match fs::metadata(&path) {
         Ok(metadata) => Some(stamp(&metadata)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("Einstellungen konnten nicht gelesen werden: {e}")),
+        Err(e) => return Err(ui_err("SETTINGS_READ_FAILED").detail(e).into()),
     };
     if current != base {
         return Err(SETTINGS_CONFLICT.into());
     }
     atomic(&path, json.as_bytes())
         .map(|metadata| stamp(&metadata))
-        .map_err(|e| format!("Einstellungen konnten nicht gespeichert werden: {e}"))
+        .map_err(|e| ui_err("SETTINGS_SAVE_FAILED").detail(e).into())
 }
 
 fn fingerprint_at(dir: &Path) -> Result<Vec<FileStamp>, String> {
@@ -557,7 +571,7 @@ fn fingerprint_at(dir: &Path) -> Result<Vec<FileStamp>, String> {
         let metadata = match fs::metadata(dir.join(name)) {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(format!("{name} konnte nicht gelesen werden: {e}")),
+            Err(e) => return Err(read_failed(name, e)),
         };
         let Stamp { modified_ms, size } = stamp(&metadata);
         stamps.push(FileStamp {
@@ -574,7 +588,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|_| "Datenordner-Vorgang wurde abgebrochen".to_owned())?
+        .map_err(|e| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(e)))?
 }
 
 #[tauri::command]
@@ -605,7 +619,7 @@ pub async fn data_dir_set(
     let cache = app
         .path()
         .app_cache_dir()
-        .map_err(|_| "App-Cache-Ordner konnte nicht ermittelt werden".to_owned())?;
+        .map_err(|e| String::from(ui_err("CACHE_DIR_UNAVAILABLE").detail(e)))?;
     blocking(move || set_at(&config, &cache, path.map(PathBuf::from), copy_current)).await
 }
 
@@ -652,6 +666,7 @@ pub async fn app_restart(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_error::code_of;
 
     struct Temp(PathBuf);
     impl Temp {
@@ -719,10 +734,9 @@ mod tests {
         assert_eq!(resolve_at(&config).unwrap(), custom);
 
         fs::remove_dir(&custom).unwrap();
-        assert!(
-            resolve_at(&config)
-                .unwrap_err()
-                .starts_with("Datenordner nicht erreichbar:")
+        assert_eq!(
+            code_of(&resolve_at(&config).unwrap_err()),
+            Some("DATA_DIR_UNREACHABLE")
         );
         assert!(!status_at(&config).unwrap().reachable);
         // No silent fallback: the pointer stays untouched.
@@ -945,7 +959,7 @@ mod tests {
         for target in [cache.clone(), cache.join("editor"), cache.join("new")] {
             assert_eq!(
                 set_at(&config, &cache, Some(target.clone()), false).unwrap_err(),
-                "Datenordner darf nicht im App-Cache liegen"
+                "DATA_DIR_IN_CACHE"
             );
         }
         assert!(!cache.join("new").exists());
@@ -978,10 +992,9 @@ mod tests {
         let cache = temp.0.join("cache");
         write_pointer(&config, Some(temp.0.join("gone")));
         let target = temp.0.join("fresh");
-        assert!(
-            set_at(&config, &cache, Some(target.clone()), true)
-                .unwrap_err()
-                .starts_with("Datenordner nicht erreichbar:")
+        assert_eq!(
+            code_of(&set_at(&config, &cache, Some(target.clone()), true).unwrap_err()),
+            Some("DATA_DIR_UNREACHABLE")
         );
         assert!(!target.exists());
         let status = set_at(&config, &cache, Some(target.clone()), false).unwrap();
@@ -1109,7 +1122,7 @@ mod tests {
             SETTINGS_CONFLICT
         );
         assert!(!path.exists());
-        // Validation errors stay German messages, not the conflict marker.
+        // Validation errors carry their own code, not the conflict marker.
         let invalid = save_settings(&temp.0, "[]", Some(second)).unwrap_err();
         assert_ne!(invalid, SETTINGS_CONFLICT);
         assert!(no_temp_files(&temp.0));

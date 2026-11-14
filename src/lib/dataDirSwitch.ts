@@ -1,3 +1,4 @@
+import { errorText } from "./backendError";
 export interface SwitchSteps {
   flushSettings(): Promise<void>;
   stopTunnels(): Promise<void>;
@@ -24,5 +25,5 @@ export async function runSwitch(steps: SwitchSteps): Promise<void> {
   await steps.stopLogs();
   await steps.setDataDir();
   steps.lock();
-  try { await steps.restart(); } catch (reason) { steps.onRestartFailed(String(reason)); }
+  try { await steps.restart(); } catch (reason) { steps.onRestartFailed(errorText(reason)); }
 }

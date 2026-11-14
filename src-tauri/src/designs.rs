@@ -6,6 +6,8 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::ui_error::{ui_code, ui_err};
+
 const MAX_SIZE: u64 = 256 * 1024;
 const UI_KEYS: &str = "bg-content bg-app bg-panel bg-panel-alt bg-toolbar bg-menubar bg-input bg-hover bg-active bg-tab bg-tab-active fg-primary fg-secondary fg-muted fg-inverse accent accent-hover accent-hover-fill border border-strong focus-ring danger warning success on-accent monitor-ok monitor-warn monitor-critical selection backdrop shadow warning-bg error-bg indent-guide diff-added diff-deleted diff-added-text diff-deleted-text";
 const TERMINAL_KEYS: &str = "background foreground cursor selectionBackground black red green yellow blue magenta cyan white brightBlack brightRed brightGreen brightYellow brightBlue brightMagenta brightCyan brightWhite";
@@ -58,9 +60,7 @@ fn valid_color(value: &str) -> bool {
 }
 
 fn validate_design(value: &Value) -> Result<Value, String> {
-    let source = value
-        .as_object()
-        .ok_or("Ungültiges Design: Objekt erwartet.")?;
+    let source = value.as_object().ok_or(ui_code("DESIGN_NOT_OBJECT"))?;
     let name = source
         .get("name")
         .and_then(Value::as_str)
@@ -94,27 +94,26 @@ fn validate_design(value: &Value) -> Result<Value, String> {
 
 fn read_json(path: &Path) -> Result<Value, String> {
     let file =
-        fs::File::open(path).map_err(|e| format!("Design konnte nicht geöffnet werden: {e}"))?;
+        fs::File::open(path).map_err(|e| String::from(ui_err("DESIGN_READ_FAILED").detail(e)))?;
     let mut bytes = Vec::new();
     file.take(MAX_SIZE + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| format!("Design konnte nicht gelesen werden: {e}"))?;
+        .map_err(|e| String::from(ui_err("DESIGN_READ_FAILED").detail(e)))?;
     if bytes.len() as u64 > MAX_SIZE {
-        return Err("Designdatei ist größer als 256 KB.".into());
+        return Err(ui_err("DESIGN_TOO_LARGE").arg("limit", "256 KB").into());
     }
-    serde_json::from_slice(&bytes).map_err(|e| format!("Ungültige Designdatei: {e}"))
+    serde_json::from_slice(&bytes)
+        .map_err(|e| ui_err("DESIGN_INVALID_FILE").json_position(&e).into())
 }
 
 fn parse_export(value: &Value) -> Result<Value, String> {
     if value.get("format").and_then(Value::as_str) != Some("werkterm-design") {
-        return Err("Unbekanntes Dateiformat: Werkterm-Design erwartet.".into());
+        return Err(ui_err("DESIGN_UNKNOWN_FORMAT").into());
     }
     match value.get("version").and_then(Value::as_u64) {
-        Some(1) => validate_design(value.get("design").ok_or("Design fehlt in der Datei.")?),
-        Some(version) if version > 1 => {
-            Err("Diese Designversion ist neuer als die unterstützte Version.".into())
-        }
-        _ => Err("Ungültige Designversion.".into()),
+        Some(1) => validate_design(value.get("design").ok_or(ui_code("DESIGN_MISSING"))?),
+        Some(version) if version > 1 => Err(ui_err("DESIGN_NEWER_VERSION").into()),
+        _ => Err(ui_err("DESIGN_INVALID_VERSION").into()),
     }
 }
 
@@ -139,7 +138,11 @@ fn atomic_write(path: &Path, value: &Value) -> Result<(), String> {
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
-    result.map_err(|e| format!("Design konnte nicht gespeichert werden: {e}"))
+    result.map_err(|e| ui_err("DESIGN_SAVE_FAILED").detail(e).into())
+}
+
+fn io(error: std::io::Error) -> String {
+    ui_err("FILE_ACCESS_FAILED").detail(error).into()
 }
 
 fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -148,7 +151,7 @@ fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn design_path(directory: &Path, id: &str) -> Result<PathBuf, String> {
     if !valid_id(id) {
-        return Err("Ungültige Design-ID.".into());
+        return Err(ui_err("DESIGN_INVALID_ID").into());
     }
     Ok(directory.join(format!("{id}.json")))
 }
@@ -158,7 +161,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|e| format!("Designvorgang fehlgeschlagen: {e}"))?
+        .map_err(|e| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(e)))?
 }
 
 #[tauri::command]
@@ -169,8 +172,8 @@ pub async fn designs_list(app: tauri::AppHandle) -> Result<Vec<StoredDesign>, St
             return Ok(Vec::new());
         }
         let mut designs = Vec::new();
-        for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(directory).map_err(io)? {
+            let entry = entry.map_err(io)?;
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
@@ -206,7 +209,7 @@ pub async fn designs_save(
         let design = validate_design(&design)?;
         let id = id.unwrap_or_else(|| make_id(design["name"].as_str().unwrap_or("design")));
         let path = design_path(&directory, &id)?;
-        fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&directory).map_err(io)?;
         atomic_write(&path, &design)?;
         Ok(id)
     })
@@ -220,7 +223,7 @@ pub async fn designs_delete(app: tauri::AppHandle, id: String) -> Result<(), Str
         move || match fs::remove_file(design_path(&directory, &id)?) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!("Design konnte nicht gelöscht werden: {error}")),
+            Err(error) => Err(ui_err("DESIGN_DELETE_FAILED").detail(error).into()),
         },
     )
     .await
@@ -237,7 +240,7 @@ pub async fn designs_export(
     blocking(move || {
         let design = match id {
             Some(id) => validate_design(&read_json(&design_path(&directory, &id)?)?)?,
-            None => validate_design(&design.ok_or("Kein Design zum Exportieren gewählt.")?)?,
+            None => validate_design(&design.ok_or(ui_code("DESIGN_NONE_SELECTED"))?)?,
         };
         atomic_write(
             Path::new(&path),
@@ -289,10 +292,10 @@ mod tests {
     #[test]
     fn import_checks_format_and_version() {
         assert!(parse_export(&json!({"format":"other", "version":1,"design":{}})).is_err());
-        assert!(
+        assert_eq!(
             parse_export(&json!({"format":"werkterm-design", "version":2,"design":{}}))
-                .unwrap_err()
-                .contains("neuer")
+                .unwrap_err(),
+            "DESIGN_NEWER_VERSION"
         );
         assert!(
             parse_export(&json!({"format":"werkterm-design", "version":0,"design":{}})).is_err()
@@ -332,7 +335,10 @@ mod tests {
         );
         bytes.push(b' ');
         fs::write(&path, bytes).unwrap();
-        assert!(read_json(&path).unwrap_err().contains("256 KB"));
+        assert_eq!(
+            read_json(&path).unwrap_err(),
+            r#"DESIGN_TOO_LARGE: {"args":{"limit":"256 KB"}}"#
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 }

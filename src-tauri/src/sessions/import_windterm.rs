@@ -3,6 +3,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use super::{ImportCandidate, ImportPreview, OneKeyRef};
+use crate::ui_error::ui_err;
 
 #[derive(Deserialize)]
 struct WindSession {
@@ -40,8 +41,8 @@ pub(super) fn parse_json<T: serde::de::DeserializeOwned>(text: &str) -> serde_js
 }
 
 pub fn parse(text: &str, one_keys: Option<&str>, home: &Path) -> Result<ImportPreview, String> {
-    let sessions: Vec<WindSession> =
-        parse_json(text).map_err(|_| "Ungültige WindTerm-Sitzungsdatei".to_owned())?;
+    let sessions: Vec<WindSession> = parse_json(text)
+        .map_err(|error| String::from(ui_err("WINDTERM_CORRUPT").json_position(&error)))?;
     let mut result = ImportPreview::default();
     if let Some(text) = one_keys {
         match parse_json::<Vec<PublicOneKey>>(text) {
@@ -57,7 +58,7 @@ pub fn parse(text: &str, one_keys: Option<&str>, home: &Path) -> Result<ImportPr
             }
             Err(_) => result
                 .warnings
-                .push("WindTerm-OneKey-Metadaten konnten nicht gelesen werden".into()),
+                .push(ui_err("WINDTERM_ONEKEY_METADATA").into()),
         }
     }
     for session in sessions {
@@ -93,7 +94,7 @@ pub fn parse(text: &str, one_keys: Option<&str>, home: &Path) -> Result<ImportPr
             result.skipped += 1;
             result
                 .warnings
-                .push("Ungültiger WindTerm-SSH-Eintrag wurde übersprungen".into());
+                .push(ui_err("WINDTERM_INVALID_ENTRY").into());
             continue;
         }
         let key = if cfg!(windows) {
@@ -105,7 +106,7 @@ pub fn parse(text: &str, one_keys: Option<&str>, home: &Path) -> Result<ImportPr
             key: format!(
                 "windterm:{}",
                 serde_json::to_string(&(&session.label, &session.group, target, port))
-                    .map_err(|_| "WindTerm-Importkennung konnte nicht erzeugt werden".to_owned())?
+                    .map_err(|error| String::from(ui_err("IMPORT_KEY_FAILED").detail(error)))?
             ),
             name: session.label.trim().into(),
             folder: session
@@ -195,7 +196,7 @@ mod tests {
     #[test]
     fn malformed_onekeys_do_not_discard_sessions() {
         let result = parse("[]", Some("invalid"), Path::new("test-home")).unwrap();
-        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings, ["WINDTERM_ONEKEY_METADATA"]);
         assert!(parse("{}", None, Path::new("test-home")).is_err());
     }
 }

@@ -5,6 +5,7 @@ pub mod permissions;
 mod sudo;
 pub use actions::TransferProgress;
 
+use crate::ui_error::{UiError, code_of, ui_code, ui_err};
 use russh::{ChannelMsg, ChannelWriteHalf, Disconnect, client, keys};
 use russh_sftp::client::SftpSession;
 use serde::Serialize;
@@ -65,7 +66,7 @@ pub struct SshTarget {
 impl FromStr for SshTarget {
     type Err = String;
     fn from_str(value: &str) -> Result<Self, String> {
-        let invalid = || "Ungültiges SSH-Ziel (erwartet user@host[:port])".to_owned();
+        let invalid = || String::from(ui_err("SSH_INVALID_TARGET"));
         if value.chars().any(char::is_whitespace) {
             return Err(invalid());
         }
@@ -112,7 +113,7 @@ pub fn ssh_dir() -> Result<PathBuf, String> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .filter(|p| !p.is_empty())
         .map(|p| PathBuf::from(p).join(".ssh"))
-        .ok_or_else(|| "Home-Verzeichnis nicht gefunden".into())
+        .ok_or_else(|| ui_err("HOME_NOT_FOUND").into())
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -144,7 +145,7 @@ impl std::fmt::Display for SshError {
 impl std::error::Error for SshError {}
 impl From<russh::Error> for SshError {
     fn from(error: russh::Error) -> Self {
-        Self(format!("SSH-Verbindung fehlgeschlagen: {error}"))
+        Self(UiError::new("SSH_CONNECT_FAILED").detail(error).into())
     }
 }
 
@@ -177,9 +178,7 @@ impl client::Handler for Handler {
         offered: &keys::PublicKeyOrCertificate,
     ) -> Result<bool, SshError> {
         if offered.certificate().is_some() {
-            return Err(SshError(
-                "SSH-Hostzertifikate werden nicht unterstützt".into(),
-            ));
+            return Err(SshError(ui_err("SSH_HOST_CERTIFICATE").into()));
         }
         let key = offered.public_key();
         let (host, port, path) = (
@@ -191,16 +190,23 @@ impl client::Handler for Handler {
         let check =
             tokio::task::spawn_blocking(move || check_known_key(&host, port, &check_key, &path))
                 .await
-                .map_err(|_| SshError("Hostkey-Prüfung fehlgeschlagen".into()))?;
+                .map_err(|_| SshError(ui_err("SSH_HOST_KEY_CHECK_FAILED").into()))?;
         match check {
             Ok(true) => return Ok(true),
             Err(keys::Error::KeyChanged { line }) => {
-                return Err(SshError(format!(
-                    "Hostkey von {}:{} hat sich geändert (known_hosts Zeile {line}) – Verbindung abgebrochen",
-                    self.target.host, self.target.port
-                )));
+                return Err(SshError(
+                    UiError::new("SSH_HOST_KEY_CHANGED")
+                        .arg("host", self.target.host.clone())
+                        .arg("port", self.target.port.to_string())
+                        .arg("line", line.to_string())
+                        .into(),
+                ));
             }
-            Err(_) => return Err(SshError("known_hosts konnte nicht gelesen werden".into())),
+            Err(error) => {
+                return Err(SshError(
+                    UiError::new("SSH_KNOWN_HOSTS_READ").detail(error).into(),
+                ));
+            }
             Ok(false) => (),
         }
         self.prompt_active.send_replace(true);
@@ -226,14 +232,15 @@ impl client::Handler for Handler {
         );
         tokio::task::spawn_blocking(move || {
             if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-                std::fs::create_dir_all(parent)
-                    .map_err(|_| SshError("SSH-Verzeichnis konnte nicht angelegt werden".into()))?;
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    SshError(UiError::new("SSH_DIR_CREATE").detail(error).into())
+                })?;
             }
             keys::known_hosts::learn_known_hosts_path(&host, port, &key, path)
-                .map_err(|_| SshError("Hostkey konnte nicht gespeichert werden".into()))
+                .map_err(|error| SshError(UiError::new("SSH_HOST_KEY_SAVE").detail(error).into()))
         })
         .await
-        .map_err(|_| SshError("Hostkey konnte nicht gespeichert werden".into()))??;
+        .map_err(|_| SshError(ui_err("SSH_HOST_KEY_SAVE").into()))??;
         Ok(true)
     }
 }
@@ -386,7 +393,7 @@ async fn authenticate<H: client::Handler>(
             keys::load_secret_key(key_path, None)
         })
         .await
-        .map_err(|_| "Schlüsseldatei konnte nicht geladen werden")?;
+        .map_err(|_| ui_code("SSH_KEY_LOAD"))?;
         let key = match initial {
             Ok(key) => Some(key),
             Err(keys::Error::KeyIsEncrypted) => {
@@ -414,7 +421,7 @@ async fn authenticate<H: client::Handler>(
                         result
                     })
                     .await
-                    .map_err(|_| "Schlüsseldatei konnte nicht geladen werden")?;
+                    .map_err(|_| ui_code("SSH_KEY_LOAD"))?;
                     if let Ok(loaded) = loaded {
                         key = Some(loaded);
                         break;
@@ -428,7 +435,7 @@ async fn authenticate<H: client::Handler>(
             let hash = handle
                 .best_supported_rsa_hash()
                 .await
-                .map_err(|_| "SSH-Authentifizierung fehlgeschlagen")?
+                .map_err(|error| UiError::new("SSH_AUTH_FAILED").detail(error))?
                 .flatten();
             if handle
                 .authenticate_publickey(
@@ -436,7 +443,7 @@ async fn authenticate<H: client::Handler>(
                     keys::PrivateKeyWithHashAlg::new(Arc::new(key), hash),
                 )
                 .await
-                .map_err(|_| "SSH-Authentifizierung fehlgeschlagen")?
+                .map_err(|error| UiError::new("SSH_AUTH_FAILED").detail(error))?
                 .success()
             {
                 return Ok(());
@@ -458,18 +465,18 @@ async fn authenticate<H: client::Handler>(
             )
             .await
         else {
-            return Err("Anmeldung abgebrochen".into());
+            return Err(ui_err("SSH_LOGIN_CANCELED").into());
         };
         let result = handle.authenticate_password(&target.user, &secret).await;
         drop(secret);
         if result
-            .map_err(|_| "SSH-Authentifizierung fehlgeschlagen")?
+            .map_err(|error| UiError::new("SSH_AUTH_FAILED").detail(error))?
             .success()
         {
             return Ok(());
         }
     }
-    Err("SSH-Anmeldung fehlgeschlagen".into())
+    Err(ui_err("SSH_LOGIN_FAILED").into())
 }
 
 fn auth_key_paths(auth: &crate::sessions::SessionAuth) -> Result<Vec<PathBuf>, String> {
@@ -487,7 +494,7 @@ fn auth_key_paths(auth: &crate::sessions::SessionAuth) -> Result<Vec<PathBuf>, S
                 let home = ssh_dir()?
                     .parent()
                     .map(std::path::Path::to_path_buf)
-                    .ok_or_else(|| "Home-Verzeichnis nicht gefunden".to_owned())?;
+                    .ok_or_else(|| String::from(ui_err("HOME_NOT_FOUND")))?;
                 Ok(vec![crate::sessions::expand_home(path, &home)])
             } else {
                 Ok(vec![PathBuf::from(path)])
@@ -532,21 +539,54 @@ async fn reply(channel: &mut russh::Channel<client::Msg>) -> Result<(), String> 
         match channel.wait().await {
             Some(ChannelMsg::Success) => return Ok(()),
             Some(ChannelMsg::Failure | ChannelMsg::Close | ChannelMsg::Eof) | None => {
-                return Err("SSH-Kanalanforderung abgelehnt".into());
+                return Err(ui_err("SSH_CHANNEL_REJECTED").into());
             }
             _ => (),
         }
     }
 }
 fn ssh_error(error: impl std::fmt::Display) -> String {
-    format!("SSH-Operation fehlgeschlagen: {error}")
+    UiError::new("SSH_FAILED").detail(error).into()
+}
+/// Prefixes an error of a jump host hop; the frontend translates the nested error.
+fn jump_error(name: &str, error: String) -> String {
+    UiError::new("SSH_JUMP_HOST")
+        .arg("name", name)
+        .arg("error", error)
+        .into()
+}
+/// Connection errors that a retry cannot fix (cancellation, rejected or changed host key),
+/// also when they occurred on a jump host.
+pub(crate) fn is_final_connect_error(error: &str) -> bool {
+    let mut error = error.to_owned();
+    while code_of(&error) == Some("SSH_JUMP_HOST") {
+        let inner = error
+            .split_once(':')
+            .and_then(|(_, json)| serde_json::from_str::<serde_json::Value>(json.trim()).ok())
+            .and_then(|value| value["args"]["error"].as_str().map(str::to_owned));
+        match inner {
+            Some(inner) => error = inner,
+            None => break,
+        }
+    }
+    matches!(
+        code_of(&error),
+        Some(
+            "SSH_CONNECT_CANCELED"
+                | "SSH_LOGIN_CANCELED"
+                | "SSH_USER_CANCELED"
+                | "SSH_HOST_KEY_CHANGED"
+                | "SSH_HOST_KEY_CHECK_FAILED"
+                | "SSH_HOST_KEY_SAVE"
+        )
+    )
 }
 fn quote(path: &str) -> String {
     format!("'{}'", path.replace('\'', "'\\''"))
 }
 
 const PHASE_TIMEOUT: Duration = Duration::from_secs(15);
-const CANCELED: &str = "Verbindungsaufbau abgebrochen";
+const CANCELED: &str = ui_code("SSH_CONNECT_CANCELED");
 
 trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
 impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> SshTransport for T {}
@@ -564,7 +604,7 @@ async fn hop_target(
             )
             .await
             .filter(|user| !user.trim().is_empty())
-            .ok_or_else(|| "Benutzereingabe abgebrochen".to_owned())?,
+            .ok_or_else(|| String::from(ui_err("SSH_USER_CANCELED")))?,
     };
     let host = if session.host.contains(':') {
         format!("[{}]", session.host)
@@ -612,7 +652,7 @@ async fn phase_with_budget<T>(
             changed = prompts.changed() => {
                 if changed.is_err() { return future.await; }
             }
-            _ = tokio::time::sleep(remaining), if !paused => return Err("Zeitüberschreitung beim SSH-Verbindungsaufbau".into()),
+            _ = tokio::time::sleep(remaining), if !paused => return Err(ui_err("SSH_CONNECT_TIMEOUT").into()),
         }
         if !paused {
             remaining = remaining.saturating_sub(started.elapsed());
@@ -729,12 +769,12 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
         hop_targets.push(
             phase(hop_target(hop, prompter.as_ref()), canceled, prompts)
                 .await
-                .map_err(|error| format!("Jump host {}: {error}", hop.name))?,
+                .map_err(|error| jump_error(&hop.name, error))?,
         );
     }
     let first_target = hop_targets.first().unwrap_or(&target);
     let first_error = |error: String| match jump_sessions.first() {
-        Some(hop) => format!("Jump host {}: {error}", hop.name),
+        Some(hop) => jump_error(&hop.name, error),
         None => error,
     };
     let started = tokio::time::Instant::now();
@@ -747,7 +787,7 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
                 tokio::net::lookup_host((first_target.host.as_str(), first_target.port)),
             )
             .await
-            .map_err(|_| "Zeitüberschreitung bei der Namensauflösung".to_owned())?
+            .map_err(|_| String::from(ui_err("SSH_RESOLVE_TIMEOUT")))?
             .map(|addresses| addresses.collect())
             .map_err(ssh_error)
         },
@@ -756,7 +796,8 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
     )
     .await
     .map_err(first_error)?;
-    let mut last_error = String::from("Host konnte nicht aufgelöst werden");
+    let mut last_error =
+        String::from(ui_err("SSH_RESOLVE_FAILED").arg("host", first_target.host.clone()));
     let mut connected = None;
     for address in addresses {
         if started.elapsed() >= Duration::from_secs(15) {
@@ -769,7 +810,9 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
                     tokio::net::TcpStream::connect(address),
                 )
                 .await
-                .map_err(|_| format!("Zeitüberschreitung bei {address}"))?
+                .map_err(|_| {
+                    String::from(ui_err("SSH_ADDRESS_TIMEOUT").arg("address", address.to_string()))
+                })?
                 .map_err(ssh_error)
             },
             canceled,
@@ -803,7 +846,7 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
         let hop_session = hop.or(session.as_ref());
         let hop_target = hop_targets.get(index).unwrap_or(&target);
         let label_error = |error: String| match hop {
-            Some(hop) => format!("Jump host {}: {error}", hop.name),
+            Some(hop) => jump_error(&hop.name, error),
             None => error,
         };
         let config = Arc::new(client::Config {
@@ -987,7 +1030,7 @@ impl SshManager {
                 if *early_cancel.borrow() && early_cancel.receiver_count() == 0 {
                     canceled = early_cancel.subscribe();
                 } else {
-                    return Err("Verbindungsnummer bereits verwendet".into());
+                    return Err(ui_err("SSH_CONNECT_TOKEN_IN_USE").into());
                 }
             } else {
                 connections.running.insert(connect_token, cancel);
@@ -1058,7 +1101,7 @@ impl SshManager {
         prompts: &mut watch::Receiver<bool>,
     ) -> Result<SshConnection, String> {
         if cols == 0 || rows == 0 {
-            return Err("Terminalgröße muss größer als null sein".into());
+            return Err(ui_err("TERMINAL_SIZE_ZERO").into());
         }
         let (handle, jumps, mut setup_socket) = connect_transport(
             target,
@@ -1099,7 +1142,7 @@ impl SshManager {
         let id = self
             .next_id
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map_err(|_| "SSH-Sitzungsnummern ausgeschöpft")?;
+            .map_err(|_| ui_code("SSH_IDS_EXHAUSTED"))?;
         let (mut reader, writer) = terminal.split();
         let (stop, mut stopped) = oneshot::channel();
         let (replies, mut responses) = mpsc::unbounded_channel();
@@ -1186,7 +1229,7 @@ impl SshManager {
                     if responses.recv().await == Some(true) {
                         Ok(())
                     } else {
-                        Err("SSH-Kanalanforderung abgelehnt".into())
+                        Err(ui_err("SSH_CHANNEL_REJECTED").into())
                     }
                 },
                 canceled,
@@ -1203,7 +1246,7 @@ impl SshManager {
                     if responses.recv().await == Some(true) {
                         Ok(())
                     } else {
-                        Err("SSH-Kanalanforderung abgelehnt".into())
+                        Err(ui_err("SSH_CHANNEL_REJECTED").into())
                     }
                 },
                 canceled,
@@ -1277,7 +1320,7 @@ impl SshManager {
                 let _ = session.sftp.set(sftp);
             }
             if responses.is_closed() {
-                return Err("SSH-Terminal während des Verbindungsaufbaus geschlossen".into());
+                return Err(ui_err("SSH_TERMINAL_CLOSED").into());
             }
             Ok::<_, String>(())
         }
@@ -1315,8 +1358,8 @@ impl SshManager {
         id: u32,
     ) -> Result<russh_sftp::client::RawSftpSession, String> {
         self.editor_sftp(id, false).await.map_err(|e| {
-            if e == "Nur mit SFTP verfügbar" {
-                "Ordnervergleich benötigt SFTP".into()
+            if code_of(&e) == Some("SFTP_ONLY") {
+                ui_err("FOLDER_DIFF_SFTP").into()
             } else {
                 e
             }
@@ -1338,19 +1381,22 @@ impl SshManager {
             Ok(raw)
         })
         .await
-        .map_err(|_| "Zeitüberschreitung beim Öffnen des SFTP-Kanals".to_owned())?
+        .map_err(|_| String::from(ui_err("SFTP_OPEN_TIMEOUT")))?
     }
     pub(crate) async fn editor_sftp(
         &self,
         id: u32,
         sudo: bool,
     ) -> Result<Arc<SftpSession>, String> {
-        let unavailable = if sudo {
-            "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv"
+        let unavailable = ui_err(if sudo {
+            "SUDO_INACTIVE"
         } else {
-            "SESSION_CLOSED: SSH-Sitzung beendet"
-        };
-        let session = self.session(id).await.map_err(|_| unavailable.to_owned())?;
+            "SESSION_CLOSED"
+        });
+        let session = self
+            .session(id)
+            .await
+            .map_err(|_| String::from(unavailable.clone()))?;
         if session.finished.load(Ordering::Acquire) {
             return Err(unavailable.into());
         }
@@ -1360,21 +1406,20 @@ impl SshManager {
                 .lock()
                 .await
                 .clone()
-                .ok_or_else(|| "SUDO_INACTIVE: sudo-Modus ist nicht mehr aktiv".into());
+                .ok_or_else(|| ui_err("SUDO_INACTIVE").into());
         }
         session
             .sftp
             .get()
             .cloned()
-            .ok_or_else(|| "Nur mit SFTP verfügbar".into())
+            .ok_or_else(|| ui_err("SFTP_ONLY").into())
     }
     async fn session(&self, id: u32) -> Result<Arc<Session>, String> {
-        self.sessions
-            .lock()
-            .await
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| format!("Unbekannte SSH-Sitzung: {id}"))
+        self.sessions.lock().await.get(&id).cloned().ok_or_else(|| {
+            ui_err("SSH_UNKNOWN_SESSION")
+                .arg("id", id.to_string())
+                .into()
+        })
     }
     pub async fn write(&self, id: u32, bytes: &[u8]) -> Result<(), String> {
         self.session(id)
@@ -1386,7 +1431,7 @@ impl SshManager {
     }
     pub async fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
         if cols == 0 || rows == 0 {
-            return Err("Terminalgröße muss größer als null sein".into());
+            return Err(ui_err("TERMINAL_SIZE_ZERO").into());
         }
         self.session(id)
             .await?
@@ -1411,7 +1456,7 @@ impl SshManager {
     pub async fn list_dir(&self, id: u32, path: String) -> Result<DirListing, String> {
         let session = self.session(id).await?;
         if path.contains('\0') {
-            return Err("Ungültiger Verzeichnispfad".into());
+            return Err(ui_err("INVALID_PATH").into());
         }
         let home = path.is_empty() || path == "~";
         let elevated = session.sudo_sftp.lock().await.clone();
@@ -1494,7 +1539,7 @@ impl SshManager {
 async fn exec(handle: &Handle, command: String) -> Result<String, String> {
     let mut channel = tokio::time::timeout(PHASE_TIMEOUT, handle.channel_open_session())
         .await
-        .map_err(|_| "Zeitüberschreitung beim Öffnen des Exec-Kanals")?
+        .map_err(|_| ui_code("SSH_EXEC_OPEN_TIMEOUT"))?
         .map_err(|_| lsparse::UNSUPPORTED)?;
     run_exec(&mut channel, command, PHASE_TIMEOUT).await
 }
@@ -1541,7 +1586,7 @@ async fn run_exec(
         String::from_utf8(output).map_err(|_| lsparse::UNSUPPORTED.into())
     })
     .await
-    .map_err(|_| "Zeitüberschreitung beim Exec-Aufruf".to_owned())
+    .map_err(|_| String::from(ui_err("SSH_EXEC_TIMEOUT")))
     .and_then(|result| result);
     // Every operation result, including rejection and timeout, reaches close.
     let _ = tokio::time::timeout(budget, channel.close_channel()).await;
@@ -1612,7 +1657,7 @@ mod tests {
             )
             .await
             .unwrap_err()
-            .contains("Zeitüberschreitung")
+                == "SSH_CONNECT_TIMEOUT"
         );
         active.send_replace(true);
         cancel.send_replace(true);
@@ -1786,7 +1831,7 @@ mod tests {
         assert!(manager.connections.lock().await.running.is_empty());
         manager.cancel_connect(19).await;
         assert!(manager.connections.lock().await.running.is_empty());
-        assert!(connect().await.err().unwrap().contains("Terminalgröße"));
+        assert_eq!(connect().await.err().unwrap(), "TERMINAL_SIZE_ZERO");
         assert!(manager.connections.lock().await.running.is_empty());
     }
     struct FakeExec {
@@ -1852,6 +1897,25 @@ mod tests {
         ))
     }
     #[test]
+    fn final_connect_errors_are_found_through_jump_hosts() {
+        let canceled = jump_error("outer", jump_error("inner", CANCELED.into()));
+        assert_eq!(code_of(&canceled), Some("SSH_JUMP_HOST"));
+        assert!(canceled.contains(r#""name":"outer""#));
+        assert!(is_final_connect_error(&canceled));
+        assert!(is_final_connect_error(
+            &ui_err("SSH_HOST_KEY_CHANGED")
+                .arg("host", "h")
+                .arg("port", "22")
+                .arg("line", "3")
+                .to_string()
+        ));
+        assert!(!is_final_connect_error(&jump_error(
+            "hop",
+            ssh_error("connection reset")
+        )));
+        assert!(!is_final_connect_error("SSH_JUMP_HOST: {broken"));
+    }
+    #[test]
     fn parses_targets() {
         for (input, host, port) in [
             ("me@example.org", "example.org", 22),
@@ -1881,7 +1945,11 @@ mod tests {
             "me@host@other",
             "me@ho st",
         ] {
-            assert!(input.parse::<SshTarget>().is_err(), "{input}");
+            assert_eq!(
+                input.parse::<SshTarget>().unwrap_err(),
+                "SSH_INVALID_TARGET",
+                "{input}"
+            );
         }
         assert_eq!(quote("a'b"), "'a'\\''b'");
     }

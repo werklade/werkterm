@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { Icon, standardIcons, type IconName } from "./Icon";
@@ -14,10 +15,10 @@ export function IconSetEditor({ value, onChange }: { value: string; onChange(val
   const [folder, setFolder] = useState<string | null>(null);
   const [name, setName] = useState("");
   const refresh = async () => setSets(await invoke<StoredIconSet[]>("icon_sets_list"));
-  useEffect(() => { void refresh().catch(reason => setError(String(reason))); }, []);
+  useEffect(() => { void refresh().catch(reason => setError(errorText(reason))); }, []);
   const run = async (work: () => Promise<void>) => {
     setBusy(true); setError(""); setMessages([]);
-    try { await work(); } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
+    try { await work(); } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
   const imported = sets.find(set => set.id === value);
   return <section className="icon-set-editor" aria-label={t("iconSet.heading")} aria-busy={busy}>
@@ -42,7 +43,7 @@ export function IconSetEditor({ value, onChange }: { value: string; onChange(val
     })}>{t("common.delete")}</button></div>
     {folder !== null && <form onSubmit={event => { event.preventDefault(); void run(async () => {
       const result = await invoke<{ id: string; warnings: string[] }>("icon_sets_import", { folder, name: name.trim(), known: Object.keys(standardIcons) });
-      await refresh(); onChange(result.id); setFolder(null); setMessages([t("iconSet.imported"), ...result.warnings]);
+      await refresh(); onChange(result.id); setFolder(null); setMessages([t("iconSet.imported"), ...result.warnings.map(errorText)]);
     }); }}><label>{t("iconSet.name")}<input autoFocus maxLength={60} value={name} disabled={busy} onChange={event => setName(event.target.value)} /></label>
       <button disabled={busy || !name.trim()}>{t("iconSet.importSubmit")}</button><button type="button" disabled={busy} onClick={() => setFolder(null)}>{t("common.cancel")}</button></form>}
     <p>{t("iconSet.help")}</p>

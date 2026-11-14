@@ -1,4 +1,5 @@
 import { currentLocale, t } from "../i18n";
+import { errorText } from "./backendError";
 import type { SavedSession } from "./sessions";
 export interface Tunnel { id: string; name: string; kind: "local" | "remote" | "dynamic"; session_id: string; bind_address: string; bind_port: number; target_host: string; target_port: number | null; autostart: boolean; reconnect: boolean; allow_public: boolean }
 export interface TunnelStatus { id: string; state: "stopped" | "connecting" | "running" | "error" | "reconnecting"; error: string | null; connections: number; bytes_in: number; bytes_out: number; bound_port: number | null }
@@ -30,7 +31,7 @@ export function validateTunnel(tunnel: Tunnel, sessions: SavedSession[]): string
 }
 export function statusText(s?: TunnelStatus): string {
   if (!s) return t("tunnel.state.stopped");
-  return t(`tunnel.state.${s.state}`) + (s.error ? `: ${s.error}` : "");
+  return t(`tunnel.state.${s.state}`) + (s.error ? `: ${errorText(s.error)}` : "");
 }
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

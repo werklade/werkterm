@@ -1,4 +1,5 @@
 import { activateIconSet } from "./lib/iconSets";
+import { errorCode, errorText } from "./lib/backendError";
 import { applyDesign, getDesign, getUserDesigns, registerUserDesign, designsChangedEvent, type StoredDesign } from "./lib/designs";
 import { SerialPermissionDialog } from "./components/SerialPermissionDialog";
 import { serialFixCommands, type SerialPermission } from "./lib/serialPermission";
@@ -90,15 +91,13 @@ function EditorCloseDialog({ name, busy, onAnswer }: { name: string; busy: boole
   </dialog>;
 }
 function editorOpenError(reason: unknown): string {
-  const message = String(reason);
-  const code = message.split(":", 1)[0];
-  switch (code) {
+  switch (errorCode(reason)) {
     case "ENCODING": return t("app.openError.ENCODING");
     case "BINARY": return t("app.openError.BINARY");
     case "TOO_LARGE": return t("app.openError.TOO_LARGE");
     case "SESSION_CLOSED": return t("app.openError.SESSION_CLOSED");
     case "CONFLICT": return t("app.openError.CONFLICT");
-    default: return t("app.openError.generic", { message });
+    default: return t("app.openError.generic", { message: errorText(reason) });
   }
 }
 
@@ -144,7 +143,7 @@ export default function App() {
   const onLog = useCallback((id: number, path: string | null) => setLogPaths(current => { const next = { ...current }; if (path) next[id] = path; else delete next[id]; return next; }), []);
   useEffect(() => {
     const subscription = listen<{ id: number; message: string }>("session-log-error", event => {
-      setStatus(event.payload.message); onLog(event.payload.id, null);
+      setStatus(errorText(event.payload.message)); onLog(event.payload.id, null);
     });
     return () => { void subscription.then(stop => stop()); };
   }, [onLog]);
@@ -177,7 +176,7 @@ export default function App() {
       event.preventDefault();
       void closeRequest.current();
     }).then(stop => { if (disposed) stop(); else unlisten = stop; })
-      .catch(reason => setStatus(String(reason)));
+      .catch(reason => setStatus(errorText(reason)));
     return () => { disposed = true; unlisten?.(); };
   }, []);
   const [sshClose, setSshClose] = useState<{ message: string; transfers: number; quitting: boolean; answer(accepted: boolean, never: boolean): void } | null>(null);
@@ -212,7 +211,7 @@ export default function App() {
       if (disposed) return;
       await reloadTunnels();
       if (!tunnelAutostart.current) { tunnelAutostart.current = true; await invoke("tunnel_autostart", { onPrompt: tunnelPromptChannel() }); }
-    }).catch(reason => setStatus(String(reason)));
+    }).catch(reason => setStatus(errorText(reason)));
     return () => { disposed = true; void subscription.then(unlisten => unlisten()); };
   }, [dataReady]);
   // Empty means "ready": the default text is translated at render time, so it follows the language.
@@ -250,7 +249,7 @@ export default function App() {
     // Derived value, device-local: updates state and cache only and never writes settings.json.
     void defaultLogFolder().then(logFolder => {
       if (!settingsRef.current.logFolder) { const next = normalizeSettings({ ...settingsRef.current, logFolder }); settingsRef.current = next; setSettings(next); saveSettings(next); }
-    }).catch(reason => setStatus(t("app.status.logFolder", { reason: String(reason) })));
+    }).catch(reason => setStatus(t("app.status.logFolder", { reason: errorText(reason) })));
   }, [dataReady]);
   const applyLoadedSettings = (loaded: Settings) => { settingsRef.current = loaded; setSettings(loaded); };
   const refreshFingerprint = async () => { try { fingerprint.current = await dataDirFingerprint(); } catch { fingerprint.current = null; } };
@@ -259,7 +258,7 @@ export default function App() {
   const bootstrapData = async (firstSetup = false): Promise<boolean> => {
     let next: DataDirStatus;
     try { next = await dataDirStatus(); }
-    catch (reason) { settingsSync.block(); setDataError(String(reason)); setDataPhase("error"); return false; }
+    catch (reason) { settingsSync.block(); setDataError(errorText(reason)); setDataPhase("error"); return false; }
     setDataError("");
     setDataStatus(next);
     if (!next.configured) { settingsSync.block(); setDataPhase("setup"); return false; }
@@ -285,11 +284,11 @@ export default function App() {
   };
   const finishSwitch = async (copy: boolean) => {
     lockForSwitch(copy);
-    try { await appRestart(); } catch (reason) { setRestartError(String(reason)); }
+    try { await appRestart(); } catch (reason) { setRestartError(errorText(reason)); }
   };
   const retryRestart = async () => {
     setRestartBusy(true); setRestartError("");
-    try { await appRestart(); } catch (reason) { setRestartError(String(reason)); }
+    try { await appRestart(); } catch (reason) { setRestartError(errorText(reason)); }
     finally { setRestartBusy(false); }
   };
   /** Startup dialogs: the default folder continues in place, any other folder needs a restart. */
@@ -302,7 +301,7 @@ export default function App() {
   const [dataErrorAction, setDataErrorAction] = useState("");
   const runDataErrorAction = async (action: () => Promise<void>) => {
     setDataErrorBusy(true); setDataErrorAction("");
-    try { await action(); } catch (reason) { setDataErrorAction(String(reason)); }
+    try { await action(); } catch (reason) { setDataErrorAction(errorText(reason)); }
     finally { setDataErrorBusy(false); }
   };
   const resetPointer = async () => {
@@ -313,7 +312,7 @@ export default function App() {
   const changeDataDirFrom = (current: DataDirStatus, choice: DataDirChoice) => setDataDirChange({ status: current, choice });
   const pickForChange = async (current: DataDirStatus) => {
     try { const path = await pickDataDir(); if (path !== null) changeDataDirFrom(current, { kind: "folder", path }); }
-    catch (reason) { setStatus(t("app.status.folderPicker", { reason: String(reason) })); }
+    catch (reason) { setStatus(t("app.status.folderPicker", { reason: errorText(reason) })); }
   };
   const sidebarVisible = settings.sidebarVisible;
   const setSidebarVisible = (value: boolean | ((current: boolean) => boolean)) => changeSettings({ ...settingsRef.current, sidebarVisible: typeof value === "function" ? value(settingsRef.current.sidebarVisible) : value });
@@ -323,12 +322,12 @@ export default function App() {
   const [lastTabs, setLastTabs] = useState<LastTab[]>([]);
   const [restoreQueue, setRestoreQueue] = useState<LastTab[] | null>(null);
   useEffect(() => {
-    void invoke<string>("local_shell_name").then(setShellName).catch(reason => setStatus(String(reason)));
+    void invoke<string>("local_shell_name").then(setShellName).catch(reason => setStatus(errorText(reason)));
   }, []);
   useEffect(() => {
     if (!dataReady) return;
-    void recentList().then(setRecents).catch(reason => setStatus(String(reason)));
-    void lastTabsList().then(setLastTabs).catch(reason => setStatus(String(reason)));
+    void recentList().then(setRecents).catch(reason => setStatus(errorText(reason)));
+    void lastTabsList().then(setLastTabs).catch(reason => setStatus(errorText(reason)));
   }, [dataReady]);
   useEffect(() => {
     const show = (event: KeyboardEvent) => {
@@ -369,7 +368,7 @@ export default function App() {
   }, [dataReady]);
   const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | "werkterm" | null>(null);
   const fullscreenPending = useRef(false);
-  useEffect(() => { void activateIconSet(settings.iconSet).catch(reason => setStatus(String(reason))); }, [settings.iconSet]);
+  useEffect(() => { void activateIconSet(settings.iconSet).catch(reason => setStatus(errorText(reason))); }, [settings.iconSet]);
   useLayoutEffect(() => { applyDesign(getDesign(settings.design)); }, [settings, designRevision]);
   const [prompts, setPrompts] = useState<QueuedPrompt[]>([]);
   const promptQueue = useRef<QueuedPrompt[]>([]);
@@ -422,7 +421,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     void availableShells().then(shells => { if (!cancelled) { setHasWsl(shells.includes("wsl")); setShellsLoaded(true); } }).catch((error: unknown) => {
-      if (!cancelled) setStatus(t("app.status.shellsLoadFailed", { reason: String(error) }));
+      if (!cancelled) setStatus(t("app.status.shellsLoadFailed", { reason: errorText(error) }));
     });
     return () => { cancelled = true; };
   }, []);
@@ -548,7 +547,7 @@ export default function App() {
     void closeAfterSsh(() => askSshClose([id]), async () => {
       if (editorsRef.current[id]) return closeEditors([id], true);
       removeTab(id); return true;
-    }).catch(reason => reportStatus(String(reason))).finally(() => closing.current.delete(id));
+    }).catch(reason => reportStatus(errorText(reason))).finally(() => closing.current.delete(id));
   };
   const answerEditorClose = (answer: CloseAnswer) => {
     if (closeEditorBusy) return;
@@ -615,9 +614,9 @@ export default function App() {
         settingsSync.lock(); setRestartForUpdate(true); setRestartNotInstalled(true); setRestartRequired(true); setUpdateOpen(false);
         return false;
       }
-      if (restart?.kind === "update") throw new Error(withStoppedNote(String(reason instanceof Error ? reason.message : reason), { tunnels: tunnelsStopped, logs: logsStopped }));
-      if (restart) throw new Error(t("app.error.dataDirSwitch", { reason: String(reason) }));
-      reportStatus(t("app.error.windowClose", { reason: String(reason) }));
+      if (restart?.kind === "update") throw new Error(withStoppedNote(errorText(reason), { tunnels: tunnelsStopped, logs: logsStopped }));
+      if (restart) throw new Error(t("app.error.dataDirSwitch", { reason: errorText(reason) }));
+      reportStatus(t("app.error.windowClose", { reason: errorText(reason) }));
     }
     finally { for (const handle of locked) handle.unlock(); windowClosing.current = false; }
     return done;
@@ -672,7 +671,7 @@ export default function App() {
     const next = { ...source, tab: original };
     if (remember) { setMarked(next); return; }
     const sources = comparisonSources(markedSource, next);
-    if (sources) void compareFiles(sources).catch(reason => reportStatus(String(reason)));
+    if (sources) void compareFiles(sources).catch(reason => reportStatus(errorText(reason)));
   };
   // Restart a finished session in the same tab; the new generation remounts the terminal view.
   const restartTab = useCallback((id: number) => {
@@ -699,7 +698,7 @@ export default function App() {
       if (tab) {
         const at = Date.now();
         const item: Recent = tab.savedSessionId ? { kind: "saved", sessionId: tab.savedSessionId, name: tab.title, at } : { kind: "quick", target: tab.target ?? "", at };
-        void invoke("recent_add", { item }).then(recentList).then(setRecents).catch(reason => setStatus(String(reason)));
+        void invoke("recent_add", { item }).then(recentList).then(setRecents).catch(reason => setStatus(errorText(reason)));
       }
     }
     setTabs(current => current.map(tab => tab.id === id && !tab.exited ? { ...tab, sessionId: sessionId ?? undefined } : tab));
@@ -780,7 +779,7 @@ export default function App() {
       if (tabsRef.current.some(t => t.id === id && !t.exited)) onLog(id, path);
       else return stopLog(id);
     });
-    void operation.catch(reason => setStatus(t("app.status.log", { reason: String(reason) }))).finally(() => logBusy.current.delete(id));
+    void operation.catch(reason => setStatus(t("app.status.log", { reason: errorText(reason) }))).finally(() => logBusy.current.delete(id));
   };
   const action = (name: string) => {
     setTemporaryMenu(false);
@@ -800,11 +799,11 @@ export default function App() {
     if (name.startsWith("size:")) { changeSettings({ ...settings, toolbarSize: name.slice(5) as Settings["toolbarSize"] }); return; }
     switch (name) {
       case "paste": if (activeId !== null) terminalPasteRequests.get(activeId)?.(); break;
-      case "logFolder": void openLogFolder(settings.logFolder).catch(reason => setStatus(String(reason))); break;
+      case "logFolder": void openLogFolder(settings.logFolder).catch(reason => setStatus(errorText(reason))); break;
       case "logToggle": if (activeId !== null) toggleSessionLog(activeId); break;
       case "root": case "processes": case "hardware": openTab("local", name); break;
       case "compareFiles": setDiffDialog(true); break;
-      case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: t("app.tab.local"), titleKey: "app.tab.local", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(String(reason))); break;
+      case "openFile": void openFileDialog({ multiple: false, directory: false }).then(path => { if (typeof path === "string") openEditor({ id: 0, kind: "local", title: t("app.tab.local"), titleKey: "app.tab.local", exited: false, browserPath: "" }, path); }).catch(reason => setStatus(errorText(reason))); break;
       case "compact": changeSettings({ ...settings, compact: !settings.compact }); break;
       case "left": case "right": changeSettings({ ...settings, sidebarRight: name === "right" }); break;
       case "tabNumbers": changeSettings({ ...settings, tabNumbers: !settings.tabNumbers }); break;
@@ -816,7 +815,7 @@ export default function App() {
       case "wsl": if (hasWsl) openTab("wsl"); break;
       case "quick": setSidebarVisible(true); requestAnimationFrame(() => document.querySelector<HTMLInputElement>("input[data-quick-connect]")?.focus()); break;
       case "close": if (activeId !== null) closeTab(activeId); break;
-      case "tunnels": setTunnelsOpen(true); void reloadTunnels().catch(reason => setStatus(String(reason))); break;
+      case "tunnels": setTunnelsOpen(true); void reloadTunnels().catch(reason => setStatus(errorText(reason))); break;
       case "quit": void closeRequest.current(); break;
       case "newSession": setSessionDialog({}); break;
       case "sessions": showPanel(0); break;
@@ -835,7 +834,7 @@ export default function App() {
         if (fullscreenPending.current) break;
         fullscreenPending.current = true;
         const win = getCurrentWindow();
-        void win.isFullscreen().then(value => win.setFullscreen(!value)).catch(reason => reportStatus(String(reason))).finally(() => { fullscreenPending.current = false; }); break;
+        void win.isFullscreen().then(value => win.setFullscreen(!value)).catch(reason => reportStatus(errorText(reason))).finally(() => { fullscreenPending.current = false; }); break;
       }
       case "settings": setSettingsOpen(true); break;
       case "shortcuts": setHelp("shortcuts"); break;
@@ -886,7 +885,7 @@ export default function App() {
         if (loaded) { applyLoadedSettings(loaded); reloaded = true; }
       }
       if (reloaded) setStatus(t("app.status.dataReloaded"));
-    } catch (reason) { setStatus(t("app.status.dataDirUnreadable", { reason: String(reason) })); }
+    } catch (reason) { setStatus(t("app.status.dataDirUnreadable", { reason: errorText(reason) })); }
     finally { checkingFingerprint.current = false; }
   };
   const checkExternalRef = useRef(checkExternal);
@@ -983,7 +982,7 @@ export default function App() {
     {tunnelConfirmation && <TunnelConfirmDialog onAnswer={accepted => { setTunnelConfirmation(null); tunnelConfirmation(accepted); }} />}
     {diffDialog && <DiffDialog onCompare={compareFiles} onClose={() => setDiffDialog(false)} />}
     {tool && <ToolDialog kind={tool} onClose={() => setTool(null)} />}
-    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} tabPasteCount={tabPasteCount} onResetTabPaste={() => { tabPasteChoices.current.clear(); setTabPasteCount(0); }} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(String(reason))); }} onClose={() => setSettingsOpen(false)}
+    {settingsOpen && <SettingsDialog settings={settings} onChange={changeSettings} tabPasteCount={tabPasteCount} onResetTabPaste={() => { tabPasteChoices.current.clear(); setTabPasteCount(0); }} onClearRecents={() => { void invoke("recent_clear").then(() => setRecents([])).catch(reason => setStatus(errorText(reason))); }} onClose={() => setSettingsOpen(false)}
       onChangeDataDir={current => { void pickForChange(current); }} onDefaultDataDir={current => changeDataDirFrom(current, { kind: "default", path: current.defaultPath })} />}
     {dataDirChange && <DataDirDialog mode="change" status={dataDirChange.status} initialChoice={dataDirChange.choice} onApply={restartWithDataDir} onCancel={() => setDataDirChange(null)} />}
     {dataPhase === "setup" && dataStatus && <DataDirDialog mode="setup" status={dataStatus} notice={setupNotice} onApply={applyStartupChoice(true)} />}
@@ -1003,7 +1002,7 @@ export default function App() {
         openTab("local");
       })} />}
     {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
-    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus([tp("app.import.result", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? [])].join("; ")); }} />}
+    {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus([tp("app.import.result", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? []).map(errorText)].join("; ")); }} />}
     {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(tp("app.import.done", result.imported)); }} />}
     {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}

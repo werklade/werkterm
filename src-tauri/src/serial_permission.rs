@@ -62,7 +62,7 @@ pub(super) fn inspect(device: &str) -> Result<Permission, String> {
         .or_else(|| std::env::var("USER").ok())
         .unwrap_or_default();
     if !valid_username(&username) {
-        return Err("Benutzername ungewöhnlich, bitte manuell".into());
+        return Err(crate::ui_error::ui_err("SERIAL_USERNAME_UNUSUAL").into());
     }
     // metadata follows symlinks, including /dev/serial/by-id links.
     let gid = std::fs::metadata(device).ok().map(|m| m.gid());
@@ -96,12 +96,12 @@ pub(super) fn inspect(device: &str) -> Result<Permission, String> {
 fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\"'\"'"))
 }
+/// The frontend derives the hint text from `needs_root_password`.
 #[derive(Serialize)]
 struct OptionCommand {
     label: String,
     command: String,
     needs_root_password: bool,
-    hint: String,
 }
 const PRIVILEGE: [&str; 4] = ["sudo", "doas", "pkexec", "su"];
 const GROUP_TOOLS: [&str; 4] = ["usermod", "gpasswd", "addgroup", "adduser"];
@@ -126,22 +126,18 @@ fn options(group: &str, user: &str, has: impl Fn(&str) -> bool) -> Vec<OptionCom
                     format!("{privilege} {cmd}")
                 },
                 needs_root_password: privilege == "su",
-                hint: if privilege == "su" {
-                    "Fragt das Root-Passwort"
-                } else {
-                    "Authentifizierung erfolgt im Terminal"
-                }
-                .into(),
             });
         }
     }
     result
 }
+/// Install command for the distribution, or empty when unknown (the frontend then shows a
+/// translated general hint).
 fn install_hint(id: &str, like: &str) -> &'static str {
     for distro in std::iter::once(id).chain(like.split_whitespace()) {
         match distro {
             "debian" | "ubuntu" => return "apt install sudo",
-            "alpine" => return "apk add sudo oder apk add doas",
+            "alpine" => return "apk add sudo / apk add doas",
             "arch" => return "pacman -S sudo",
             "fedora" | "rhel" => return "dnf install sudo",
             "opensuse" | "opensuse-leap" | "opensuse-tumbleweed" | "suse" => {
@@ -150,7 +146,7 @@ fn install_hint(id: &str, like: &str) -> &'static str {
             _ => (),
         }
     }
-    "Als root ein Berechtigungswerkzeug (sudo, doas, pkexec oder su) und ein Gruppenwerkzeug installieren."
+    ""
 }
 #[cfg(target_os = "linux")]
 pub(super) fn fix_options(device: &str) -> Result<serde_json::Value, String> {
@@ -235,6 +231,7 @@ mod tests {
             format!("su -c {}", quote(&command))
         );
         assert_eq!(install_hint("mint", "ubuntu debian"), "apt install sudo");
+        assert_eq!(install_hint("unknown", ""), "");
         assert_eq!(
             release_value("ID=\"alpine\"\nID_LIKE=debian", "ID"),
             "alpine"

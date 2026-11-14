@@ -1,4 +1,5 @@
 import { backendErrorText, localFileName, transferText, type TransferProgress } from "./transferFormat";
+import { errorCode } from "./backendError";
 import { t } from "../i18n";
 import { parentPath } from "./paths";
 
@@ -105,7 +106,7 @@ export class TransferQueue<C> {
     try { await this.transfer(active, active.job.kind === "upload" && (active.job.overwrite === true || active.batch.overwriteAll)); }
     catch (reason: unknown) {
       if (active.controller.signal.aborted) return;
-      if (active.job.kind !== "upload" || !String(reason).startsWith("EXISTS:")) throw reason;
+      if (active.job.kind !== "upload" || errorCode(reason) !== "EXISTS") throw reason;
       const signal = active.controller.signal;
       // Cancellation releases the queue even if an injected dialog never answers.
       let stop: () => void = () => undefined;

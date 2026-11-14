@@ -1,4 +1,5 @@
 use super::{ChannelMsg, PHASE_TIMEOUT, SftpSession, SshManager, quote, reply};
+use crate::ui_error::{ui_code, ui_err};
 use std::sync::Arc;
 
 // A timed-out exec setup must close its channel even before into_stream().
@@ -21,7 +22,7 @@ impl Drop for PendingChannel {
     }
 }
 
-const FAILED: &str = "SUDO_FAILED: sudo-SFTP konnte nicht gestartet werden (Passwort oder Serverkonfiguration prüfen)";
+const FAILED: &str = ui_code("SUDO_FAILED");
 pub(super) const SEARCH: &str = "for p in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server /usr/lib/ssh/sftp-server /usr/libexec/sftp-server /usr/lib/sftp-server /usr/sbin/sftp-server; do if [ -x \"$p\" ]; then printf '%s\\n' \"$p\"; exit 0; fi; done; exit 1";
 
 // No Debug implementation: this buffer must never enter diagnostics.
@@ -57,7 +58,7 @@ impl SshManager {
         }
         let session = self.session(id).await?;
         if session.sftp.get().is_none() {
-            return Err("Nur mit SFTP verfügbar".into());
+            return Err(ui_err("SFTP_ONLY").into());
         }
         // Serialize toggles, including setup, so disable cannot race publication.
         let mut active = session.sudo_sftp.lock().await;
@@ -94,9 +95,9 @@ impl SshManager {
                     if code == Some(0) {
                         Ok(())
                     } else if denied(&output) {
-                        Err("SUDO_DENIED: sudo nicht erlaubt")
+                        Err(ui_code("SUDO_DENIED"))
                     } else {
-                        Err("SUDO_PASSWORD: sudo verlangt ein Passwort")
+                        Err(ui_code("SUDO_PASSWORD"))
                     }
                 }
                 .await;
@@ -105,7 +106,7 @@ impl SshManager {
             }
             let path = super::exec(&session.handle, SEARCH.into())
                 .await
-                .map_err(|_| "SUDO_NO_SFTP: sftp-server nicht gefunden")?;
+                .map_err(|_| ui_code("SUDO_NO_SFTP"))?;
             let path = path.trim();
             // Only accept the fixed candidates; never execute arbitrary stdout.
             if ![
@@ -118,7 +119,7 @@ impl SshManager {
             ]
             .contains(&path)
             {
-                return Err("SUDO_NO_SFTP: sftp-server nicht gefunden");
+                return Err(ui_code("SUDO_NO_SFTP"));
             }
             let channel = session
                 .handle

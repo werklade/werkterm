@@ -1,4 +1,5 @@
 //! Read-only local socket inventory. No sockets or network connections are opened.
+use crate::ui_error::ui_err;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -152,12 +153,12 @@ fn inventory() -> Result<Vec<LocalPort>, String> {
         }
     }
     if !readable {
-        return Err("Lokale Socket-Tabellen sind nicht lesbar.".into());
+        return Err(ui_err("LOCAL_SOCKETS_UNREADABLE").into());
     }
     let wanted: std::collections::HashSet<_> = sockets.iter().map(|(_, inode)| *inode).collect();
     let mut owners = HashMap::new();
     for entry in fs::read_dir("/proc")
-        .map_err(|_| "Prozessliste ist nicht lesbar.")?
+        .map_err(|error| String::from(ui_err("LOCAL_PROCESSES_UNREADABLE").detail(error)))?
         .flatten()
     {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
@@ -210,9 +211,9 @@ fn inventory() -> Result<Vec<LocalPort>, String> {
         .arg("-ano")
         .creation_flags(0x08000000)
         .output()
-        .map_err(|_| "netstat konnte nicht gestartet werden.")?;
+        .map_err(|error| String::from(ui_err("NETSTAT_START_FAILED").detail(error)))?;
     if !output.status.success() {
-        return Err("netstat ist fehlgeschlagen.".into());
+        return Err(ui_err("NETSTAT_FAILED").detail(output.status).into());
     }
     let mut ports = parse_netstat(&String::from_utf8_lossy(&output.stdout));
     let names = command("tasklist")
@@ -233,7 +234,7 @@ fn inventory() -> Result<Vec<LocalPort>, String> {
 pub async fn local_ports() -> Result<Vec<LocalPort>, String> {
     tauri::async_runtime::spawn_blocking(inventory)
         .await
-        .map_err(|_| "Portliste konnte nicht gelesen werden.".to_owned())?
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[cfg(test)]

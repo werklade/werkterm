@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { errorText } from "../lib/backendError";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t } from "../i18n";
 import { choicePath, dataDirInspect, describeInspect, type ChoiceFeedback, type DataDirChoice, type DataDirStatus } from "../lib/dataDir";
@@ -39,7 +40,7 @@ export function DataDirDialog({ mode, status, initialChoice, onApply, onRetry, o
     setChoice(next); setFeedback(null); setError(""); setInspecting(true);
     dataDirInspect(next.path)
       .then(info => { if (current()) setFeedback(describeInspect(info, { allowSame })); })
-      .catch((reason: unknown) => { if (current()) setFeedback({ tone: "error", message: String(reason), canConfirm: false, showCopy: false }); })
+      .catch((reason: unknown) => { if (current()) setFeedback({ tone: "error", message: errorText(reason), canConfirm: false, showCopy: false }); })
       .finally(() => { if (current()) setInspecting(false); });
   };
   useEffect(() => { if (initialChoice) inspect(initialChoice); }, []);
@@ -47,7 +48,7 @@ export function DataDirDialog({ mode, status, initialChoice, onApply, onRetry, o
   const apply = async (path: string | null, copyCurrent: boolean) => {
     setBusy(true); setError("");
     try { await onApply(path, copyCurrent); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
   const pick = async () => {
@@ -55,7 +56,7 @@ export function DataDirDialog({ mode, status, initialChoice, onApply, onRetry, o
     try {
       const path = await pickDataDir();
       if (path !== null) { setView("choose"); inspect({ kind: "folder", path }); }
-    } catch (reason) { setError(String(reason)); }
+    } catch (reason) { setError(errorText(reason)); }
   };
   const useDefault = () => {
     // Setup and unreachable: the explicit button is the choice. Change: inspect first, confirm with the apply button.
@@ -65,7 +66,7 @@ export function DataDirDialog({ mode, status, initialChoice, onApply, onRetry, o
   const retry = async () => {
     setBusy(true); setError("");
     try { if (!(await onRetry?.())) setError(t("dataDir.stillUnreachable")); }
-    catch (reason) { setError(String(reason)); }
+    catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
   const submit = () => {

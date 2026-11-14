@@ -20,6 +20,7 @@ pub mod ssh;
 pub mod telnet;
 mod terminal_colors;
 pub mod tunnels;
+pub mod ui_error;
 #[cfg(desktop)]
 mod updater;
 

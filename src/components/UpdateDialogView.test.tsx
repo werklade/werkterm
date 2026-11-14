@@ -139,8 +139,8 @@ describe("update available", () => {
     expect(handlers.onCopy).toHaveBeenCalledWith(aptCommand);
   });
   it("self-update blocked here: reason as note, download address to copy, no install button", () => {
-    const tree = render(offer({ canInstall: false, blockedReason: "Der AppImage-Ordner ist nicht beschreibbar." }));
-    expect(textOf(tree)).toContain("Der AppImage-Ordner ist nicht beschreibbar.");
+    const tree = render(offer({ canInstall: false, blockedReason: "UPDATE_NOT_WRITABLE" }));
+    expect(textOf(tree)).toContain("Der Ordner des AppImage ist nicht beschreibbar");
     expect(textOf(findAll(tree, e => e.type === "code")[0])).toBe(updateDownloadUrl);
     expect(labels(tree)).toEqual(["Kopieren", "Schließen"]);
     expect(primaries(tree)).toEqual([]);

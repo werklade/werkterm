@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { errorText } from "../lib/backendError";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { Icon } from "./Icon";
 import { MonitorTooltip as Tip } from "./MonitorTooltip";
@@ -51,7 +52,7 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
     channel.onmessage = value => { if (alive) { setSample(value); if (value.cpuPercent !== null) setValues(old => history(old, value.cpuPercent!)); } };
     monitorQueue = monitorQueue.catch(() => undefined).then(async () => {
       if (alive) await invoke("ssh_monitor_start", { id: sessionId, onSample: channel });
-    }).catch((reason: unknown) => { if (alive) setError(String(reason)); });
+    }).catch((reason: unknown) => { if (alive) setError(errorText(reason)); });
     return () => {
       alive = false;
       monitorQueue = monitorQueue.catch(() => undefined).then(() => invoke("ssh_monitor_stop", { id: sessionId }));

@@ -278,3 +278,28 @@ async fn late_or_unread_open_confirmation_closes_owned_resource() {
         assert!(closed.load(Ordering::Relaxed));
     }
 }
+#[test]
+fn autostart_reports_every_failed_tunnel_with_its_name() {
+    assert_eq!(autostart_result(Vec::new()), Ok(()));
+    let error = autostart_result(vec![
+        (
+            "Database".into(),
+            ui_err("TUNNEL_PORT_IN_USE").arg("port", "8080").into(),
+        ),
+        ("Web".into(), ui_err("TUNNEL_DISCONNECTED").into()),
+    ])
+    .unwrap_err();
+    let (code, payload) = error.split_once(": ").unwrap();
+    assert_eq!(code, "TUNNEL_AUTOSTART_FAILED");
+    let payload: serde_json::Value = serde_json::from_str(payload).unwrap();
+    assert_eq!(payload["args"]["count"], "2");
+    let errors: Vec<String> =
+        serde_json::from_str(payload["args"]["errors"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        errors,
+        [
+            r#"TUNNEL_START_FAILED: {"args":{"error":"TUNNEL_PORT_IN_USE: {\"args\":{\"port\":\"8080\"}}","name":"Database"}}"#,
+            r#"TUNNEL_START_FAILED: {"args":{"error":"TUNNEL_DISCONNECTED","name":"Web"}}"#,
+        ]
+    );
+}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import { currentLocale, t, useT, type TextKey } from "../i18n";
@@ -44,12 +45,12 @@ export function DesignEditor({ name, onChange }: { name: string; onChange(name: 
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     const next = pending.current; pending.current = null;
-    if (next) saving.current = saving.current.then(async () => { await invoke("designs_save", { id: next.id, design: next.design }); }).catch(reason => setError(String(reason)));
+    if (next) saving.current = saving.current.then(async () => { await invoke("designs_save", { id: next.id, design: next.design }); }).catch(reason => setError(errorText(reason)));
   };
   useEffect(() => {
     const update = () => setUsers(getUserDesigns());
     window.addEventListener(designsChangedEvent, update);
-    void invoke<StoredDesign[]>("designs_list").then(items => { for (const item of items) { const existing = getUserDesigns().find(stored => stored.id === item.id); const normalized = existing?.design ?? normalizeDesign(item.design, getDesign("Werklade Dunkel")); if (!existing) registerUserDesign(item.id, normalized); if (!originals.current.has(normalized.name)) originals.current.set(normalized.name, structuredClone(normalized)); } if (!touched.current) setDesign(getDesign(name)); }).catch(reason => setError(String(reason)));
+    void invoke<StoredDesign[]>("designs_list").then(items => { for (const item of items) { const existing = getUserDesigns().find(stored => stored.id === item.id); const normalized = existing?.design ?? normalizeDesign(item.design, getDesign("Werklade Dunkel")); if (!existing) registerUserDesign(item.id, normalized); if (!originals.current.has(normalized.name)) originals.current.set(normalized.name, structuredClone(normalized)); } if (!touched.current) setDesign(getDesign(name)); }).catch(reason => setError(errorText(reason)));
     return () => { window.removeEventListener(designsChangedEvent, update); flush(); };
   }, []);
   useEffect(() => { const next = getDesign(name); setDesign(next); if (!originals.current.has(next.name)) originals.current.set(next.name, structuredClone(next)); }, [name]);
@@ -80,10 +81,10 @@ export function DesignEditor({ name, onChange }: { name: string; onChange(name: 
         setBusy(true);
         copyInFlight.current = create(editableDesign(next, true), false).then(item => { originals.current.set(item.design.name, { ...original, name: item.design.name }); return item; });
       }
-      void copyInFlight.current.then(item => { const latest = { ...current.current, name: item.design.name }; current.current = latest; setDesign(latest); registerUserDesign(item.id, latest); onChange(latest.name); pending.current = { id: item.id, design: latest }; timer.current = setTimeout(flush, 400); }).catch(reason => setError(String(reason))).finally(() => { copyInFlight.current = null; setBusy(false); });
+      void copyInFlight.current.then(item => { const latest = { ...current.current, name: item.design.name }; current.current = latest; setDesign(latest); registerUserDesign(item.id, latest); onChange(latest.name); pending.current = { id: item.id, design: latest }; timer.current = setTimeout(flush, 400); }).catch(reason => setError(errorText(reason))).finally(() => { copyInFlight.current = null; setBusy(false); });
     }
   };
-  const run = async (action: () => Promise<void>) => { setBusy(true); setError(""); try { flush(); await saving.current; await action(); } catch (reason) { setError(String(reason)); } finally { setBusy(false); } };
+  const run = async (action: () => Promise<void>) => { setBusy(true); setError(""); try { flush(); await saving.current; await action(); } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); } };
   const user = users.find(item => item.design.name === design.name);
   const status = new Set(["accent", "accent-hover", "accent-hover-fill", "on-accent", "focus-ring", "danger", "warning", "success", "warning-bg", "error-bg"]);
   const groups: { id: string; title: TextKey; group: "ui" | "terminal" | "editor"; keys: readonly string[] }[] = [

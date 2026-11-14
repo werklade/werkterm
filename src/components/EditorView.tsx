@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { errorCode, errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
 import { basicSetup } from "codemirror";
 import { Compartment, EditorState, Facet, Prec, type Range } from "@codemirror/state";
@@ -175,12 +176,10 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     const pending = chooseRef.current; chooseRef.current = null; setChoice(null); pending?.resolve(value);
   }
   function fail(error: unknown) {
-    const message = String(error);
-    const prefix = message.split(":", 1)[0];
-    const code = errorCodes.find(known => known === prefix);
-    // The backend appends the backup path ("Sicherung: <path>") to WRITE_FAILED; unknown text is shown unchanged.
-    const backup = prefix === "WRITE_FAILED" ? /Sicherung: ([^\r\n]+)$/.exec(message)?.[1] : undefined;
-    const readable = prefix === "WRITE_FAILED" ? backup ? t("error.WRITE_FAILED", { backup }) : message.slice("WRITE_FAILED: ".length) : code ? t(`error.${code}`) : t("editor.saveFailed", { message });
+    // Known codes stand alone (WRITE_FAILED carries the backup path as args.backup); anything else gets the save prefix.
+    const code = errorCode(error);
+    const known = code !== undefined && ((errorCodes as readonly string[]).includes(code) || code === "WRITE_FAILED" || code === "WRITE_FAILED_NO_BACKUP");
+    const readable = known ? errorText(error) : t("editor.saveFailed", { message: errorText(error) });
     if (mounted.current) { setNotice(readable); callbacks.current.onStatusChange(readable); }
   }
   async function performSave(): Promise<boolean> {
@@ -204,7 +203,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
           callbacks.current.onDocumentChange?.(document); setNotice(""); report();
           return !dirty.current;
         } catch (error) {
-          if (!String(error).startsWith("CONFLICT:")) throw error;
+          if (errorCode(error) !== "CONFLICT") throw error;
           const action = await ask(t("editor.conflict.title"), ["overwrite", "reload", "cancel"]);
           if (!mounted.current || action === "cancel") return false;
           if (action === "overwrite") { force = true; continue; }

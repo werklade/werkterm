@@ -7,6 +7,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::ui_error::{ui_code, ui_err};
+
 pub(crate) static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
@@ -54,38 +56,38 @@ fn validate(items: &[Macro]) -> Result<(), String> {
     let mut shortcuts = HashSet::new();
     for item in items {
         if item.id.is_empty() || !ids.insert(&item.id) {
-            return Err("Ungültige oder doppelte Makro-ID".into());
+            return Err(ui_err("MACRO_INVALID_ID").into());
         }
         if item.name.trim().is_empty() || item.name.chars().count() > 80 {
-            return Err("Name muss 1–80 Zeichen lang sein".into());
+            return Err(ui_err("MACRO_NAME_LENGTH").arg("max", "80").into());
         }
         if item.steps.len() > 500 {
-            return Err("Maximal 500 Schritte erlaubt".into());
+            return Err(ui_err("MACRO_TOO_MANY_STEPS").arg("max", "500").into());
         }
         let mut bytes = 0usize;
         for step in &item.steps {
             match step {
                 Step::Text { text } => bytes = bytes.saturating_add(text.len()),
                 Step::Wait { ms } if *ms > 60_000 => {
-                    return Err("Wartezeit muss 0–60000 ms betragen".into());
+                    return Err(ui_err("MACRO_WAIT_RANGE").arg("max", "60000").into());
                 }
                 Step::Prompt { label, .. }
                     if label.trim().is_empty() || label.chars().count() > 200 =>
                 {
-                    return Err("Rückfrage benötigt eine Beschriftung (1–200 Zeichen)".into());
+                    return Err(ui_err("MACRO_PROMPT_LABEL").arg("max", "200").into());
                 }
                 _ => (),
             }
         }
         if bytes > 65_536 {
-            return Err("Makrotext überschreitet 64 KB".into());
+            return Err(ui_err("MACRO_TEXT_TOO_LARGE").arg("limit", "64 KB").into());
         }
         if let Some(shortcut) = &item.shortcut {
             if !valid_shortcut(shortcut) {
-                return Err("Ungültiges Makro-Tastenkürzel".into());
+                return Err(ui_err("MACRO_SHORTCUT_INVALID").into());
             }
             if !shortcuts.insert(shortcut) {
-                return Err("Tastenkürzel bereits vergeben".into());
+                return Err(ui_err("MACRO_SHORTCUT_TAKEN").into());
             }
         }
     }
@@ -96,12 +98,12 @@ fn load(path: &Path) -> Result<Vec<Macro>, String> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err("Makrodatei konnte nicht gelesen werden".into()),
+        Err(error) => return Err(ui_err("MACROS_READ_FAILED").detail(error).into()),
     };
     let file: MacroFile = serde_json::from_slice(&bytes)
-        .map_err(|_| "Makrodatei ist beschädigt; Original bleibt erhalten")?;
+        .map_err(|error| String::from(ui_err("MACROS_CORRUPT").json_position(&error)))?;
     if file.version != 1 {
-        return Err("Unbekannte Version der Makrodatei".into());
+        return Err(ui_err("MACROS_UNKNOWN_VERSION").into());
     }
     validate(&file.macros)?;
     Ok(file.macros)
@@ -111,9 +113,10 @@ fn write_atomic(path: &Path, macros: Vec<Macro>) -> Result<(), String> {
     load(path)?;
     validate(&macros)?;
     let bytes = serde_json::to_vec_pretty(&MacroFile { version: 1, macros })
-        .map_err(|_| "Makros konnten nicht serialisiert werden")?;
-    let parent = path.parent().ok_or("Ungültiger Makropfad")?;
-    fs::create_dir_all(parent).map_err(|_| "Makroordner konnte nicht erstellt werden")?;
+        .map_err(|error| String::from(ui_err("MACROS_SAVE_FAILED").detail(error)))?;
+    let parent = path.parent().ok_or(ui_code("INVALID_PATH"))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| String::from(ui_err("CONFIG_DIR_CREATE_FAILED").detail(error)))?;
     let temp = parent.join(format!(
         ".macros-{}-{}.tmp",
         std::process::id(),
@@ -136,7 +139,7 @@ fn write_atomic(path: &Path, macros: Vec<Macro>) -> Result<(), String> {
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    result.map_err(|_: std::io::Error| "Makrodatei konnte nicht atomar gespeichert werden".into())
+    result.map_err(|error| ui_err("MACROS_SAVE_FAILED").detail(error).into())
 }
 
 fn path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -149,7 +152,7 @@ pub async fn macros_list(app: tauri::AppHandle) -> Result<Vec<Macro>, String> {
     let path = path(&app)?;
     tauri::async_runtime::spawn_blocking(move || load(&path))
         .await
-        .map_err(|_| "Makros konnten nicht geladen werden")?
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[tauri::command]
@@ -166,7 +169,7 @@ pub async fn macro_save(app: tauri::AppHandle, item: Macro) -> Result<(), String
         write_atomic(&path, items)
     })
     .await
-    .map_err(|_| "Makro konnte nicht gespeichert werden")?
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[tauri::command]
@@ -179,7 +182,7 @@ pub async fn macro_delete(app: tauri::AppHandle, id: String) -> Result<(), Strin
         write_atomic(&path, items)
     })
     .await
-    .map_err(|_| "Makro konnte nicht gelöscht werden")?
+    .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
 }
 
 #[cfg(test)]

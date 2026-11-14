@@ -2,6 +2,7 @@ use crate::pty::{Platform, PtyManager, ShellKind, program_in_path, resolve_shell
 use crate::ssh::{
     DirListing, PromptFuture, Prompter, SecretKind, SshConnection, SshManager, SshTarget, ssh_dir,
 };
+use crate::ui_error::ui_err;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -246,7 +247,7 @@ pub async fn pty_spawn(
             .map_err(|error| error.to_string())
     })
     .await
-    .map_err(|_| "Terminal konnte nicht gestartet werden".to_owned())?
+    .map_err(|_| String::from(ui_err("PTY_START_FAILED")))?
 }
 
 #[tauri::command]
@@ -262,7 +263,7 @@ pub async fn pty_write(
             .map_err(|error| error.to_string())
     })
     .await
-    .map_err(|_| "Terminaldaten konnten nicht geschrieben werden".to_owned())?
+    .map_err(|_| String::from(ui_err("PTY_WRITE_FAILED")))?
 }
 
 #[tauri::command]
@@ -279,7 +280,7 @@ pub async fn pty_resize(
             .map_err(|error| error.to_string())
     })
     .await
-    .map_err(|_| "Terminalgröße konnte nicht geändert werden".to_owned())?
+    .map_err(|_| String::from(ui_err("PTY_RESIZE_FAILED")))?
 }
 
 #[tauri::command]
@@ -289,7 +290,7 @@ pub async fn pty_kill(state: State<'_, Arc<PtyManager>>, id: u32) -> Result<(), 
         manager.kill(id).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|_| "Terminal konnte nicht beendet werden".to_owned())?
+    .map_err(|_| String::from(ui_err("PTY_KILL_FAILED")))?
 }
 
 #[tauri::command]
@@ -302,7 +303,7 @@ pub async fn available_shells() -> Result<Vec<ShellKind>, String> {
         shells
     })
     .await
-    .map_err(|_| "Verfügbare Shells konnten nicht ermittelt werden".to_owned())
+    .map_err(|_| String::from(ui_err("SHELLS_UNAVAILABLE")))
 }
 
 #[tauri::command]
@@ -384,12 +385,12 @@ pub async fn ssh_answer_host_key(
         let mut answers = state
             .answers
             .lock()
-            .map_err(|_| "SSH-Rückfrage konnte nicht beantwortet werden".to_owned())?;
+            .map_err(|_| String::from(ui_err("SSH_PROMPT_FAILED")))?;
         if !matches!(
             answers.get(&request_id),
             Some((_, PendingAnswer::HostKey(_)))
         ) {
-            return Err("SSH-Hostkey-Rückfrage ist nicht mehr gültig".to_owned());
+            return Err(ui_err("SSH_PROMPT_EXPIRED").into());
         }
         answers.remove(&request_id)
     };
@@ -409,7 +410,7 @@ pub async fn ssh_answer_secret(
         let mut answers = state
             .answers
             .lock()
-            .map_err(|_| "SSH-Rückfrage konnte nicht beantwortet werden".to_owned())?;
+            .map_err(|_| String::from(ui_err("SSH_PROMPT_FAILED")))?;
         if !matches!(
             answers.get(&request_id),
             Some((_, PendingAnswer::Secret(_)))
@@ -417,7 +418,7 @@ pub async fn ssh_answer_secret(
             if let Some(secret) = secret.as_mut() {
                 secret.clear();
             }
-            return Err("SSH-Geheimnis-Rückfrage ist nicht mehr gültig".to_owned());
+            return Err(ui_err("SSH_PROMPT_EXPIRED").into());
         }
         answers.remove(&request_id)
     };
@@ -470,7 +471,7 @@ pub async fn local_list_dir(
 ) -> Result<DirListing, String> {
     tauri::async_runtime::spawn_blocking(move || crate::local_fs::list_local_dir(path, wsl_distro))
         .await
-        .map_err(|_| "Lokales Verzeichnis konnte nicht gelesen werden".to_owned())?
+        .map_err(|_| String::from(ui_err("LOCAL_FS_READ_DIR")))?
 }
 
 #[cfg(test)]

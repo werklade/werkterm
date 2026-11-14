@@ -1,4 +1,5 @@
 import { writeClipboardText } from "../lib/clipboard";
+import { errorText } from "../lib/backendError";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useModal } from "./useModal";
@@ -31,12 +32,12 @@ export function SerialPermissionDialog({ info, onClose, onRetry, onExecute }: Pr
     let disposed = false;
     if (!info.already_member) void invoke<FixOptions>("serial_permission_fix_options", { device: info.device })
       .then(value => { if (!disposed) setFixes(value); })
-      .catch(reason => { if (!disposed) setError(String(reason)); });
+      .catch(reason => { if (!disposed) setError(errorText(reason)); });
     return () => { disposed = true; };
   }, [info]);
   const mode = permissionMode(info, fixes);
   const option = fixes?.options[selected];
-  const copy = (text: string) => { void writeClipboardText(text).catch(reason => setError(String(reason))); };
+  const copy = (text: string) => { void writeClipboardText(text).catch(reason => setError(errorText(reason))); };
   const newgrp = "newgrp " + "'" + info.group.split("'").join(String.fromCharCode(39, 34, 39, 34, 39)) + "'";
   return <dialog ref={dialog} className="ssh-dialog" aria-labelledby="serial-permission-title"
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
@@ -50,16 +51,16 @@ export function SerialPermissionDialog({ info, onClose, onRetry, onExecute }: Pr
           {fixes!.options.map((item, index) => <option key={item.label} value={index}>{item.label}{index === 0 ? ` ${t("serial.recommended")}` : ""}</option>)}
         </select></label>
         <textarea aria-label={t("serial.fullCommand")} readOnly value={option.command} rows={3} style={{ width: "100%", fontFamily: "monospace" }} />
-        <p>{option.needs_root_password ? t("serial.asksRoot") : option.hint}</p>
+        <p>{option.needs_root_password ? t("serial.asksRoot") : t("serial.authInTerminal")}</p>
         {!sent && <button disabled={busy} onClick={() => {
           setBusy(true); setError("");
-          void onExecute(option.command).then(() => setSent(true)).catch(reason => setError(String(reason))).finally(() => setBusy(false));
+          void onExecute(option.command).then(() => setSent(true)).catch(reason => setError(errorText(reason))).finally(() => setBusy(false));
         }}>{t("serial.run")}</button>}
         <button onClick={() => copy(option.command)}>{t("serial.copyCommand")}</button>
       </>}
       {mode === "missing" && fixes && <>
         <p>{t("serial.missing", { tools: fixes.missing.join(", ") })}</p>
-        <p>{t("serial.install", { hint: fixes.install_hint })}</p>
+        <p>{fixes.install_hint ? t("serial.install", { hint: fixes.install_hint }) : t("serial.installGeneric")}</p>
         <p>{t("serial.runAsRoot")}</p>
         <textarea aria-label={t("serial.rootCommand")} readOnly value={fixes.root_command} rows={3} style={{ width: "100%", fontFamily: "monospace" }} />
         <button onClick={() => copy(fixes.root_command)}>{t("serial.copyCommand")}</button>

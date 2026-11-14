@@ -118,7 +118,7 @@ describe("password field accessibility and errors", () => {
     expect(toggle).toHaveBeenCalledOnce();
   });
   it("shows the specific keyring error and the alternative login hint", () => {
-    expect(sessionSaveError("KEYRING_LOCKED: Schlüsselbund ist gesperrt")).toBe(
+    expect(sessionSaveError("KEYRING_LOCKED")).toBe(
       "Schlüsselbund ist gesperrt. Entsperren oder Anmeldung „Beim Verbinden fragen“ wählen.",
     );
     expect(sessionSaveError(new Error("Sitzungsdatei konnte nicht gespeichert werden"))).toBe("Sitzungsdatei konnte nicht gespeichert werden");

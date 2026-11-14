@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { applyOneKeyMappings, commitImport, defaultImportSelection, deselectNewImportDuplicates, importDefaultPath, listSessions, markImportDuplicates, previewImport,
   sessionTarget, type ImportPreview, type ImportResult, type OneKeyMapping, type SavedSession, type SessionAuth } from "../lib/sessions";
 import { tp, useT } from "../i18n";
+import { errorText } from "../lib/backendError";
 import { useModal } from "./useModal";
 import "./SessionDialog.css";
 import "./ImportDialog.css";
@@ -106,7 +107,7 @@ export function ImportDialog({ source, onClose, onImported }: Props) {
             <td>{sessionTarget({ ...candidate, user })}</td><td>{candidate.oneKey ? preview.oneKeys.find(key => key.uuid === candidate.oneKey)?.name ?? candidate.oneKey : candidate.keyPath ?? t("import.defaultKey")}</td>
           </tr>)}</tbody></table></div>
         <p className="session-hint">{t("import.skipped", { count: preview.skipped })}</p>
-        {preview.warnings.length > 0 && <ul className="import-warnings">{preview.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+        {preview.warnings.length > 0 && <ul className="import-warnings">{preview.warnings.map((warning, index) => <li key={index}>{errorText(warning)}</li>)}</ul>}
         {usedKeys.length > 0 && <fieldset disabled={busy} className="import-onekeys"><legend>{t("import.oneKey.legend")}</legend><p className="session-hint">{t("import.oneKey.hint")}</p>
           {usedKeys.map(keyId => {
             const key = preview.oneKeys.find(value => value.uuid === keyId);

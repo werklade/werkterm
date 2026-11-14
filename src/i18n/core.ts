@@ -38,6 +38,8 @@ const fill = (text: string, params?: Params): string =>
 const lookup = (key: string): string => messages[language][key] ?? messages.de[key] ?? key;
 
 export function t(key: TextKey, params?: Params): string { return fill(lookup(key), params); }
+/** Whether a key exists (for keys built at runtime, e.g. backend error codes). */
+export const hasText = (key: string): boolean => Object.prototype.hasOwnProperty.call(messages.de, key);
 /** Plural form via `${key}.one` / `${key}.other`; `{count}` is filled in automatically, formatted for the locale. */
 export function tp(key: PluralKey, count: number, params?: Params): string {
   const category = new Intl.PluralRules(currentLocale()).select(count);

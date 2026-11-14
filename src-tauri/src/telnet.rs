@@ -12,6 +12,8 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{Notify, mpsc, oneshot},
 };
+
+use crate::ui_error::{UiError, ui_code, ui_err};
 const IAC: u8 = 255;
 const WILL: u8 = 251;
 const WONT: u8 = 252;
@@ -248,15 +250,15 @@ pub(crate) fn remove(id: u32) {
 pub(crate) async fn send(id: u32, msg: Message) -> Result<(), String> {
     let sender = connections()
         .lock()
-        .map_err(|e| e.to_string())?
+        .map_err(|_| ui_code("PTY_LOCKED"))?
         .get(&id)
         .filter(|entry| !entry.control.stop.load(Ordering::Acquire))
         .map(|entry| entry.sender.clone())
-        .ok_or("Verbindung beendet")?;
+        .ok_or(ui_code("CONNECTION_ENDED"))?;
     sender
         .send(msg)
         .await
-        .map_err(|_| "Verbindung beendet".into())
+        .map_err(|_| ui_code("CONNECTION_ENDED").into())
 }
 pub(crate) struct Output {
     pub app: tauri::AppHandle,
@@ -273,15 +275,23 @@ impl Output {
         crate::session_log::finish(&self.app, self.tab);
         let _ = self.exit.send(None);
     }
-    pub fn error(&self, error: impl std::fmt::Display) {
-        self.data(
-            format!(
-                "\r\n[{}]\r\n",
-                error.to_string().replace(['\x1b', '\0'], "")
-            )
-            .into_bytes(),
+    /// Error notice for the terminal. Travels as JSON `{"notice": "<wire-format error>"}` on the
+    /// data channel (ordered with the raw output), so the frontend can translate it; raw
+    /// stream bytes could not be translated. The session log gets the language-neutral `log_line` form.
+    pub fn error(&self, error: impl Into<String>) {
+        let notice = error.into().replace(['\x1b', '\0'], "");
+        crate::session_log::output(
+            &self.app,
+            self.tab,
+            format!("\r\n[{}]\r\n", crate::ui_error::log_line(&notice)).as_bytes(),
         );
+        let _ = self
+            .data
+            .send(InvokeResponseBody::Json(notice_json(&notice)));
     }
+}
+fn notice_json(notice: &str) -> String {
+    serde_json::json!({ "notice": notice }).to_string()
 }
 type Pending = Mutex<HashMap<u32, oneshot::Sender<()>>>;
 static PENDING: OnceLock<Pending> = OnceLock::new();
@@ -310,7 +320,7 @@ pub async fn telnet_connect(
     on_exit: Channel<Option<u32>>,
 ) -> Result<u32, String> {
     if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) || port == 0 {
-        return Err("Ungültiges Telnet-Ziel".into());
+        return Err(ui_err("TELNET_INVALID_TARGET").into());
     }
     let (cancel, mut cancelled) = oneshot::channel();
     PENDING
@@ -324,9 +334,9 @@ pub async fn telnet_connect(
             tokio::net::lookup_host((host.as_str(), port)),
         )
         .await
-        .map_err(|_| "Zeitüberschreitung bei der Namensauflösung".to_owned())?
-        .map_err(|e| e.to_string())?;
-        let mut last = "Keine Zieladresse gefunden".to_owned();
+        .map_err(|_| String::from(ui_err("SSH_RESOLVE_TIMEOUT")))?
+        .map_err(|e| String::from(ui_err("SSH_RESOLVE_FAILED").arg("host", &host).detail(e)))?;
+        let mut last: String = ui_err("SSH_RESOLVE_FAILED").arg("host", &host).into();
         for address in addresses {
             match tokio::time::timeout(
                 Duration::from_secs(10),
@@ -335,14 +345,18 @@ pub async fn telnet_connect(
             .await
             {
                 Ok(Ok(stream)) => return Ok(stream),
-                Ok(Err(error)) => last = error.to_string(),
-                Err(_) => last = format!("Zeitüberschreitung bei {address}"),
+                Ok(Err(error)) => last = ui_err("TELNET_CONNECT_FAILED").detail(error).into(),
+                Err(_) => {
+                    last = ui_err("SSH_ADDRESS_TIMEOUT")
+                        .arg("address", address.to_string())
+                        .into()
+                }
             }
         }
         Err(last)
     };
     let result = tokio::select! {
-        _ = &mut cancelled => Err("Verbindungsaufbau abgebrochen".to_owned()),
+        _ = &mut cancelled => Err(ui_err("SSH_CONNECT_CANCELED").into()),
         result = connection => result,
     };
     PENDING
@@ -366,12 +380,12 @@ pub async fn telnet_connect(
             ..Default::default()
         };
         let mut buffer = [0; 8192];
-        let result: std::io::Result<()> = async {
+        let result: Result<(), UiError> = async {
             while !control.stop.load(Ordering::Acquire) {
                 let bytes = tokio::select! {
                     _ = control.notify.notified() => break,
                     incoming = stream.read(&mut buffer) => {
-                        let n = incoming?;
+                        let n = incoming.map_err(|e| ui_err("TELNET_CONNECTION_LOST").detail(e))?;
                         if n == 0 { break; }
                         let (data, reply) = parser.feed(&buffer[..n]);
                         if !data.is_empty() { output.data(data); }
@@ -387,7 +401,9 @@ pub async fn telnet_connect(
                 tokio::select! {
                     _ = control.notify.notified() => break,
                     result = tokio::time::timeout(Duration::from_secs(10), stream.write_all(&bytes)) => {
-                        result.map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "Telnet-Schreibzeitüberschreitung"))??;
+                        result
+                            .map_err(|_| ui_err("TELNET_WRITE_TIMEOUT"))?
+                            .map_err(|e| ui_err("TELNET_CONNECTION_LOST").detail(e))?;
                     }
                 }
 
@@ -413,7 +429,11 @@ pub async fn terminal_resize(id: u32, cols: u16, rows: u16) -> Result<(), String
 }
 #[tauri::command]
 pub async fn terminal_close(id: u32) -> Result<(), String> {
-    if let Some(entry) = connections().lock().map_err(|e| e.to_string())?.remove(&id) {
+    if let Some(entry) = connections()
+        .lock()
+        .map_err(|_| ui_code("PTY_LOCKED"))?
+        .remove(&id)
+    {
         entry.control.close();
     }
     Ok(())
@@ -435,6 +455,16 @@ mod tests {
         assert!(send(id, Message::Data(vec![1])).await.is_err());
         terminal_close(id).await.unwrap();
         remove(id);
+    }
+    #[test]
+    fn notices_are_json_on_the_data_channel() {
+        let value: serde_json::Value =
+            serde_json::from_str(&notice_json(r#"SERIAL_REMOVED: {"args":{"device":"a"}}"#))
+                .unwrap();
+        assert_eq!(
+            value["notice"].as_str(),
+            Some(r#"SERIAL_REMOVED: {"args":{"device":"a"}}"#)
+        );
     }
     #[test]
     fn split_negotiation_and_subnegotiation() {

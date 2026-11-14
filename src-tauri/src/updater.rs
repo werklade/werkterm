@@ -5,6 +5,7 @@
 //! Self-update is limited to AppImage, NSIS and MSI; .deb/.rpm installs are updated by the
 //! package manager (APT repository), so they only get the version information.
 
+use crate::ui_error::ui_code;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::{
@@ -28,16 +29,17 @@ const MAX_REDIRECTS: usize = 5;
 const MAX_NOTES_CHARS: usize = 10_000;
 const PROGRESS_STEP: u64 = 256 * 1024;
 
-const MSG_NO_KEY: &str = "Update-Schlüssel fehlt in diesem Build";
-const MSG_PACKAGE_MANAGED: &str = "Diese Installation wird über die Paketverwaltung aktualisiert";
-const MSG_RUNNING: &str = "Ein Update läuft bereits";
-const MSG_NONE: &str = "Kein Update verfügbar";
-const MSG_NO_PACKAGE: &str = "Update enthält kein Paket für diese Installationsart";
-const MSG_INSTALL: &str = "Update konnte nicht installiert werden";
-const MSG_INVALID_DATA: &str = "Update-Daten sind ungültig";
-const MSG_NOT_WRITABLE: &str = "Der Ordner des AppImage ist nicht beschreibbar";
+// Error codes; the frontend translates them via `error.<CODE>`.
+const MSG_NO_KEY: &str = ui_code("UPDATE_NO_KEY");
+const MSG_PACKAGE_MANAGED: &str = ui_code("UPDATE_PACKAGE_MANAGED");
+const MSG_RUNNING: &str = ui_code("UPDATE_RUNNING");
+const MSG_NONE: &str = ui_code("UPDATE_NONE");
+const MSG_NO_PACKAGE: &str = ui_code("UPDATE_NO_PACKAGE");
+const MSG_INSTALL: &str = ui_code("UPDATE_INSTALL_FAILED");
+const MSG_INVALID_DATA: &str = ui_code("UPDATE_INVALID_DATA");
+const MSG_NOT_WRITABLE: &str = ui_code("UPDATE_NOT_WRITABLE");
 /// Exact error string: the shutdown hook already ran, so the frontend must force a restart.
-pub const RESTART_REQUIRED: &str = "UPDATE_RESTART_REQUIRED";
+pub const RESTART_REQUIRED: &str = ui_code("UPDATE_RESTART_REQUIRED");
 /// The only host packages may be downloaded from.
 const PACKAGE_HOST: &str = "pkg.werklade.de";
 
@@ -212,34 +214,32 @@ fn limit_notes(notes: Option<String>) -> Option<String> {
     })
 }
 
-/// User-facing message; never contains paths, URLs from the manifest or key material.
+/// User-facing error code; never contains paths, URLs from the manifest or key material.
 fn message(error: &UpdaterError) -> String {
     match error {
-        UpdaterError::Reqwest(e) if e.is_timeout() => "Update-Server antwortet nicht (Zeitlimit)",
+        UpdaterError::Reqwest(e) if e.is_timeout() => ui_code("UPDATE_TIMEOUT"),
         UpdaterError::Reqwest(e) if e.is_decode() => MSG_INVALID_DATA,
-        UpdaterError::Reqwest(_) => "Update-Server nicht erreichbar",
-        UpdaterError::ReleaseNotFound => "Update-Server liefert keine gültigen Update-Daten",
+        UpdaterError::Reqwest(_) => ui_code("UPDATE_UNREACHABLE"),
+        UpdaterError::ReleaseNotFound => ui_code("UPDATE_NO_RELEASE"),
         UpdaterError::Serialization(_) | UpdaterError::Semver(_) => MSG_INVALID_DATA,
         UpdaterError::TargetNotFound(_) | UpdaterError::TargetsNotFound(_) => MSG_NO_PACKAGE,
-        UpdaterError::Network(_) => "Download des Updates fehlgeschlagen",
+        UpdaterError::Network(_) => ui_code("UPDATE_DOWNLOAD_FAILED"),
         UpdaterError::Minisign(_)
         | UpdaterError::Base64(_)
         | UpdaterError::SignatureUtf8(_)
         | UpdaterError::SignedVersionMismatch { .. }
-        | UpdaterError::MissingSignedVersion => "Signatur des Updates ist ungültig",
+        | UpdaterError::MissingSignedVersion => ui_code("UPDATE_SIGNATURE"),
         UpdaterError::InvalidUpdaterFormat | UpdaterError::BinaryNotFoundInArchive => {
-            "Update-Paket hat ein unerwartetes Format"
+            ui_code("UPDATE_FORMAT")
         }
         UpdaterError::TempDirNotFound | UpdaterError::TempDirNotOnSameMountPoint => {
-            "Kein geeigneter temporärer Ordner für das Update"
+            ui_code("UPDATE_TEMP_DIR")
         }
-        UpdaterError::PreviousAppNotRestored(_) => {
-            "Update fehlgeschlagen, die bisherige Version liegt als Sicherung neben der App"
-        }
+        UpdaterError::PreviousAppNotRestored(_) => ui_code("UPDATE_PREVIOUS_KEPT"),
         UpdaterError::UnsupportedArch | UpdaterError::UnsupportedOs => {
-            "Diese Plattform wird vom Updater nicht unterstützt"
+            ui_code("UPDATE_UNSUPPORTED")
         }
-        _ => "Update fehlgeschlagen",
+        _ => ui_code("UPDATE_FAILED"),
     }
     .to_owned()
 }
@@ -368,7 +368,7 @@ fn build_updater(
     let endpoint: Url = UpdateChannel::current()
         .endpoint()
         .parse()
-        .map_err(|_| "Update-Adresse ist ungültig".to_owned())?;
+        .map_err(|_| ui_code("UPDATE_BAD_URL").to_owned())?;
     let mut builder = app
         .updater_builder()
         .endpoints(vec![endpoint])
@@ -809,6 +809,7 @@ mod tests {
         let path = std::path::PathBuf::from("secret-dir").join("werkterm.AppImage");
         let text = message(&UpdaterError::PreviousAppNotRestored(path));
         assert!(!text.contains("secret-dir"));
+        assert_eq!(text, "UPDATE_PREVIOUS_KEPT");
         assert_eq!(
             message(&UpdaterError::TargetsNotFound(vec!["linux-x86_64".into()])),
             MSG_NO_PACKAGE

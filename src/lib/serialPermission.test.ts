@@ -10,10 +10,13 @@ describe("serial permission decisions", () => {
   it("distinguishes loading, options and missing tools", () => {
     expect(permissionMode(info, null)).toBe("loading");
     expect(permissionMode(info, fixes)).toBe("missing");
-    expect(permissionMode(info, { ...fixes, options: [{ label: "sudo + usermod", command: "sudo usermod -aG 'tty' 'marc'", needs_root_password: false, hint: "" }] })).toBe("options");
+    expect(permissionMode(info, { ...fixes, options: [{ label: "sudo + usermod", command: "sudo usermod -aG 'tty' 'marc'", needs_root_password: false }] })).toBe("options");
   });
   it("only accepts structured permission errors", () => {
-    expect(parseSerialPermission("SERIAL_PERMISSION:" + JSON.stringify(info))).toEqual(info);
-    for (const error of ["ordinary error", "SERIAL_PERMISSION:{", "SERIAL_PERMISSION:null", "SERIAL_PERMISSION:{}"]) expect(parseSerialPermission(error)).toBeNull();
+    const args = Object.fromEntries(Object.entries(info).map(([key, value]) => [key, String(value)]));
+    expect(parseSerialPermission("SERIAL_PERMISSION: " + JSON.stringify({ args }))).toEqual(info);
+    for (const error of ["ordinary error", "SERIAL_PERMISSION", "SERIAL_PERMISSION: {", "SERIAL_PERMISSION: {}",
+      'SERIAL_PERMISSION: {"args":{"device":"COM3"}}', "SERIAL_PERMISSION: " + JSON.stringify({ args: { ...args, guessed: "maybe" } })])
+      expect(parseSerialPermission(error)).toBeNull();
   });
 });
