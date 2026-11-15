@@ -35,24 +35,80 @@ it.each([true, false])("waits for 400 ms of quiet and sends once, data first: %s
   expect(write).toHaveBeenCalledTimes(1);
 });
 
-it("bounds continuous login output to five seconds after connecting", () => {
+it("removes the line from the history exactly once, before the printf suffix", () => {
+  const guard = "; [[ $(history 1) == *__werkterm_osc7*PROMPT_COMMAND* ]] && history -d $HISTCMD 2>/dev/null";
+  expect(SSH_PROMPT_COMMAND.split(guard)).toHaveLength(2);
+  const command = buildPromptCommand(80, 0);
+  expect(command.split(guard)).toHaveLength(2);
+  expect(command.indexOf(guard)).toBeGreaterThan(command.indexOf("PROMPT_COMMAND=\""));
+  expect(command).toMatch(/; printf '\\033\[\d+A\\r\\033\[J'\r$/);
+  expect(command.indexOf(guard) + guard.length).toBe(command.indexOf("; printf '\\033["));
+  expect(command).not.toContain("\n");
+});
+
+it("never sends while output keeps flowing, even after the deadline", () => {
   const write = vi.fn(async () => undefined);
   const sender = createPromptCommandSender(() => true, write, vi.fn());
   sender.connect(1);
-  for (let i = 0; i < 49; i++) { sender.receiveData(); vi.advanceTimersByTime(100); }
+  for (let i = 0; i < 80; i++) { sender.receiveData(); vi.advanceTimersByTime(100); }
   expect(write).not.toHaveBeenCalled();
+  // The last chunk arrived 100 ms ago, so 300 ms of quiet remain.
+  vi.advanceTimersByTime(299);
+  expect(write).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(write).toHaveBeenCalledExactlyOnceWith(1, buildPromptCommand(80, 0));
+});
+
+it("sends after quiet when the prompt is recognised", () => {
+  const write = vi.fn(async () => undefined);
+  const sender = createPromptCommandSender(() => true, write, vi.fn(), undefined, () => "prompt");
+  sender.connect(1);
   sender.receiveData();
+  vi.advanceTimersByTime(399);
+  expect(write).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(write).toHaveBeenCalledTimes(1);
+});
+
+it("waits for the prompt past the quiet period and sends once after the deadline", () => {
+  const write = vi.fn(async () => undefined);
+  let ready = false;
+  const sender = createPromptCommandSender(() => true, write, vi.fn(), undefined, () => (ready ? "prompt" : "other"));
+  sender.connect(1);
+  sender.receiveData();
+  vi.advanceTimersByTime(4900);
+  expect(write).not.toHaveBeenCalled();
   vi.advanceTimersByTime(100);
   expect(write).toHaveBeenCalledExactlyOnceWith(1, buildPromptCommand(80, 0));
+  sender.receiveData();
+  vi.advanceTimersByTime(6000);
+  expect(write).toHaveBeenCalledTimes(1);
+});
+
+it("sends when the prompt appears after a slow pause", () => {
+  const write = vi.fn(async () => undefined);
+  let ready = false;
+  const sender = createPromptCommandSender(() => true, write, vi.fn(), undefined, () => (ready ? "prompt" : "other"));
+  sender.connect(1);
+  sender.receiveData();
+  vi.advanceTimersByTime(1000);
+  expect(write).not.toHaveBeenCalled();
+  ready = true;
+  sender.receiveData();
+  vi.advanceTimersByTime(400);
+  expect(write).toHaveBeenCalledTimes(1);
 });
 
 it("requires first data even when the deadline expires", () => {
   const write = vi.fn(async () => undefined);
-  const sender = createPromptCommandSender(() => true, write, vi.fn());
+  const sender = createPromptCommandSender(() => true, write, vi.fn(), undefined, () => "other");
   sender.connect(1);
   vi.advanceTimersByTime(6000);
   expect(write).not.toHaveBeenCalled();
   sender.receiveData();
+  vi.advanceTimersByTime(399);
+  expect(write).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
   expect(write).toHaveBeenCalledTimes(1);
 });
 
@@ -108,4 +164,33 @@ it("reads terminal dimensions when sending instead of when connecting", () => {
   cursorX = 21;
   vi.advanceTimersByTime(400);
   expect(write).toHaveBeenCalledExactlyOnceWith(7, buildPromptCommand(43, 21));
+});
+
+it("never sends into a password prompt, question or full-screen program", () => {
+  const write = vi.fn(async () => undefined);
+  const sender = createPromptCommandSender(() => true, write, vi.fn(), undefined, () => "blocked");
+  sender.connect(1);
+  sender.receiveData();
+  vi.advanceTimersByTime(20000);
+  expect(write).not.toHaveBeenCalled();
+});
+
+it("stops as soon as the user types", () => {
+  const write = vi.fn(async () => undefined);
+  const sender = createPromptCommandSender(() => true, write, vi.fn(), undefined, () => "other");
+  sender.connect(1);
+  sender.receiveData();
+  vi.advanceTimersByTime(1000);
+  sender.userInput();
+  vi.advanceTimersByTime(10000);
+  expect(write).not.toHaveBeenCalled();
+});
+
+it("gives up after 15 seconds without a usable quiet period", () => {
+  const write = vi.fn(async () => undefined);
+  const sender = createPromptCommandSender(() => true, write, vi.fn());
+  sender.connect(1);
+  for (let i = 0; i < 200; i++) { sender.receiveData(); vi.advanceTimersByTime(100); }
+  vi.advanceTimersByTime(1000);
+  expect(write).not.toHaveBeenCalled();
 });

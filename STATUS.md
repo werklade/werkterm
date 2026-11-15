@@ -60,6 +60,7 @@ Hier nur, was nicht öffentlich geführt wird:
 ## Nächster Schritt
 - #2 schwarzes Fenster: betrifft auch das AppImage, die WebKit-Variable von Hand hilft, also greift die automatische
   Abhilfe nicht; Angaben des Testers einholen (welche Variable, `werkterm: set`-Zeile, lspci).
-- #8 OSC-7-Echo (auch über Sprungserver zu AlmaLinux): vermutlich Einzeiler vor dem Prompt gesendet; Prompt-Erkennung.
+- #8 OSC-7-Echo und Historie: behoben auf main (Prompt-Erkennung, Selbstlöschung aus der Historie, Bash 5.2 geprüft);
+  Test auf dem AlmaLinux-Ziel (Bash 4.4/5.1) steht aus, Label `testing`.
 - #1 Sitzungsverwaltung per Drag & Drop.
 - Release-Ablauf: `docs/release.md`.

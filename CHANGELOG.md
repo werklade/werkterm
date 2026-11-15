@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- SSH: the helper command for "Follow terminal folder" no longer stays visible on hosts with slow logins (it is only sent once a shell prompt is recognised, never into password prompts, questions or full-screen programs, and not after the user started typing), and it no longer appears in the shell history on systems without `HISTCONTROL=ignorespace` (for example AlmaLinux).
+
 ### Changed
 
 - The update dialog shows the release notes formatted (headings, lists, code) instead of raw Markdown. Links stay plain text.

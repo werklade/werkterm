@@ -153,7 +153,13 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
       const resizeSession = wire ? (id: number, cols: number, rows: number) => invoke<void>("terminal_resize", { id, cols, rows }) : kind === "ssh" ? resizeSsh : resizePty;
       const close = wire ? (id: number) => invoke<void>("terminal_close", { id }) : kind === "ssh" ? closeSsh : killPty;
       const report = (error: unknown) => callbacks.current.onStatus(t("terminal.error", { message: keyringErrorText(error) }));
-      const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report, () => ({ cols: terminal.cols, cursorX: terminal.buffer.active.cursorX }));
+      const promptCommand = createPromptCommandSender(() => kind === "ssh" && settings.current.sshPromptCommand && !cancelled && !exited, write, report, () => ({ cols: terminal.cols, cursorX: terminal.buffer.active.cursorX }), () => {
+        const buffer = terminal.buffer.active;
+        if (buffer.type === "alternate") return "blocked";
+        const line = (buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString(false, 0, buffer.cursorX) ?? "").trimEnd();
+        if (/[:?]$/.test(line)) return "blocked";
+        return /[$#%>❯]$/.test(line) ? "prompt" : "other";
+      });
       const sendPermissionCommand = () => {
         if (!permissionShell || !shellReady || sessionId === undefined || cancelled || exited) return;
         const pending = serialFixCommands.get(id);
@@ -255,6 +261,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
       };
       element.addEventListener("paste", paste, true);
       const input = terminal.onData(data => {
+        if (provenance.isUserInput()) promptCommand.userInput();
         if (!deliveringPaste && provenance.isUserInput() && keyboardInput && canDistribute() && inputRef.current) inputRef.current(id, data, false);
         else send(data);
       });
