@@ -300,7 +300,9 @@ Stand: 2026-11-14
   2026-11-15: Neues Repo werklade/werkterm (vorerst privat) mit gefilterter Historie (git filter-repo: ohne prompts/, CLAUDE.md,
   AGENTS.md und alte STATUS.md-Fassungen; 147 Commits, Tags v0.1.0-v0.1.8 neu gesetzt). Das bisherige Repo heisst
   werklade/werkterm-archive (privat, alte Pre-releases). Sicherung aller Refs: Bundle ausserhalb des Repos. Lokaler und
-  WSL-Klon umgestellt. Offen: Secrets TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) im neuen Repo (Nutzer), Release 1.0.0, dann public.
+  WSL-Klon umgestellt; Secrets im neuen Repo eingetragen (Nutzer).
+  2026-11-15: **1.0.0 veroeffentlicht** (Tag v1.0.0 auf 049c8b4, Run 43658993858): pkg.werklade.de test und stable, APT 1.0.0,
+  Downloads 200; GitHub-Release v1.0.0 (Latest, kein Pre-release). Offen: Repo oeffentlich schalten.
 - **Übergabe 2026-11-13 (neue Sitzung beginnt hier).** Stand der Arbeit am Update-Kanal:
   - Werkterm: Update-Prüfung und Selbst-Update umgesetzt (Backend src-tauri/src/updater.rs über tauri-plugin-updater 2.14.1 mit rustls,
     Oberfläche src/components/UpdateDialog*, src/lib/update*.ts, Einstellung updateCheckOnStart). Öffentlicher Updater-Schlüssel steht in
