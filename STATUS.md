@@ -302,7 +302,8 @@ Stand: 2026-11-14
   werklade/werkterm-archive (privat, alte Pre-releases). Sicherung aller Refs: Bundle ausserhalb des Repos. Lokaler und
   WSL-Klon umgestellt; Secrets im neuen Repo eingetragen (Nutzer).
   2026-11-15: **1.0.0 veroeffentlicht** (Tag v1.0.0 auf 049c8b4, Run 43658993858): pkg.werklade.de test und stable, APT 1.0.0,
-  Downloads 200; GitHub-Release v1.0.0 (Latest, kein Pre-release). Offen: Repo oeffentlich schalten.
+  Downloads 200; GitHub-Release v1.0.0 (Latest, kein Pre-release). Repo werklade/werkterm seit 2026-11-15 oeffentlich
+  (anonym geprueft: Repo, Release, Setup-Skript per raw-URL). werkterm-archive bleibt privat.
 - **Übergabe 2026-11-13 (neue Sitzung beginnt hier).** Stand der Arbeit am Update-Kanal:
   - Werkterm: Update-Prüfung und Selbst-Update umgesetzt (Backend src-tauri/src/updater.rs über tauri-plugin-updater 2.14.1 mit rustls,
     Oberfläche src/components/UpdateDialog*, src/lib/update*.ts, Einstellung updateCheckOnStart). Öffentlicher Updater-Schlüssel steht in
