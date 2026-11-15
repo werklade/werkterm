@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Settings: the tabs are listed on the left and the dialog is wider, so all tabs fit without scrolling sideways; only the content scrolls. Arrow keys, Home and End move between tabs. "Clear recent" is a button in the General tab.
 - The update dialog shows the release notes formatted (headings, lists, code) instead of raw Markdown. Links stay plain text.
 
 ## [1.0.0] – 2026-11-15
