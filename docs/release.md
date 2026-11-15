@@ -198,7 +198,8 @@ Derzeit sind die Signier-Secrets Repository-Secrets; Schreibrecht auf das Repo h
    `main` zulassen.
 2. `TAURI_SIGNING_PRIVATE_KEY` und `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` dorthin verschieben (als Repository-Secrets
    löschen) und in den Jobs `linux` und `windows` `environment: release` setzen.
-3. Settings > Rules > Rulesets: Tag-Ruleset für `v*` (Erstellen, Ändern und Löschen nur für den Betreiber).
+3. Erledigt 2026-11-15 (Settings > Rules > Rulesets): „Protect version tags“ – Tags `v*` anlegen, ändern und löschen nur
+   mit Admin-Rolle des Repos; „Protect main“ – kein Löschen und kein Force-Push auf `main`, ohne Ausnahme.
 
 Rückweg: Secrets wieder als Repository-Secrets anlegen, `environment:` entfernen, Ruleset deaktivieren.
 
