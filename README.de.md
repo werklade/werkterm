@@ -239,7 +239,9 @@ Das Rust-Backend verwendet Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyr
 
 ## Ausblick
 
-Zurückgestellt: Tabs ablösen, Popup-Konsole, Mosh/RDP/VNC. Makros und die übrigen oben genannten Funktionen sind trotz älterer offener/zurückgestellter Einträge in STATUS.md umgesetzt.
+Geplante Arbeiten stehen als GitHub-Issues in den [Meilensteinen](https://github.com/werklade/werkterm/milestones) (zum Beispiel [1.1.0](https://github.com/werklade/werkterm/milestone/1)), mit den Labels `in progress` und `testing`. Fertige, noch nicht veröffentlichte Änderungen stehen unter „Unreleased“ in der [CHANGELOG.md](CHANGELOG.md). Funktionswünsche: [neues Issue](https://github.com/werklade/werkterm/issues/new/choose).
+
+Zurückgestellt: Tabs ablösen, Popup-Konsole, Mosh/RDP/VNC.
 
 Nicht geplant: Master-Passwort (stattdessen System-Schlüsselbund), mitgeliefertes X11/Cygwin, Netzwerk-/Port-Scanner, Paketmitschnitt und vorerst Wake on LAN.
 

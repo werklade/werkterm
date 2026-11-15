@@ -239,7 +239,9 @@ The Rust backend uses Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyring` 
 
 ## Roadmap
 
-Deferred: detached tabs, popup console, Mosh/RDP/VNC. Macros and the other features above are implemented despite older deferred/open entries in STATUS.md.
+Planned work is tracked as GitHub issues: see the [milestones](https://github.com/werklade/werkterm/milestones) (for example [1.1.0](https://github.com/werklade/werkterm/milestone/1)) and the labels `in progress` and `testing`. Finished but unreleased changes are listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Feature requests: [new issue](https://github.com/werklade/werkterm/issues/new/choose).
+
+Deferred: detached tabs, popup console, Mosh/RDP/VNC.
 
 Not planned: master password (system keyring is used), bundled X11/Cygwin, network/port scanner, packet capture and, for now, Wake on LAN.
 
