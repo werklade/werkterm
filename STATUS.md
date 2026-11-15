@@ -296,8 +296,11 @@ Stand: 2026-11-14
   logs/public-audit-2026-11.md abarbeiten (erledigt 2026-11-14: STATUS.md bereinigt, prompts/ aus dem Repo genommen,
   alter Projektname entfernt; 2026-11-14 zweite Runde: CLAUDE.md aus dem Repo genommen (lokal, git-ignoriert), docs/release.md und
   release.yml ohne Hinweise auf den privaten Veröffentlichungsweg, READMEs ohne Vorabversion/Tester, versionsneutral; Version auf
-  1.0.0 gesetzt (Metainfo type=development bis zum CHANGELOG-Abschnitt). Offen: Historie bereinigen (filter-repo + Force-Push,
-  nur nach ausdruecklicher Freigabe), lokale Altrefs sichern/loeschen, Remote-Branch test/update-0.1.9 loeschen, Release 1.0.0.
+  1.0.0 gesetzt (Metainfo type=development bis zum CHANGELOG-Abschnitt).
+  2026-11-15: Neues Repo werklade/werkterm (vorerst privat) mit gefilterter Historie (git filter-repo: ohne prompts/, CLAUDE.md,
+  AGENTS.md und alte STATUS.md-Fassungen; 147 Commits, Tags v0.1.0-v0.1.8 neu gesetzt). Das bisherige Repo heisst
+  werklade/werkterm-archive (privat, alte Pre-releases). Sicherung aller Refs: Bundle ausserhalb des Repos. Lokaler und
+  WSL-Klon umgestellt. Offen: Secrets TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) im neuen Repo (Nutzer), Release 1.0.0, dann public.
 - **Übergabe 2026-11-13 (neue Sitzung beginnt hier).** Stand der Arbeit am Update-Kanal:
   - Werkterm: Update-Prüfung und Selbst-Update umgesetzt (Backend src-tauri/src/updater.rs über tauri-plugin-updater 2.14.1 mit rustls,
     Oberfläche src/components/UpdateDialog*, src/lib/update*.ts, Einstellung updateCheckOnStart). Öffentlicher Updater-Schlüssel steht in
