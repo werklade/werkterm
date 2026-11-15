@@ -63,8 +63,8 @@ Hier nur, was nicht öffentlich geführt wird:
 - #8 OSC-7-Echo und Historie: behoben auf main (Prompt-Erkennung, Selbstlöschung aus der Historie, Bash 5.2 geprüft);
   Test auf dem AlmaLinux-Ziel (Bash 4.4/5.1) steht aus, Label `testing`.
 - Testkanal (2026-11-15): 1.0.1 (Branch test/1.0.1, Run 43666264597: #8, #17) und 1.0.2 (Branch test/1.0.2 = 1.0.1 + main
-  bis 1fe4be1, Run 43680780421: zusätzlich #16) veröffentlicht. Prüfen: Update 1.0.1 -> 1.0.2 zeigt die Notizen formatiert
-  (#17), danach Einstellungsfenster (#16); #8 am AlmaLinux-Ziel. Versionen 1.0.1/1.0.2 sind vergeben; nächste echte
+  bis 1fe4be1, Run 43680780421: zusätzlich #16) veröffentlicht. #17 unter Windows bestätigt (Update 1.0.1 -> 1.0.2 zeigt
+  die Notizen formatiert). Offen: Einstellungsfenster in 1.0.2 (#16), #8 am AlmaLinux-Ziel. Versionen 1.0.1/1.0.2 sind vergeben; nächste echte
   Version 1.1.0 (oder 1.0.3). Test-Branches nicht mergen, nach den Tests löschen.
 - #1 Sitzungsverwaltung per Drag & Drop.
 - Release-Ablauf: `docs/release.md`.
