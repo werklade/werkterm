@@ -163,6 +163,8 @@ Werkterm sucht nur auf Anforderung nach Updates: **Hilfe > Nach Updates suchen�
 - AppImage und die Windows-Installer (NSIS, MSI) laden das signierte Update und installieren es; Werkterm startet danach neu. Die Signatur wird gegen einen in Werkterm eingebauten Schlüssel geprüft.
 - Eine `.deb`-Installation wird über das Werklade-APT-Repository aktualisiert (`sudo apt update && sudo apt upgrade`).
 
+Testversionen: AppImage- und Windows-Installationen nutzen den Testkanal, wenn Werkterm mit der Umgebungsvariable `WERKTERM_UPDATE_CHANNEL=test` startet (Bash: `WERKTERM_UPDATE_CHANNEL=test ./Werkterm_<version>_amd64.AppImage`; PowerShell: `$env:WERKTERM_UPDATE_CHANNEL='test'; & "$env:LOCALAPPDATA\Werkterm\werkterm.exe"`). Testversionen können unfertig sein. Zurück auf Stabil gibt es kein Downgrade: Die Testversion bleibt, bis eine neuere stabile Version erscheint. Eine Einstellung dafür ist geplant ([#14](https://github.com/werklade/werkterm/issues/14)); das APT-Repository hat noch keinen Testbereich ([#15](https://github.com/werklade/werkterm/issues/15)).
+
 ## Datenordner
 
 Beim ersten Start fragt Werkterm nach dem Datenordner: Standardordner oder ein eigener Ordner, z. B. ein von einem Cloud-Client zwischen mehreren Geräten synchronisierter. Später änderbar unter Einstellungen > Datenordner. Werkterm startet beim Wechsel neu; laufende Tunnel werden gestoppt, offene Verbindungen nach Rückfrage getrennt. Unter Windows ist der Standardordner `%APPDATA%\de.werklade.werkterm`.

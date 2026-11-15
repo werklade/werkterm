@@ -163,6 +163,8 @@ Werkterm checks for updates only when you ask for it: **Hilfe > Nach Updates suc
 - AppImage and the Windows installers (NSIS, MSI) download the signed update and install it; Werkterm restarts afterwards. The signature is verified against a key built into Werkterm.
 - A `.deb` installation is updated through the Werklade APT repository (`sudo apt update && sudo apt upgrade`).
 
+Test builds: AppImage and Windows installations can use the test channel by starting Werkterm with the environment variable `WERKTERM_UPDATE_CHANNEL=test` (Bash: `WERKTERM_UPDATE_CHANNEL=test ./Werkterm_<version>_amd64.AppImage`; PowerShell: `$env:WERKTERM_UPDATE_CHANNEL='test'; & "$env:LOCALAPPDATA\Werkterm\werkterm.exe"`). Test builds may be unfinished. Switching back does not downgrade: the test version stays until a newer stable release appears. A setting for this is planned ([#14](https://github.com/werklade/werkterm/issues/14)); the APT repository has no test suite yet ([#15](https://github.com/werklade/werkterm/issues/15)).
+
 ## Data folder
 
 On first start Werkterm asks for the data folder: the default folder or a folder of your own, for example one that a cloud client synchronizes between several devices. Change it later under Settings > Data folder. Werkterm restarts on change; running tunnels are stopped and open connections are closed after confirmation. On Windows the default folder is `%APPDATA%\de.werklade.werkterm`.
