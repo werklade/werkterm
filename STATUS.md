@@ -32,9 +32,10 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server (seit 2026-11-15; Betriebshandbuch im privaten
-  Repo `werklade/packages`, überarbeitet). Während des Umzugs ruhen alle Veröffentlichungen, auch der Testkanal
-  (#16, #8).
+- Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
+  (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
+  Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
+  `werklade/packages`).
 
 ## Offen
 Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.1.0: #1–#6, #8; Sammelliste: #7, #9–#13).
