@@ -32,7 +32,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-nichts
+- Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server (seit 2026-11-15; Betriebshandbuch im privaten
+  Repo `werklade/packages`, überarbeitet). Während des Umzugs ruhen alle Veröffentlichungen, auch der Testkanal
+  (#16, #8).
 
 ## Offen
 Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.1.0: #1–#6, #8; Sammelliste: #7, #9–#13).
@@ -40,7 +42,6 @@ Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
   Windows); Rückfrage beim Schließen des Fensters; Seriell-Berechtigungshilfe (Linux) mit echtem Gerät.
-- Paket-Server pkg.werklade.de auf den endgültigen Server umziehen (Betriebshandbuch im privaten Repo `werklade/packages`).
 - Zurückgestellt: Tab ablösen, Popup-Konsole, Mosh/RDP/VNC. Nicht geplant: Master-Passwort, X11/Cygwin, Port-Scanner,
   Paketmitschnitt, Wake on LAN.
 
