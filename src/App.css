@@ -131,7 +131,7 @@ input::placeholder { color: var(--fg-muted); }
 .settings-action-row > button { grid-column: 2; justify-self: start; }
 .settings-secondary { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 6px 12px; background: var(--bg-toolbar); color: var(--fg-primary); cursor: pointer; }
 .settings-secondary:hover { background: var(--bg-hover); }
-.settings-fields { display: grid; gap: 12px; align-content: start; min-width: 0; min-height: 0; overflow: hidden auto; padding-right: 4px; }
+.settings-fields { display: grid; gap: 12px; align-content: start; min-width: 0; min-height: 0; overflow: hidden auto; padding-right: 20px; }
 .settings-fields label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-items: center; gap: 12px; }
 .settings-fields select { padding: 6px; min-width: 0; max-width: 100%; }
 .settings-fields .settings-check { display: flex; }
