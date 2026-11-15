@@ -1,0 +1,60 @@
+name: Bug report / Fehler melden
+description: Something does not work as expected. / Etwas funktioniert nicht wie erwartet.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or German is fine. / Deutsch oder Englisch.
+        Do not include passwords, keys, host names or IP addresses. / Keine Passwörter, Schlüssel, Hostnamen oder IP-Adressen angeben.
+  - type: input
+    id: version
+    attributes:
+      label: Werkterm version / Version
+      description: Help > About Werkterm / Hilfe > Über Werkterm
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package / Paket
+      options:
+        - .deb (APT)
+        - AppImage
+        - Windows installer (NSIS, .exe)
+        - Windows MSI
+        - Built from source / selbst gebaut
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system / Betriebssystem
+      description: e.g. Debian 13 GNOME Wayland, Ubuntu 24.04 X11, Windows 11 23H2
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Was ist passiert?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect? / Was wurde erwartet?
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Schritte zum Nachstellen
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output or screenshot / Terminal-Ausgabe oder Bildschirmfoto
+      description: Linux - start `werkterm` from a terminal and copy the output. / Unter Linux `werkterm` im Terminal starten und die Ausgabe kopieren.
+      render: text

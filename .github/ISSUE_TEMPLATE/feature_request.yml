@@ -1,0 +1,30 @@
+name: Feature request / Funktionswunsch
+description: Suggest a new feature or an improvement. / Neue Funktion oder Verbesserung vorschlagen.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: English or German is fine. / Deutsch oder Englisch.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do? / Was möchtest du erreichen?
+      description: Describe the task or problem, not only the solution. / Die Aufgabe oder das Problem beschreiben, nicht nur die Lösung.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution / Vorschlag
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or alternatives / Behelfe oder Alternativen
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform / Plattform
+      multiple: true
+      options:
+        - Linux
+        - Windows

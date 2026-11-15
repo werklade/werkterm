@@ -87,26 +87,36 @@ describe("update available", () => {
     expect(primaries(tree)).toEqual(["Herunterladen und installieren"]);
     (button(tree, "Herunterladen und installieren")!.props.onClick as () => void)();
     expect(handlers.onInstall).toHaveBeenCalledTimes(1);
-    const notes = findAll(tree, e => e.type === "pre")[0];
-    expect(textOf(notes)).toBe("Neu: Update-Prüfung\nBehoben: Absturz");
+    const notes = findAll(tree, e => e.props.className === "update-notes")[0];
+    expect(notes.type).toBe("div");
+    expect(textOf(notes)).toBe("Neu: Update-Prüfung Behoben: Absturz");
     expect(notes.props.tabIndex).toBe(0);
+    expect(notes.props["aria-labelledby"]).toBe("update-notes-title");
   });
-  it("renders server notes as a text child, never as markup", () => {
+  it("formats Markdown notes into headings, lists and inline code", () => {
+    const tree = render(offer({}, { notes: "### Added\n\n- Foo `bar` **baz**\n- Qux" }));
+    const notes = findAll(tree, e => e.props.className === "update-notes")[0];
+    expect(textOf(findAll(notes, e => e.type === "h4")[0])).toBe("Added");
+    expect(findAll(notes, e => e.type === "li")).toHaveLength(2);
+    expect(textOf(findAll(notes, e => e.type === "code")[0])).toBe("bar");
+    expect(textOf(findAll(notes, e => e.type === "strong")[0])).toBe("baz");
+    expect(findAll(notes, e => e.type === "a")).toHaveLength(0);
+  });
+  it("renders server notes as text children, never as markup", () => {
     const evil = "<img src=x onerror=alert(1)><script>alert(1)</script>";
     const tree = render(offer({}, { notes: evil }));
-    const notes = findAll(tree, e => e.type === "pre")[0];
-    expect(notes.props.children).toBe(evil);
-    expect(notes.props.dangerouslySetInnerHTML).toBeUndefined();
+    const notes = findAll(tree, e => e.props.className === "update-notes")[0];
+    expect(textOf(notes)).toBe(evil);
     expect(findAll(tree, e => e.props.dangerouslySetInnerHTML !== undefined)).toHaveLength(0);
     expect(findAll(tree, e => e.type === "img" || e.type === "script")).toHaveLength(0);
   });
   it("caps very long notes", () => {
     const tree = render(offer({}, { notes: "x".repeat(notesMaxChars * 5) }));
-    expect(textOf(findAll(tree, e => e.type === "pre")[0]).length).toBeLessThanOrEqual(notesMaxChars + 2);
+    expect(textOf(findAll(tree, e => e.props.className === "update-notes")[0]).length).toBeLessThanOrEqual(notesMaxChars + 2);
   });
   it("omits the notes block and the date when the server sends none", () => {
     const tree = render(offer({}, { notes: null, pubDate: null }));
-    expect(findAll(tree, e => e.type === "pre")).toHaveLength(0);
+    expect(findAll(tree, e => e.props.className === "update-notes")).toHaveLength(0);
     expect(textOf(tree)).not.toContain("Veröffentlicht");
   });
   it("restart note per platform: Linux restarts, NSIS quits and restarts, MSI also asks for admin rights", () => {
@@ -124,7 +134,7 @@ describe("update available", () => {
   it("announced version without 'available' never produces an offer", () => {
     const tree = render(run([{ type: "info", info: info() }, { type: "checked", check: check({ available: false }) }]));
     expect(textOf(tree)).toContain("Werkterm ist aktuell (Version 0.3.0)");
-    expect(findAll(tree, e => e.type === "pre")).toHaveLength(0);
+    expect(findAll(tree, e => e.props.className === "update-notes")).toHaveLength(0);
   });
   it("deb: no install button, apt note and the command in a copyable field", () => {
     const tree = render(offer({ selfUpdate: false, installKind: "deb" }));

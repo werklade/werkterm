@@ -4,7 +4,15 @@
 .update-channel { display: inline-block; margin: 0 0 8px; padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--fg-secondary); font-size: 12px; }
 .update-error { color: var(--danger); overflow-wrap: anywhere; }
 .update-dialog h3 { margin: 12px 0 4px; font-size: 14px; }
-.update-notes { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; background: var(--bg-input); border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.update-notes { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; background: var(--bg-input); border-radius: var(--radius); font-size: 13px; overflow-wrap: anywhere; user-select: text; }
+.update-notes h4, .update-notes h5 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
+.update-notes > :first-child { margin-top: 0; }
+.update-notes > :last-child { margin-bottom: 0; }
+.update-notes p { margin: 0 0 6px; }
+.update-notes ul { margin: 0 0 6px; padding-left: 18px; list-style: disc; }
+.update-notes ul ul { margin: 2px 0 0; list-style: circle; }
+.update-notes li { margin: 0 0 3px; }
+.update-notes code { padding: 0 4px; background: var(--bg-panel); border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; }
 .update-notes:focus-visible, .update-progress:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .update-copy { display: flex; align-items: stretch; gap: 8px; margin: 4px 0 8px; }
 .update-copy code { flex: 1; min-width: 0; padding: 8px 10px; font-family: var(--font-mono); background: var(--bg-input); border-radius: var(--radius); user-select: all; overflow-wrap: anywhere; word-break: break-all; }

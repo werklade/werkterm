@@ -6,6 +6,7 @@ import {
   aptCommand, aptRepoNote, blockedFallback, canCloseUpdateDialog, formatPubDate, installKindLabel, progressPercent, restartHints, progressText, updateAction, updateDownloadUrl,
   type AvailableUpdate, type UpdateInfo, type UpdateState,
 } from "../lib/updateState";
+import { parseNotes, type Inline, type ListItem } from "../lib/notesMarkdown";
 import "./UpdateDialog.css";
 
 export interface UpdateDialogViewProps {
@@ -32,6 +33,23 @@ const copyField = (p: UpdateDialogViewProps, text: string) => <div className="up
   <button type="button" onClick={() => p.onCopy(text)}>{t("update.copy")}</button>
 </div>;
 
+const inlineView = (inlines: Inline[]) => inlines.map((part, i) =>
+  part.type === "code" ? <code key={i}>{part.text}</code> : part.type === "bold" ? <strong key={i}>{part.text}</strong> : part.text);
+
+const itemsView = (items: ListItem[]) => <ul>{items.map((item, i) => <li key={i}>
+  {inlineView(item.inlines)}
+  {item.children.length > 0 && itemsView(item.children)}
+</li>)}</ul>;
+
+/** Release notes as elements; a plain function (not a component) so the tree stays inspectable. */
+export function notesView(notes: string) {
+  return parseNotes(notes).map((block, i) => {
+    if (block.type === "heading") { const Tag = block.level <= 3 ? "h4" : "h5"; return <Tag key={i}>{inlineView(block.inlines)}</Tag>; }
+    if (block.type === "list") return <div key={i}>{itemsView(block.items)}</div>;
+    return <p key={i}>{inlineView(block.inlines)}</p>;
+  });
+}
+
 function details(info: UpdateInfo) {
   return <p className="update-meta">{t("update.installed", { version: info.currentVersion, kind: installKindLabel(info.installKind) })}{info.channel === "test" ? ` · ${t("update.channel.test")}` : ""}</p>;
 }
@@ -44,8 +62,8 @@ function offer(p: UpdateDialogViewProps, info: UpdateInfo, update: AvailableUpda
     {date && <p className="update-meta">{t("update.published", { date })}</p>}
     {update.notes && <>
       <h3 id="update-notes-title">{t("update.notes")}</h3>
-      {/* Server text: rendered as plain text only, scrollable via keyboard. */}
-      <pre className="update-notes" tabIndex={0} aria-labelledby="update-notes-title">{update.notes}</pre>
+      {/* Server text: parsed into React elements (text children only, no links), scrollable via keyboard. */}
+      <div className="update-notes" role="region" tabIndex={0} aria-labelledby="update-notes-title">{notesView(update.notes)}</div>
     </>}
     {action === "install" && restartHints(info.installKind).map(hint => <p key={hint} className="update-note">{hint}</p>)}
     {action === "blocked" && <><p className="update-note">{info.blockedReason?.trim() ? errorText(info.blockedReason.trim()) : blockedFallback()}</p><p className="update-note">{downloadNote()}</p>{copyField(p, updateDownloadUrl)}</>}

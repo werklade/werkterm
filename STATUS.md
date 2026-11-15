@@ -28,6 +28,8 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - Releases: 0.1.0–0.1.8 als Pre-releases im archivierten Repo; 1.0.0 am 2026-11-15 als erstes öffentliches Release.
   Das Repo `werklade/werkterm` ist seit 2026-11-15 öffentlich (bereinigte Historie); Rulesets schützen `main` und die
   Tags `v*`.
+- Release-Notizen im Update-Dialog formatiert (eigener kleiner Markdown-Parser, ohne HTML, ohne Links); Issue-Vorlagen
+  für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
 nichts
@@ -47,7 +49,6 @@ nichts
   - Rückfrage beim Schließen des Fensters.
   - Seriell-Berechtigungshilfe (Linux) mit echtem Gerät.
 - Kleine Fehler/Lücken:
-  - Update-Dialog zeigt Release-Notizen als Markdown-Rohtext.
   - Designs werden bei externen Änderungen nicht neu geladen.
   - Abgebrochenes Kopieren in den Datenordner hinterlässt eine Teilkopie.
   - „Für das Profil“-Zurücksetzen der Einfüge-Auswahl fehlt im Sitzungsdialog (nur gesammelt in den Einstellungen).
@@ -78,6 +79,5 @@ nichts
 ## Nächster Schritt
 - Rückmeldung des Testers zum schwarzen Fenster mit 1.0.0 einholen (.deb und AppImage).
 - Datenordner von Hand prüfen.
-- Markdown der Release-Notizen im Update-Dialog darstellen.
 - Paket-Server auf den endgültigen Server umziehen.
 - Release-Ablauf: `docs/release.md`.

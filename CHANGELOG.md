@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The update dialog shows the release notes formatted (headings, lists, code) instead of raw Markdown. Links stay plain text.
+
 ## [1.0.0] – 2026-11-15
 
 ### Added
