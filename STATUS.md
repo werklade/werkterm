@@ -41,7 +41,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.1.0: #1, #3–#6, #11, #14, #15, #20, #22; Sammelliste: #7–#10, #12, #13, #19).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.2.0: #1, #3–#6, #11, #14, #15, #20; Sammelliste: #7–#10, #12, #13, #19).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
@@ -64,7 +64,8 @@ Hier nur, was nicht öffentlich geführt wird:
 
 ## Nächster Schritt
 - Release 1.1.0 am 2026-11-16 veröffentlicht: CI-Lauf 43865852492, GitHub-Release (Latest), pkg.werklade.de stable und
-  test. Offen: Meilenstein 1.2.0 anlegen und die offenen 1.1.0-Issues verschieben.
+  test. Offene Issues liegen im Meilenstein 1.2.0; im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet
+  auf Bestätigung).
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.
 - nouveau unter Wayland ungetestet.
