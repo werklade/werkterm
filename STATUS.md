@@ -60,8 +60,9 @@ Hier nur, was nicht öffentlich geführt wird:
   Icon-Änderung.
 
 ## Nächster Schritt
-- #2 schwarzes Fenster: betrifft auch das AppImage, die WebKit-Variable von Hand hilft, also greift die automatische
-  Abhilfe nicht; Angaben des Testers einholen (welche Variable, `werkterm: set`-Zeile, lspci).
+- #2 schwarzes Fenster: Ursache gefunden, der Tester hat eine GTX 1060 mit nouveau (X11), und nouveau wurde nicht als
+  NVIDIA-Fall erkannt; die Variable `WEBKIT_DISABLE_DMABUF_RENDERER=1` von Hand hilft (bestätigt, .deb und AppImage
+  1.0.0). Fix unter #21 in Arbeit (Abhilfe auch bei nouveau); wartet auf Test mit neuem Build.
 - #8 OSC-7-Echo und Historie: behoben auf main (Prompt-Erkennung, Selbstlöschung aus der Historie, Bash 5.2 geprüft);
   Test auf dem AlmaLinux-Ziel (Bash 4.4/5.1) steht aus, Label `testing`.
 - Testkanal (2026-11-15): 1.0.1 (Branch test/1.0.1, Run 43666264597: #8, #17) und 1.0.2 (Branch test/1.0.2 = 1.0.1 + main

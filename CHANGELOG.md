@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Linux: the window no longer stays black on NVIDIA graphics with the open-source nouveau driver; Werkterm now applies the WebKit workaround (`WEBKIT_DISABLE_DMABUF_RENDERER=1`, also under Wayland) there too.
 - SSH: the helper command for "Follow terminal folder" no longer stays visible on hosts with slow logins (it is only sent once a shell prompt is recognised, never into password prompts, questions or full-screen programs, and not after the user started typing), and it no longer appears in the shell history on systems without `HISTCONTROL=ignorespace` (for example AlmaLinux).
 
 ### Changed

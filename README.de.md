@@ -135,7 +135,7 @@ Downloads gegen `SHA256SUMS` prüfen (Linux: `sha256sum --check --ignore-missing
 
 ### Linux: Darstellungsprobleme / schwarzes Fenster
 
-Auf Systemen mit NVIDIA-Grafik und proprietärem Treiber kann das Fenster schwarz bleiben. Erkennt Werkterm eine solche Grafikkarte, setzt es beim Start `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unter Wayland zusätzlich `__NV_DISABLE_EXPLICIT_SYNC=1`. Das geschieht nicht, wenn eine dieser Variablen oder `WEBKIT_DISABLE_COMPOSITING_MODE` vom Nutzer gesetzt ist. Die Variablen werden nicht an lokale Terminals weitergegeben. Programme, die über die Desktop-Umgebung geöffnet werden (etwa der Dateimanager für den Log-Ordner), erben sie weiterhin.
+Auf Systemen mit NVIDIA-Grafik kann das Fenster schwarz bleiben, sowohl mit dem proprietären Treiber als auch mit dem freien Treiber nouveau. Erkennt Werkterm eine solche Grafikkarte, setzt es beim Start `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Beim proprietären Treiber kommt unter Wayland zusätzlich `__NV_DISABLE_EXPLICIT_SYNC=1` hinzu; bei nouveau wird nur `WEBKIT_DISABLE_DMABUF_RENDERER=1` gesetzt, auch unter Wayland. Das geschieht nicht, wenn eine dieser Variablen oder `WEBKIT_DISABLE_COMPOSITING_MODE` vom Nutzer gesetzt ist. Die Variablen werden nicht an lokale Terminals weitergegeben. Programme, die über die Desktop-Umgebung geöffnet werden (etwa der Dateimanager für den Log-Ordner), erben sie weiterhin. Auf Laptops mit zwei Grafikchips greift die Abhilfe auch, wenn Werkterm auf dem internen Chip läuft; abschalten mit `WERKTERM_NO_WEBKIT_WORKAROUND=1`.
 
 | Variable | Wirkung |
 | --- | --- |
@@ -148,7 +148,7 @@ Beispiel, Bash:
 WERKTERM_WEBKIT_WORKAROUND=1 werkterm
 ```
 
-Auf echter NVIDIA-Hardware noch nicht bestätigt.
+Von einem Tester bestätigt: GeForce GTX 1060 mit nouveau unter X11 (.deb und AppImage 1.0.0) zeigt ohne `WEBKIT_DISABLE_DMABUF_RENDERER=1` ein schwarzes Fenster und funktioniert mit der Variable. Mit dem proprietären Treiber noch nicht bestätigt.
 
 AppImage vor 1.0.0: Bleibt das Fenster trotzdem schwarz oder stürzt die Darstellung ab, fehlen dem AppImage GStreamer-Plugins. Abhilfe ist der Start mit `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu-Pfad; andere Distributionen verwenden andere Pfade). Ab 1.0.0 bringt das AppImage die Plugins selbst mit; die Variable dann entfernen, denn System-Plugins mit dem mitgelieferten GStreamer zu mischen kann abstürzen.
 

@@ -135,7 +135,7 @@ Check downloads against `SHA256SUMS` (Linux: `sha256sum --check --ignore-missing
 
 ### Linux: display problems / black window
 
-On systems with NVIDIA graphics and the proprietary driver, the window can stay black. If it detects such a graphics card, Werkterm sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup, under Wayland also `__NV_DISABLE_EXPLICIT_SYNC=1`. This does not happen if you have set one of these variables or `WEBKIT_DISABLE_COMPOSITING_MODE` yourself. The variables are not passed on to local terminals. Programs opened through the desktop (for example the file manager for the log folder) still inherit them.
+On systems with NVIDIA graphics, the window can stay black, with the proprietary driver as well as with the open-source driver nouveau. If it detects such a graphics card, Werkterm sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup. With the proprietary driver it also sets `__NV_DISABLE_EXPLICIT_SYNC=1` under Wayland; with nouveau it sets only `WEBKIT_DISABLE_DMABUF_RENDERER=1`, under Wayland too. This does not happen if you have set one of these variables or `WEBKIT_DISABLE_COMPOSITING_MODE` yourself. The variables are not passed on to local terminals. Programs opened through the desktop (for example the file manager for the log folder) still inherit them. On laptops with two graphics chips the workaround also applies when Werkterm runs on the integrated chip; turn it off with `WERKTERM_NO_WEBKIT_WORKAROUND=1`.
 
 | Variable | Effect |
 | --- | --- |
@@ -148,7 +148,7 @@ Example, Bash:
 WERKTERM_WEBKIT_WORKAROUND=1 werkterm
 ```
 
-Not yet confirmed on real NVIDIA hardware.
+Confirmed by a tester: GeForce GTX 1060 with nouveau under X11 (.deb and AppImage 1.0.0) shows a black window without `WEBKIT_DISABLE_DMABUF_RENDERER=1` and works with it. Not yet confirmed with the proprietary driver.
 
 AppImage before 1.0.0: if the window stays black or rendering crashes even so, the AppImage lacks GStreamer plugins. Starting with `GST_PLUGIN_PATH_1_0=/usr/lib/x86_64-linux-gnu/gstreamer-1.0` (Debian/Ubuntu path; other distributions use different paths) helps. From 1.0.0 the AppImage ships the plugins itself; remove the variable then, as mixing system plugins with the bundled GStreamer can crash.
 
