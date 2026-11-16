@@ -63,13 +63,12 @@ Hier nur, was nicht öffentlich geführt wird:
   Icon-Änderung.
 
 ## Nächster Schritt
-- Release 1.1.0: Versionsstand auf main, CI-Lauf `Release build`, Artefakt prüfen, GitHub-Release (Nutzer), dann
-  `npm run publish-pkg` test und stable (Ablauf `docs/release.md`). Nach 1.1.0 Meilenstein 1.2.0 anlegen und die offenen
-  1.1.0-Issues verschieben.
+- Release 1.1.0 am 2026-11-16 veröffentlicht: CI-Lauf 43865852492, GitHub-Release (Latest), pkg.werklade.de stable und
+  test. Offen: Meilenstein 1.2.0 anlegen und die offenen 1.1.0-Issues verschieben.
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.
 - nouveau unter Wayland ungetestet.
-- Testkanal: Versionen 1.0.1–1.0.3 sind vergeben. Test-Branches test/1.0.1–1.0.3 nicht mergen, nach dem Release
-  löschen.
+- Testkanal: Versionen 1.0.1–1.0.3 sind vergeben; ihre Branches sind nach dem Release 1.1.0 gelöscht. Regel: Nach
+  einem Stable-Release fallen ältere Test-Builds weg, von Tests bleibt nur der neueste; Stable-Releases bleiben immer.
 - Als Nächstes in der Entwicklung: #7 (Unterstriche unsichtbar), #20 (Einfüge-Dialog), #4 und #3 (Datenordner).
 - Release-Ablauf: `docs/release.md`.
