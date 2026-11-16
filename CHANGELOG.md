@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] – 2026-11-16
+
 ### Fixed
 
 - Linux: the window no longer stays black on NVIDIA graphics with the open-source nouveau driver; Werkterm now applies the WebKit workaround (`WEBKIT_DISABLE_DMABUF_RENDERER=1`, also under Wayland) there too.

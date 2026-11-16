@@ -1,6 +1,6 @@
 # STATUS – Werkterm
 
-Stand: 2026-11-15
+Stand: 2026-11-16
 
 Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 
@@ -28,6 +28,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - Releases: 0.1.0–0.1.8 als Pre-releases im archivierten Repo; 1.0.0 am 2026-11-15 als erstes öffentliches Release.
   Das Repo `werklade/werkterm` ist seit 2026-11-15 öffentlich (bereinigte Historie); Rulesets schützen `main` und die
   Tags `v*`.
+- 1.1.0 (2026-11-16, stable): schwarzes Fenster mit nouveau behoben (#2, #21, vom Tester mit 1.0.3 bestätigt, .deb und
+  AppImage), Einstellungen mit vertikalen Tabs (#16), formatierte Release-Notizen (#17), klare Meldung ohne grafische
+  Sitzung (#22), OSC-7-Echo (#8).
 - Release-Notizen im Update-Dialog formatiert (eigener kleiner Markdown-Parser, ohne HTML, ohne Links); Issue-Vorlagen
   für Fehler und Funktionswünsche auf GitHub.
 
@@ -38,7 +41,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.1.0: #1–#6, #8; Sammelliste: #7, #9–#13).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.1.0: #1, #3–#6, #11, #14, #15, #20, #22; Sammelliste: #7–#10, #12, #13, #19).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
@@ -60,19 +63,13 @@ Hier nur, was nicht öffentlich geführt wird:
   Icon-Änderung.
 
 ## Nächster Schritt
-- #2 schwarzes Fenster: Ursache gefunden, der Tester hat eine GTX 1060 mit nouveau (X11), und nouveau wurde nicht als
-  NVIDIA-Fall erkannt; die Variable `WEBKIT_DISABLE_DMABUF_RENDERER=1` von Hand hilft (bestätigt, .deb und AppImage
-  1.0.0). Fix unter #21 auf main (7a71a14, Abhilfe auch bei nouveau, Label `testing`); steckt im Testbuild 1.0.3.
-  Offen: Tester startet das .deb 1.0.3 ohne Variable, erwartet normales Fenster und die Zeile
-  `werkterm: set WEBKIT_DISABLE_DMABUF_RENDERER=1 (NVIDIA GPU with nouveau driver detected)`. nouveau unter Wayland
-  ungetestet.
-- #8 OSC-7-Echo und Historie: behoben auf main (Prompt-Erkennung, Selbstlöschung aus der Historie, Bash 5.2 geprüft);
-  Test auf dem AlmaLinux-Ziel (Bash 4.4/5.1) steht aus, Label `testing`.
-- Testkanal (2026-11-15): 1.0.1 (Branch test/1.0.1, Run 43666264597: #8, #17) und 1.0.2 (Branch test/1.0.2 = 1.0.1 + main
-  bis 1fe4be1, Run 43680780421: zusätzlich #16) veröffentlicht. #17 unter Windows bestätigt (Update 1.0.1 -> 1.0.2 zeigt
-  die Notizen formatiert). Offen: Einstellungsfenster in 1.0.2 (#16), #8 am AlmaLinux-Ziel.
-  2026-11-16: 1.0.3 (Branch test/1.0.3 = main bis 7a71a14, Run 43845037908: zusätzlich #21) im Testkanal
-  veröffentlicht. Versionen 1.0.1–1.0.3 sind vergeben; nächste echte Version 1.1.0. Test-Branches nicht mergen,
-  nach den Tests löschen.
-- #1 Sitzungsverwaltung per Drag & Drop.
+- Release 1.1.0: Versionsstand auf main, CI-Lauf `Release build`, Artefakt prüfen, GitHub-Release (Nutzer), dann
+  `npm run publish-pkg` test und stable (Ablauf `docs/release.md`). Nach 1.1.0 Meilenstein 1.2.0 anlegen und die offenen
+  1.1.0-Issues verschieben.
+- #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
+- #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.
+- nouveau unter Wayland ungetestet.
+- Testkanal: Versionen 1.0.1–1.0.3 sind vergeben. Test-Branches test/1.0.1–1.0.3 nicht mergen, nach dem Release
+  löschen.
+- Als Nächstes in der Entwicklung: #7 (Unterstriche unsichtbar), #20 (Einfüge-Dialog), #4 und #3 (Datenordner).
 - Release-Ablauf: `docs/release.md`.
