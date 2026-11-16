@@ -112,6 +112,25 @@ pub fn session_type(env: &GraphicsEnv) -> Session {
     }
 }
 
+/// True when GTK has a chance to open a window. Deliberately lenient: only a shell with
+/// no DISPLAY, no WAYLAND_DISPLAY, no graphical XDG_SESSION_TYPE and no GDK_BACKEND
+/// (e.g. SSH, `su -`, text console) counts as "no graphical session"; anything the user
+/// set explicitly is left to GTK.
+pub fn has_graphical_session(env: &GraphicsEnv) -> bool {
+    non_empty(&env.display).is_some()
+        || non_empty(&env.wayland_display).is_some()
+        || non_empty(&env.gdk_backend).is_some()
+        || non_empty(&env.xdg_session_type)
+            .and_then(parse_session)
+            .is_some()
+}
+
+/// Message printed instead of the GTK panic when there is no graphical session.
+pub const NO_SESSION_MESSAGE: &str = "werkterm: no graphical session found \
+(DISPLAY, WAYLAND_DISPLAY and GDK_BACKEND are empty).\n\
+Start Werkterm from the desktop, from a terminal inside the desktop session, \
+or over SSH with X forwarding (ssh -X).";
+
 /// Decides what to set before GTK/WebKit start. Pure, so it is tested on every platform.
 /// `nvidia` is the detected NVIDIA driver (`None` = no NVIDIA GPU detected).
 pub fn decide(env: &GraphicsEnv, nvidia: Option<NvidiaDriver>) -> Decision {
@@ -178,13 +197,12 @@ pub fn detect_nvidia(root: &Path) -> Option<NvidiaDriver> {
     found
 }
 
-/// Applies the workaround. Must run first in `main`, before any thread exists.
 #[cfg(target_os = "linux")]
-pub fn apply() {
+fn read_env() -> GraphicsEnv {
     use std::env::{var, var_os};
     // var_os: a set-but-non-UTF-8 value still counts as the user's choice.
     let raw = |key: &str| var_os(key).map(|v| v.to_string_lossy().into_owned());
-    let env = GraphicsEnv {
+    GraphicsEnv {
         gdk_backend: var("GDK_BACKEND").ok(),
         xdg_session_type: var("XDG_SESSION_TYPE").ok(),
         wayland_display: var("WAYLAND_DISPLAY").ok(),
@@ -194,7 +212,23 @@ pub fn apply() {
         compositing: raw(COMPOSITING),
         opt_out: raw(OPT_OUT),
         force: raw(FORCE),
-    };
+    }
+}
+
+/// Exits with code 1 and a clear message when there is no graphical session, instead of
+/// letting GTK initialisation panic later. Call first in `main`.
+#[cfg(target_os = "linux")]
+pub fn ensure_graphical_session() {
+    if !has_graphical_session(&read_env()) {
+        eprintln!("{NO_SESSION_MESSAGE}");
+        std::process::exit(1);
+    }
+}
+
+/// Applies the workaround. Must run first in `main`, before any thread exists.
+#[cfg(target_os = "linux")]
+pub fn apply() {
+    let env = read_env();
     let nvidia = detect_nvidia(Path::new("/"));
     let decision = decide(&env, nvidia);
     for warning in &decision.warnings {
@@ -205,8 +239,8 @@ pub fn apply() {
     }
     for (key, value) in &decision.set {
         // SAFETY: set_var is unsafe since edition 2024 because setenv races with
-        // concurrent getenv in other threads. This runs as the first statement of
-        // `main`: the Rust runtime has started no threads, and Tauri, GTK, WebKit and
+        // concurrent getenv in other threads. This runs at the start of `main`, only
+        // after `ensure_graphical_session` (which starts no threads): the Rust runtime has started no threads, and Tauri, GTK, WebKit and
         // Tokio are not initialized yet, so no other thread can read the environment.
         unsafe { std::env::set_var(key, value) };
     }
@@ -378,6 +412,46 @@ mod tests {
         };
         assert_eq!(session_type(&e), Session::X11);
         assert_eq!(session_type(&env()), Session::Unknown);
+    }
+
+    #[test]
+    fn graphical_session_detection() {
+        // SSH, `su -`, text console: nothing set or only empty values.
+        assert!(!has_graphical_session(&env()));
+        let e = GraphicsEnv {
+            display: Some(String::new()),
+            wayland_display: Some("  ".into()),
+            xdg_session_type: Some("tty".into()),
+            gdk_backend: Some(" ".into()),
+            ..env()
+        };
+        assert!(!has_graphical_session(&e));
+        for e in [
+            GraphicsEnv {
+                display: Some(":0.0".into()),
+                ..env()
+            },
+            GraphicsEnv {
+                wayland_display: Some("wayland-0".into()),
+                ..env()
+            },
+            // Wayland session where GTK falls back to the default socket.
+            GraphicsEnv {
+                xdg_session_type: Some("Wayland".into()),
+                ..env()
+            },
+            GraphicsEnv {
+                xdg_session_type: Some("x11".into()),
+                ..env()
+            },
+            // Explicit backend such as broadway: left to GTK.
+            GraphicsEnv {
+                gdk_backend: Some("broadway".into()),
+                ..env()
+            },
+        ] {
+            assert!(has_graphical_session(&e), "{e:?}");
+        }
     }
 
     /// Fake procfs/sysfs tree in the system temp dir, removed on drop.
