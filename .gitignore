@@ -28,6 +28,8 @@ src-tauri/target/
 src-tauri/gen/schemas/
 tmp/
 logs/
+# Downloaded release artifacts (gh run download --dir dl-<version>)
+/dl-*/
 *.log
 
 # Claude Code (lokal)
