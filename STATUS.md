@@ -62,12 +62,17 @@ Hier nur, was nicht öffentlich geführt wird:
 ## Nächster Schritt
 - #2 schwarzes Fenster: Ursache gefunden, der Tester hat eine GTX 1060 mit nouveau (X11), und nouveau wurde nicht als
   NVIDIA-Fall erkannt; die Variable `WEBKIT_DISABLE_DMABUF_RENDERER=1` von Hand hilft (bestätigt, .deb und AppImage
-  1.0.0). Fix unter #21 in Arbeit (Abhilfe auch bei nouveau); wartet auf Test mit neuem Build.
+  1.0.0). Fix unter #21 auf main (7a71a14, Abhilfe auch bei nouveau, Label `testing`); steckt im Testbuild 1.0.3.
+  Offen: Tester startet das .deb 1.0.3 ohne Variable, erwartet normales Fenster und die Zeile
+  `werkterm: set WEBKIT_DISABLE_DMABUF_RENDERER=1 (NVIDIA GPU with nouveau driver detected)`. nouveau unter Wayland
+  ungetestet.
 - #8 OSC-7-Echo und Historie: behoben auf main (Prompt-Erkennung, Selbstlöschung aus der Historie, Bash 5.2 geprüft);
   Test auf dem AlmaLinux-Ziel (Bash 4.4/5.1) steht aus, Label `testing`.
 - Testkanal (2026-11-15): 1.0.1 (Branch test/1.0.1, Run 43666264597: #8, #17) und 1.0.2 (Branch test/1.0.2 = 1.0.1 + main
   bis 1fe4be1, Run 43680780421: zusätzlich #16) veröffentlicht. #17 unter Windows bestätigt (Update 1.0.1 -> 1.0.2 zeigt
-  die Notizen formatiert). Offen: Einstellungsfenster in 1.0.2 (#16), #8 am AlmaLinux-Ziel. Versionen 1.0.1/1.0.2 sind vergeben; nächste echte
-  Version 1.1.0 (oder 1.0.3). Test-Branches nicht mergen, nach den Tests löschen.
+  die Notizen formatiert). Offen: Einstellungsfenster in 1.0.2 (#16), #8 am AlmaLinux-Ziel.
+  2026-11-16: 1.0.3 (Branch test/1.0.3 = main bis 7a71a14, Run 43845037908: zusätzlich #21) im Testkanal
+  veröffentlicht. Versionen 1.0.1–1.0.3 sind vergeben; nächste echte Version 1.1.0. Test-Branches nicht mergen,
+  nach den Tests löschen.
 - #1 Sitzungsverwaltung per Drag & Drop.
 - Release-Ablauf: `docs/release.md`.
