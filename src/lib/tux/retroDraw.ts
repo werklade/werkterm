@@ -52,9 +52,13 @@ function particles(ctx: Ctx, parts: Particles): void {
   for (const p of parts.list) { ctx.globalAlpha = clamp(p.life / 0.25, 0, 1); ctx.fillStyle = p.color; ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size); }
   ctx.globalAlpha = 1;
 }
-type Layer = { canvas: CanvasImageSource; g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D };
-/** Cached cover per grid; rebuilt only when Grid.version, the background or the scale changes. Null: no canvas available. */
-const covers = new WeakMap<Grid, { layer: Layer | null; version: number; ground: string; scale: number }>();
+type Ctx2 = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+type Layer = { canvas: CanvasImageSource; g: Ctx2 };
+/** A cell tile (soil, steel, brick) that replaces the character of a cell; drawn at cell width, 16 pixels high, crisp. */
+type Tile = { prop: Prop; mirror: boolean };
+type TileAt = (r: number, c: number) => Tile | null;
+/** Cached cover per grid; rebuilt only when Grid.version, the background, the scale or the tile view changes. Null: no canvas available. */
+const covers = new WeakMap<Grid, { layer: Layer | null; version: number; ground: string; scale: number; tiles: boolean }>();
 function newLayer(w: number, h: number): Layer | null {
   try {
     if (typeof document !== "undefined") {
@@ -69,31 +73,69 @@ function newLayer(w: number, h: number): Layer | null {
   } catch { /* no canvas (tests): fall back to direct drawing */ }
   return null;
 }
-function fillDestroyed(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, grid: Grid, ground: string): void {
+/** Draws a tile into cell (r, c): the lower 16 pixels of the cell, cell wide, without smoothing. */
+function drawTile(g: Ctx2, grid: Grid, p: Prop, r: number, c: number, mirror: boolean): void {
+  const img = sheetFor(p.rows, p.palette), x = c * grid.cw, y = (r + 1) * grid.ch - 16, w = grid.cw;
+  g.imageSmoothingEnabled = false;
+  if (mirror) { g.save(); g.translate(x + w, y); g.scale(-1, 1); g.drawImage(img, 0, 0, w, 16); g.restore(); }
+  else g.drawImage(img, x, y, w, 16);
+}
+function paintCover(g: Ctx2, grid: Grid, ground: string, tileAt: TileAt | null): void {
   g.fillStyle = ground;
   for (const k of grid.destroyed) g.fillRect((k % grid.cols) * grid.cw, Math.floor(k / grid.cols) * grid.ch, grid.cw, grid.ch);
+  if (!tileAt) return;
+  for (let r = 0; r < grid.rows; r++) for (let c = 0; c < grid.cols; c++) {
+    const t = tileAt(r, c);
+    if (!t) continue;
+    // The background first hides the whole character, then the tile replaces it.
+    g.fillStyle = ground; g.fillRect(c * grid.cw, r * grid.ch, grid.cw, grid.ch);
+    drawTile(g, grid, t.prop, r, c, t.mirror);
+  }
 }
-/** Destroyed characters are covered with the terminal background (overlay only, restored on activity). */
-function cover(ctx: Ctx, grid: Grid, ground: string): void {
-  if (!grid.destroyed.size) return;
-  const scale = typeof ctx.getTransform === "function" ? Math.abs(ctx.getTransform().a) || 1 : 1;
+/**
+ * Destroyed characters are covered with the terminal background, tiles replace characters while the Tuxes are active
+ * (overlay only; the text returns when the overlay ends).
+ */
+function cover(ctx: Ctx, grid: Grid, ground: string, tileAt: TileAt | null = null): void {
+  if (!grid.destroyed.size && !tileAt) return;
+  const scale = typeof ctx.getTransform === "function" ? Math.abs(ctx.getTransform().a) || 1 : 1, tiles = tileAt !== null;
   let c = covers.get(grid);
-  if (!c || c.version !== grid.version || c.ground !== ground || c.scale !== scale) {
+  if (!c || c.version !== grid.version || c.ground !== ground || c.scale !== scale || c.tiles !== tiles) {
     const w = Math.max(1, Math.ceil(grid.width * scale)), h = Math.max(1, Math.ceil(grid.height * scale));
     const layer = c?.layer && c.scale === scale ? c.layer : newLayer(w, h);
     if (layer) {
       layer.g.setTransform(1, 0, 0, 1, 0, 0); layer.g.clearRect(0, 0, w, h); layer.g.scale(scale, scale);
-      fillDestroyed(layer.g, grid, ground);
+      paintCover(layer.g, grid, ground, tileAt);
     }
-    c = { layer, version: grid.version, ground, scale };
+    c = { layer, version: grid.version, ground, scale, tiles };
     covers.set(grid, c);
   }
   // The layer has device resolution; drawn 1:1 under the scaled context (no stretching from rounding up).
   if (c.layer) ctx.drawImage(c.layer.canvas, 0, 0, Math.max(1, Math.ceil(grid.width * scale)) / scale, Math.max(1, Math.ceil(grid.height * scale)) / scale);
-  else fillDestroyed(ctx, grid, ground);
+  else paintCover(ctx, grid, ground, tileAt);
+}
+/** Soil rows of Retro Lemminge: clods of soil, steel plates for steel words; every 2nd column mirrored. */
+function lemmingeTiles(sim: LemmingeSim): TileAt | null {
+  if (!sim.tiles) return null;
+  const look = retroLooks.lemminge, earth = frameOf(look, "earth"), steel = frameOf(look, "steel"), g = sim.grid;
+  return (r, c) => (sim.soilRow(r) && g.hasChar(r, c) ? { prop: g.isSteel(r, c) ? steel : earth, mirror: c % 2 === 1 } : null);
+}
+/** Brick rows of Retro Hüpfer: the 9 x 16 brick tile. */
+function huepferTiles(sim: HuepferSim): TileAt | null {
+  if (!sim.tiles) return null;
+  const brick = frameOf(retroLooks.huepfer, "brickTile"), g = sim.grid;
+  return (r, c) => (sim.brickRow(r) && g.hasChar(r, c) ? { prop: brick, mirror: false } : null);
 }
 
 // ---------- Retro Lemminge ----------
+const BADGE_STATES = new Set<LemmingeTux["state"]>(["walk", "stop", "dig", "build", "fall", "shrug", "tunnel", "diag", "climb"]);
+/** The climbed wall: a narrow edge of soil from the lower floor up to the upper one, in front of the climber. */
+function climbWall(ctx: Ctx, t: LemmingeTux): void {
+  const x = Math.round(t.dir > 0 ? t.x + 9 : t.x - 12), top = Math.round(t.cy), h = Math.max(0, Math.round(t.cfrom - t.cy));
+  ctx.fillStyle = "#6b4a2a"; ctx.fillRect(x, top, 3, h);
+  ctx.fillStyle = "#43301c"; ctx.fillRect(t.dir > 0 ? x + 2 : x, top, 1, h);
+  ctx.fillStyle = "#7ccf3a"; ctx.fillRect(x, top, 3, 1);
+}
 function lemmingeTux(ctx: Ctx, sim: LemmingeSim, look: RetroLook, t: LemmingeTux): void {
   if (t.state === "enter") return;
   let name: string | null = "stand", mirror = t.dir < 0, sc = PX, alpha = 1;
@@ -101,6 +143,10 @@ function lemmingeTux(ctx: Ctx, sim: LemmingeSim, look: RetroLook, t: LemmingeTux
     case "fall": case "float": name = "hang"; mirror = false; break;
     case "walk": name = Math.floor(t.anim / 0.18) % 2 ? "sideB" : "sideA"; break;
     case "dig": name = Math.floor(t.anim / 0.12) % 2 ? "digB" : "digA"; mirror = false; break;
+    case "tunnel": case "diag": name = Math.floor(t.anim / 0.15) % 2 ? "tunB" : "tunA"; break;
+    case "shrug": name = "shrug"; mirror = false; break;
+    case "climb": name = Math.floor(t.anim / 0.25) % 2 ? "climbB" : "climbA"; mirror = false; climbWall(ctx, t); break;
+    case "pop": name = "plopp"; mirror = false; break;
     case "stop": name = Math.floor(t.anim / 0.4) % 2 ? "stopB" : "stopA"; mirror = false; break;
     case "build": name = Math.floor(t.t / 0.3) % 2 ? "buildB" : "buildA"; break;
     case "die": name = t.t < 0.2 ? "squash" : t.t < 0.4 ? "plopp" : null; mirror = false; break;
@@ -110,7 +156,7 @@ function lemmingeTux(ctx: Ctx, sim: LemmingeSim, look: RetroLook, t: LemmingeTux
   ctx.globalAlpha = clamp(alpha, 0, 1);
   if (name) tux(ctx, look, name, t.x, t.y, mirror, sc);
   ctx.globalAlpha = 1;
-  if (t.umbrella && (t.state === "walk" || t.state === "stop" || t.state === "dig" || t.state === "build" || t.state === "fall")) spr(ctx, frameOf(look, "badge"), t.x - 7, t.y - 44 + Math.round(Math.sin(sim.time * 5 + t.id)));
+  if ((t.umbrella || t.climber) && BADGE_STATES.has(t.state)) spr(ctx, frameOf(look, t.umbrella ? "badge" : "badgeClimb"), t.x - 7, t.y - 44 + Math.round(Math.sin(sim.time * 5 + t.id)));
   if (t.state === "float") {
     spr(ctx, frameOf(look, "canopy"), t.x - 16, t.y - 42);
     ctx.fillStyle = "#f1f5ee"; ctx.fillRect(Math.round(t.x - 15), Math.round(t.y - 30), 1, 8); ctx.fillRect(Math.round(t.x + 14), Math.round(t.y - 30), 1, 8);
@@ -196,6 +242,7 @@ function huepferTux(ctx: Ctx, sim: HuepferSim, look: RetroLook, t: HuepferTux): 
     case "soar": name = "soar"; mirror = false; break;
     case "eat": name = Math.floor(t.anim / 0.15) % 2 ? "eatB" : "eatA"; break;
     case "vanish": mirror = false; alpha = 1 - t.t / 0.3; break;
+    case "leap": name = "jump"; alpha = t.t < 0.3 ? 1 : 1 - (t.t - 0.3) / 0.25; break;
   }
   const palette = t.star > 0 ? tinted(look.palette, RAINBOW[Math.floor(sim.time * 12) % RAINBOW.length]) : look.palette;
   const big = t.big > 0 && !(t.big < 1 && Math.floor(sim.time * 10) % 2);
@@ -226,10 +273,10 @@ function drawHuepfer(ctx: Ctx, sim: HuepferSim): void {
     if (b.type === "multi" && b.state !== "empty") { ctx.fillStyle = "#fcc419"; for (let i = 0; i < b.left; i++) ctx.fillRect(b.x - 8 + i * 4, top - 3, 3, 2); }
     ctx.globalAlpha = 1;
   }
+  // A broken brick flashes briefly: the brick tile with a white shimmer.
   for (const f of sim.flashes) {
-    const x = f.c * g.cw, y = f.r * g.ch + g.ch * 0.15, h = g.ch * 0.7;
-    ctx.fillStyle = "#5a2a0c"; ctx.fillRect(x, y, g.cw, h);
-    ctx.fillStyle = "#b5522a"; ctx.fillRect(x + 1, y + 1, g.cw - 2, h * 0.35); ctx.fillRect(x + 1, y + h * 0.5, g.cw / 2 - 1, h * 0.4); ctx.fillRect(x + g.cw / 2 + 1, y + h * 0.5, g.cw / 2 - 2, h * 0.4);
+    drawTile(ctx, g, frameOf(look, "brickTile"), f.r, f.c, false);
+    ctx.globalAlpha = 0.5; ctx.fillStyle = "#ffffff"; ctx.fillRect(f.c * g.cw, (f.r + 1) * g.ch - 16, g.cw, 16); ctx.globalAlpha = 1;
   }
   // Goal bottom left: the flag climbs the pole when a Tux touches it.
   ctx.fillStyle = "#f1f5ee"; ctx.fillRect(POLE_X, gy - 100, 3, 100);
@@ -247,8 +294,7 @@ function drawHuepfer(ctx: Ctx, sim: HuepferSim): void {
 
 /** Paints one frame of a simulation; `ground` is the terminal background that hides destroyed characters. */
 export function drawRetro(ctx: Ctx, sim: RetroSim, ground: string): void {
-  cover(ctx, sim.grid, ground);
-  if (sim.id === "lemminge") drawLemminge(ctx, sim);
-  else if (sim.id === "geruest") drawGeruest(ctx, sim, sim.time);
-  else drawHuepfer(ctx, sim);
+  if (sim.id === "lemminge") { cover(ctx, sim.grid, ground, lemmingeTiles(sim)); drawLemminge(ctx, sim); }
+  else if (sim.id === "geruest") { cover(ctx, sim.grid, ground); drawGeruest(ctx, sim, sim.time); }
+  else { cover(ctx, sim.grid, ground, huepferTiles(sim)); drawHuepfer(ctx, sim); }
 }

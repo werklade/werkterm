@@ -1,9 +1,11 @@
 import { clamp, flip, pick, rint, rnd, SimBase, type Dir, type Grid, type Rng } from "./retroGrid";
-// Retro Gerüst: every text row is a girder from its first to its last character, ladders join neighbouring rows.
-// Tuxes start bottom left and climb to the flag on the robot girder: the top girder at least 48 pixels below the top
-// edge (the second or third one if the text starts higher up), so the robot is always visible. The robot stands at
-// its right end, may cover the characters above it, throws barrels and stomps; only the characters of the top three
-// text rows crumble. A barrel hit sends the Tux back to the start.
+// Retro Gerüst: every 2nd row, counted upwards from the lowest text row (the start), is a girder from its first to its
+// last character; the rows in between stay readable and are free space. Ladders span the rows between two girders
+// (normally 2) and prefer columns without text there. Tuxes start bottom left and climb to the flag on the top girder,
+// which lies at least 48 pixels below the top edge (higher girders are dropped), so the robot is always visible. The
+// robot stands at its right end, may cover the characters above it, throws barrels and stomps; only the characters of
+// the top three text rows (in-between rows included) crumble. A barrel only hits a Tux on the same girder or ladder;
+// the hit sends it back to the start. On terminal activity every Tux beams out (under a second).
 export interface Girder { r: number; c1: number; c2: number; x1: number; x2: number; y: number }
 /** `lo` is the index of the lower girder, `hi` the index of the upper one (index 0 is the top girder). */
 export interface Ladder { x: number; c: number; lo: number; hi: number }
@@ -43,27 +45,37 @@ export class GeruestSim extends SimBase {
   constructor(grid: Grid, rng: Rng, leaveAfter?: number) {
     super(grid, rng, leaveAfter);
     this.margin = Math.min(4, grid.cw / 2 - 0.5);
-    for (const r of grid.textRows()) {
-      const [c1, c2] = grid.range(r) as [number, number];
-      this.girders.push({ r, c1, c2, x1: c1 * grid.cw, x2: (c2 + 1) * grid.cw, y: r * grid.ch + grid.ch * 0.8 });
+    const textRows = grid.textRows();
+    if (!textRows.length) return;
+    // Girders on every 2nd row from the lowest text row upwards; empty rows in this sequence are left out.
+    for (let r = textRows[textRows.length - 1]; r >= 0; r -= 2) {
+      const range = grid.range(r);
+      if (!range) continue;
+      const [c1, c2] = range;
+      this.girders.unshift({ r, c1, c2, x1: c1 * grid.cw, x2: (c2 + 1) * grid.cw, y: r * grid.ch + grid.ch * 0.8 });
     }
+    // The robot (48 pixels) needs room above the top girder.
+    while (this.girders.length > 2 && this.girders[0].y < ROBOT_MIN_Y) this.girders.shift();
     if (this.girders.length < 2) return;
     this.makeLadders();
-    this.topRows = new Set(this.girders.slice(0, TOP_ROWS).map(g => g.r));
-    const rg = this.girders.findIndex(g => g.y >= ROBOT_MIN_Y);
-    this.goalG = Math.max(0, rg);
-    const top = this.girders[this.goalG];
+    this.topRows = new Set(textRows.slice(0, TOP_ROWS));
+    this.goalG = 0;
+    const top = this.girders[0];
     this.flagX = Math.min(top.x1 + 16, top.x2 - this.margin);
-    if (rg >= 0) this.robot = { x: Math.max(4, top.x2 - 54), state: "idle", t: 0, next: 2, nextStomp: 6, hit: false };
+    if (top.y >= ROBOT_MIN_Y) this.robot = { x: Math.max(4, top.x2 - 54), state: "idle", t: 0, next: 2, nextStomp: 6, hit: false };
   }
   /** At least two girders are needed for a ladder. */
   get usable(): boolean { return this.girders.length >= 2; }
-  get done(): boolean { return this.closing && this.tuxes.length === 0 && this.barrels.length === 0; }
+  get done(): boolean { return this.closing && this.tuxes.length === 0 && (this.exiting || this.barrels.length === 0); }
   private widen(g: Girder, c: number): void {
     if (c < g.c1) { g.c1 = c; g.x1 = c * this.grid.cw; }
     if (c > g.c2) { g.c2 = c; g.x2 = (c + 1) * this.grid.cw; }
   }
-  /** 1 to 3 ladders between every row and the row above, on space columns of the lower row (any column if none). */
+  /**
+   * 1 to 3 ladders between every girder and the one above, preferably on columns without text in all rows from the
+   * row below the upper girder down to the lower girder row (the in-between rows stay readable); otherwise on space
+   * columns of the lower girder row, otherwise on any column of the overlap.
+   */
   private makeLadders(): void {
     const grid = this.grid;
     for (let i = 1; i < this.girders.length; i++) {
@@ -71,7 +83,9 @@ export class GeruestSim extends SimBase {
       let lo = Math.max(g.c1, u.c1), hi = Math.min(g.c2, u.c2);
       if (lo > hi) { const c = u.c2 < g.c1 ? u.c2 : u.c1; this.widen(g, c); lo = c; hi = c; }
       const cand: number[] = [];
-      for (let c = lo + 1; c <= hi - 1; c++) if (!grid.hasText(g.r, c)) cand.push(c);
+      const clear = (c: number) => { for (let r = u.r + 1; r <= g.r; r++) if (grid.hasText(r, c)) return false; return true; };
+      for (let c = lo + 1; c <= hi - 1; c++) if (clear(c)) cand.push(c);
+      if (!cand.length) for (let c = lo + 1; c <= hi - 1; c++) if (!grid.hasText(g.r, c)) cand.push(c);
       if (!cand.length) for (let c = lo + 1; c <= hi - 1; c++) cand.push(c);
       if (!cand.length) for (let c = lo; c <= hi; c++) cand.push(c);
       const n = Math.min(cand.length, rint(this.rng, 1, MAX_LADDERS)), chosen: number[] = [];
@@ -224,12 +238,14 @@ export class GeruestSim extends SimBase {
       else { b.y = ny; if (b.y > this.grid.height + 20) b.dead = true; }
     }
   }
+  /** A barrel only hits on the same level: rolling on the Tux's girder, or on the ladder the Tux climbs. */
   private hits(): void {
     for (const t of this.tuxes) {
       if (t.state !== "walk" && t.state !== "climb" && t.state !== "jump") continue;
       const ty = t.y - t.lift;
       for (const b of this.barrels) {
-        if (!b.dead && Math.abs(b.x - t.x) < 11 && b.y + 8 > ty - 28 && b.y - 8 < ty) {
+        const same = t.state === "climb" ? b.state === "ladder" && b.ladder === t.ladder : b.state === "roll" && b.g === t.g;
+        if (!b.dead && same && Math.abs(b.x - t.x) < 11 && b.y + 8 > ty - 28 && b.y - 8 < ty) {
           b.dead = true; t.state = "hit"; t.t = 0; t.lift = 0; this.stats.hit++;
           for (let i = 0; i < 8; i++) this.parts.add(b.x, b.y, rnd(this.rng, -70, 70), rnd(this.rng, -80, 0), 0.5, pick(this.rng, BARREL), 3, 300);
           break;
@@ -271,5 +287,20 @@ export class GeruestSim extends SimBase {
     if (this.robot) this.updateRobot(this.robot, dt);
     this.tuxes = this.tuxes.filter(t => !t.dead);
     this.barrels = this.barrels.filter(b => !b.dead);
+  }
+  /** Every Tux beams out (0.6 s, at most 0.05 s apart); barrels burst into a few sparks; the robot stands still. */
+  protected startExit(): void {
+    for (const b of this.barrels) for (let i = 0; i < 6; i++) this.parts.add(b.x, b.y, rnd(this.rng, -60, 60), rnd(this.rng, -70, 0), 0.4, pick(this.rng, BARREL), 3, 300);
+    this.barrels = [];
+    this.shake = 0;
+    this.tuxes = this.tuxes.filter(t => t.state !== "wait");
+    this.tuxes.forEach((t, i) => {
+      if (t.state === "beamout") return;
+      t.lift = 0; t.leaving = true; t.state = "beamout"; t.t = -Math.min(0.05 * i, 0.15);
+    });
+  }
+  protected exitStep(dt: number): void {
+    for (const t of this.tuxes) { t.t += dt; t.anim += dt; if (t.t > 0.6) t.dead = true; }
+    this.tuxes = this.tuxes.filter(t => !t.dead);
   }
 }

@@ -35,9 +35,9 @@ describe("sprite format", () => {
   });
   it("brings every frame and prop the three behaviours draw", () => {
     const need: Record<RetroId, { tux: string[]; props: string[] }> = {
-      lemminge: { tux: ["stand", "sideA", "sideB", "stopA", "stopB", "hang", "buildA", "buildB", "digA", "digB", "squash", "plopp"], props: ["badge", "hatchClosed", "hatchOpen", "canopy", "step", "door"] },
+      lemminge: { tux: ["stand", "sideA", "sideB", "stopA", "stopB", "hang", "buildA", "buildB", "digA", "digB", "squash", "plopp", "tunA", "tunB", "shrug", "climbA", "climbB"], props: ["badge", "badgeClimb", "earth", "steel", "hatchClosed", "hatchOpen", "canopy", "step", "door"] },
       geruest: { tux: ["stand", "sideA", "sideB", "climbA", "climbB", "jumpG", "cheer", "hit"], props: ["robot", "barrel", "flag"] },
-      huepfer: { tux: ["stand", "sideA", "sideB", "jump", "eatA", "eatB", "crouch", "slam", "fallA", "fallB", "soar"], props: ["block", "brick", "coin", "fish", "star", "feather"] },
+      huepfer: { tux: ["stand", "sideA", "sideB", "jump", "eatA", "eatB", "crouch", "slam", "fallA", "fallB", "soar"], props: ["block", "brick", "brickTile", "coin", "fish", "star", "feather"] },
     };
     for (const id of Object.keys(need) as RetroId[]) {
       for (const name of need[id].tux) expect(retroLooks[id].tux[name], `${id}.${name}`).toBeDefined();
@@ -47,6 +47,13 @@ describe("sprite format", () => {
     expect(retroLooks.geruest.props.robot).toHaveLength(4);
     for (const robot of retroLooks.geruest.props.robot) expect(isRaster(robot.rows, 24, 24)).toBe(true);
     expect(retroLooks.huepfer.props.coin).toHaveLength(3);
+  });
+  it("has cell tiles: soil and steel 8 x 8, a dedicated brick tile 9 x 16 without transparent pixels, badges 7 x 5", () => {
+    for (const name of ["earth", "steel"]) expect(isRaster(retroLooks.lemminge.props[name][0].rows, 8, 8), name).toBe(true);
+    for (const name of ["badge", "badgeClimb"]) expect(isRaster(retroLooks.lemminge.props[name][0].rows, 7, 5), name).toBe(true);
+    const brick = retroLooks.huepfer.props.brickTile[0].rows;
+    expect(isRaster(brick, 9, 16)).toBe(true);
+    expect(brick.join("")).not.toContain(".");
   });
 });
 
@@ -63,6 +70,25 @@ describe("text grid", () => {
     expect(grid.hasChar(0, 1)).toBe(false); expect(grid.hasText(0, 1)).toBe(true); expect(grid.solid(0, 1)).toBe(false);
     grid.restore();
     expect(grid.hasChar(0, 1)).toBe(true); expect(grid.solid(0, 1)).toBe(true);
+  });
+  it("knows floor rows by parity from the bottom and keeps the rows in between as text without floor", () => {
+    const lines = Array.from({ length: 10 }, () => "ab cd");
+    const grid = new Grid(lines, 10, 8, 9, 20, 2, { bottom: 9 });
+    for (let r = 0; r < 10; r++) {
+      const floor = r >= 1 && (9 - r) % 2 === 0;
+      expect(grid.floorRow(r), `row ${r}`).toBe(floor);
+      expect(grid.solid(r, 0), `row ${r}`).toBe(floor); expect(grid.solid(r, 2), `row ${r}`).toBe(floor);
+      expect(grid.hasText(r, 0)).toBe(true);
+    }
+    expect(new Grid(lines, 10, 8, 9, 20, 2).floorRow(4)).toBe(true);
+  });
+  it("marks digit words and paths as steel on floor rows only", () => {
+    const line = "abc 4096 1.2M 09:12 x/y 12ab";
+    const grid = new Grid([line, line, line], 3, 40, 9, 20, 2, { bottom: 2, steel: true });
+    const steelCols = (r: number) => Array.from({ length: 40 }, (_, c) => c).filter(c => grid.isSteel(r, c));
+    expect(steelCols(2)).toEqual([4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17, 18, 20, 21, 22]);
+    expect(steelCols(1)).toEqual([]); expect(steelCols(0)).toEqual([]);
+    expect(new Grid([line], 1, 40, 9, 20, 2, { bottom: 0 }).steelCount).toBe(0);
   });
   it("reads text ranges and rows", () => {
     const grid = new Grid(["", "  ab ", "", "x"], 4, 6, 9, 20, 0);
@@ -88,6 +114,30 @@ describe("stage", () => {
     expect(createRetroSim("geruest", input(lines), seeded(1))!.sim).toBeInstanceOf(GeruestSim);
     expect(createRetroSim("huepfer", input(lines), seeded(1))!.sim).toBeInstanceOf(HuepferSim);
     expect(createRetroSim("geruest", input(["", "one row only"]), seeded(1))).toBeNull();
+  });
+  it("gives Retro Lemminge and Retro Hüpfer floors on every 2nd row from the ground, Retro Gerüst on every row", () => {
+    const lines = Array.from({ length: 16 }, (_, i) => (i > 2 && i < 13 ? "text ".repeat(14) : ""));
+    for (const id of ["lemminge", "huepfer"] as RetroId[]) {
+      const made = createRetroSim(id, input(lines), seeded(1))!;
+      expect(made.stage.groundRow).toBe(13);
+      for (let r = 3; r < 13; r++) expect(made.sim.grid.solid(r, 0), `${id} row ${r}`).toBe((13 - r) % 2 === 0);
+    }
+    expect(createRetroSim("lemminge", input(["", "", "", "abc 4096", ""]), seeded(1))!.sim.grid.steelCount).toBe(0);
+    const geruest = createRetroSim("geruest", input(lines), seeded(1))!.sim;
+    for (let r = 3; r < 13; r++) expect(geruest.grid.solid(r, 0)).toBe(true);
+  });
+  it("ends every design within a second after activity (exit phase), with no Tux left", () => {
+    const lines = Array.from({ length: 16 }, (_, i) => (i > 2 && i < 13 ? "text ".repeat(14) : ""));
+    for (const id of ["lemminge", "geruest", "huepfer"] as RetroId[]) {
+      const { sim } = createRetroSim(id, input(lines), seeded(3))!;
+      for (let i = 0; i < 30 * 3; i++) sim.update(1 / 30);
+      expect(sim.tuxes.length, id).toBeGreaterThan(0);
+      sim.exit(); sim.exit();
+      expect(sim.exiting).toBe(true); expect(sim.closing).toBe(true);
+      let time = 0;
+      while (!sim.done && time < 2) { sim.update(1 / 60); time += 1 / 60; }
+      expect(sim.done, id).toBe(true); expect(time, id).toBeLessThan(1); expect(sim.tuxes, id).toHaveLength(0);
+    }
   });
   it("makes every design's Tuxes leave on their own after the idle limit", () => {
     const lines = Array.from({ length: 16 }, (_, i) => (i > 2 && i < 13 ? "text ".repeat(14) : ""));

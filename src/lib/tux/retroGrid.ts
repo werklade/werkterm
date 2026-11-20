@@ -37,6 +37,14 @@ export function retroStage(id: RetroId, input: RetroInput): RetroStage | null {
   return groundRow < minRow ? null : { scale, cw, ch, groundRow };
 }
 
+/**
+ * Levels of Retro Lemminge and Retro Hüpfer: only every 2nd row, counted upwards from `bottom` (the ground row),
+ * carries a floor; the rows in between stay readable text without floor. `steel`: on floor rows, words made of digits
+ * (612, 4096, 09:12, 1.2M) and words containing "/" (paths) become steel that cannot be dug.
+ */
+export interface GridLevels { bottom: number; steel?: boolean }
+const STEEL_WORD = /^\d[\d.,:]*[KMGkmg]?$/;
+
 /** The text of the terminal as cells. Destroyed cells are an overlay only; the terminal buffer stays untouched. */
 export class Grid {
   readonly width: number;
@@ -46,24 +54,48 @@ export class Grid {
   version = 0;
   private readonly text: Uint8Array;
   private readonly base: Uint8Array;
-  /** `bridge`: gaps of up to this many spaces between two characters of a row still count as floor. */
-  constructor(lines: string[], readonly rows: number, readonly cols: number, readonly cw: number, readonly ch: number, bridge: number) {
+  private readonly steel = new Set<number>();
+  /**
+   * `bridge`: gaps of up to this many spaces between two characters of a floor row still count as floor.
+   * `levels`: floors only on every 2nd row from the bottom (see GridLevels); without it every row is a floor row.
+   */
+  constructor(lines: string[], readonly rows: number, readonly cols: number, readonly cw: number, readonly ch: number, bridge: number, readonly levels: GridLevels | null = null) {
     this.width = cols * cw; this.height = rows * ch;
     this.text = new Uint8Array(rows * cols); this.base = new Uint8Array(rows * cols);
     for (let r = 0; r < rows; r++) {
-      const line = lines[r] ?? "";
+      const line = lines[r] ?? "", floor = this.floorRow(r);
       let prev = -1;
       for (let c = 0; c < cols; c++) {
         const char = line.charAt(c);
         if (char === "" || char.trim() === "") continue;
-        this.text[r * cols + c] = 1; this.base[r * cols + c] = 1;
-        const gap = c - prev - 1;
-        if (prev >= 0 && gap > 0 && gap <= bridge) for (let k = prev + 1; k < c; k++) this.base[r * cols + k] = 1;
+        this.text[r * cols + c] = 1;
+        if (floor) {
+          this.base[r * cols + c] = 1;
+          const gap = c - prev - 1;
+          if (prev >= 0 && gap > 0 && gap <= bridge) for (let k = prev + 1; k < c; k++) this.base[r * cols + k] = 1;
+        }
         prev = c;
+      }
+      if (floor && levels?.steel) {
+        let c = 0;
+        while (c < cols) {
+          if (!this.hasText(r, c)) { c++; continue; }
+          let e = c;
+          while (e + 1 < cols && this.hasText(r, e + 1)) e++;
+          const word = line.slice(c, e + 1);
+          if (STEEL_WORD.test(word) || word.includes("/")) for (let k = c; k <= e; k++) this.steel.add(r * cols + k);
+          c = e + 1;
+        }
       }
     }
   }
   private inside(r: number, c: number): boolean { return r >= 0 && r < this.rows && c >= 0 && c < this.cols; }
+  /** The row carries a floor (every row without levels; with levels every 2nd row from the bottom, never row 0). */
+  floorRow(r: number): boolean {
+    const l = this.levels;
+    if (!l) return r >= 0 && r < this.rows;
+    return r >= 1 && r <= l.bottom && r < this.rows && (l.bottom - r) % 2 === 0;
+  }
   /** y of the feet of a Tux walking on the text of row r. */
   floorY(r: number): number { return r * this.ch + this.ch * 0.3; }
   colOf(x: number): number { return Math.floor(x / this.cw); }
@@ -71,6 +103,9 @@ export class Grid {
   hasText(r: number, c: number): boolean { return this.inside(r, c) && this.text[r * this.cols + c] === 1; }
   /** The cell shows a character right now. */
   hasChar(r: number, c: number): boolean { return this.hasText(r, c) && !this.destroyed.has(r * this.cols + c); }
+  /** Steel cell (only on floor rows with GridLevels.steel): walkable, never dug. */
+  isSteel(r: number, c: number): boolean { return this.inside(r, c) && this.steel.has(r * this.cols + c); }
+  get steelCount(): number { return this.steel.size; }
   solid(r: number, c: number): boolean { return this.inside(r, c) && this.base[r * this.cols + c] === 1 && !this.destroyed.has(r * this.cols + c); }
   /** Floor over a space between two words (not a character itself). */
   bridged(r: number, c: number): boolean { return this.solid(r, c) && !this.hasText(r, c); }
@@ -117,15 +152,17 @@ export class Particles {
 /** A platform of its own (stairs, empty blocks): x range and y of the walking surface. */
 export interface Plank { x1: number; x2: number; y: number }
 export interface Floor { y: number; row: number }
-/** Floors under a Tux: rows of text, optionally the ground row, and extra planks (row -1). */
+/** Floors under a Tux: floor rows of text, optionally the ground row, and extra planks (row -1). Rows without floor are skipped. */
 export class Surfaces {
   constructor(private readonly grid: Grid, private readonly lastRow: number, private readonly hasGround: boolean, private readonly planks: () => Plank[]) {}
+  private hasFloor(r: number): boolean { return (this.hasGround && r === this.lastRow) || this.grid.floorRow(r); }
   solidAt(r: number, c: number): boolean { return (this.hasGround && r === this.lastRow) || this.grid.solid(r, c); }
   /** The floor closest to y within tol at x, or null (the Tux walks off an edge). */
   nearest(x: number, y: number, tol: number): Floor | null {
     const c = this.grid.colOf(x);
     let best: Floor | null = null;
     for (let r = 0; r <= this.lastRow; r++) {
+      if (!this.hasFloor(r)) continue;
       const fy = this.grid.floorY(r);
       if (fy < y - tol || fy > y + tol || !this.solidAt(r, c)) continue;
       if (!best || Math.abs(fy - y) < Math.abs(best.y - y)) best = { y: fy, row: r };
@@ -138,6 +175,7 @@ export class Surfaces {
     const c = this.grid.colOf(x);
     let best: Floor | null = null;
     for (let r = 0; r <= this.lastRow; r++) {
+      if (!this.hasFloor(r)) continue;
       const fy = this.grid.floorY(r);
       if (fy < y0 || fy > y1 || !this.solidAt(r, c)) continue;
       if (!best || fy < best.y) best = { y: fy, row: r };
@@ -152,26 +190,38 @@ export class Surfaces {
   }
 }
 
-/** Common clock of the simulations: fixed sub-steps, the 10-minute limit after which the Tuxes leave. */
+/** Common clock of the simulations: fixed sub-steps, the 10-minute limit after which the Tuxes leave, the exit on activity. */
 export abstract class SimBase {
   abstract readonly id: RetroId;
   time = 0;
   /** True once the Tuxes should leave: no new Tuxes, the present ones go away. */
   closing = false;
+  /** True during the short design-specific exit after terminal activity (under one second, then the text returns). */
+  exiting = false;
   readonly parts = new Particles();
   protected nextId = 1;
   constructor(readonly grid: Grid, protected readonly rng: Rng, readonly leaveAfter: number = LEAVE_AFTER) {}
   /** Closing and nothing left on stage: the overlay may stop. */
   abstract get done(): boolean;
   protected abstract step(dt: number): void;
+  /** Starts the exit animation of every Tux (called once by exit()). */
+  protected abstract startExit(): void;
+  /** One sub-step of the exit: only the leaving Tuxes move, nothing new happens. */
+  protected abstract exitStep(dt: number): void;
   beginLeave(): void { this.closing = true; }
+  /** Terminal activity: the Tuxes leave in the design's own way within a second. */
+  exit(): void {
+    if (this.exiting) return;
+    this.exiting = true; this.closing = true;
+    this.startExit();
+  }
   update(dt: number): void {
     const total = clamp(dt, 0, 0.1), n = Math.max(1, Math.ceil(total * 45)), h = total / n;
     for (let i = 0; i < n; i++) {
       this.time += h;
       if (!this.closing && this.time > this.leaveAfter) this.closing = true;
       this.parts.update(h, this.grid.height);
-      this.step(h);
+      if (this.exiting) this.exitStep(h); else this.step(h);
     }
   }
 }

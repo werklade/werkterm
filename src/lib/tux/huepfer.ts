@@ -1,11 +1,16 @@
 import { clamp, flip, pick, rint, rnd, SimBase, Surfaces, type Dir, type Grid, type Plank, type Rng } from "./retroGrid";
-// Retro Hüpfer: Tuxes drop out of a pipe at the top, zigzag over the text rows and punch down through them with a
-// crouched jump. ?-blocks over word gaps hold coins and items. The goal flag and the exit pipe sit bottom left.
-export type HuepferState = "enter" | "fall" | "walk" | "hop" | "crouch" | "jumpup" | "slam" | "bumpjump" | "soar" | "eat" | "cheer" | "exit" | "vanish";
+// Retro Hüpfer: every 2nd row (counted from the ground) is a brick row; bricks replace its characters only where
+// characters are, the rows in between stay readable text without floor, so one level is two rows. Tuxes drop out of a
+// pipe at the top, zigzag over the brick rows and stomp through them one level down with a crouched jump. ?-blocks sit
+// in a word gap of the brick row above a Tux (never within the top three text rows); items come out below and fall to
+// the Tux's level. The goal flag and the exit pipe sit bottom left. On terminal activity the Tuxes jump away with a
+// coin sparkle (under a second).
+export type HuepferState = "enter" | "fall" | "walk" | "hop" | "crouch" | "jumpup" | "slam" | "bumpjump" | "soar" | "eat" | "cheer" | "exit" | "vanish" | "leap";
 export type BlockType = "coin" | "multi" | "fish" | "star" | "feather" | "empty";
 export type ItemKind = "coin" | "fish" | "star" | "feather";
 export type HuepferRequest = "duck" | `block:${BlockType}`;
-export interface Block { id: number; x: number; y: number; row: number; type: BlockType; state: "fresh" | "empty"; left: number; bump: number; age: number; gone: boolean }
+/** `row`: the brick row holding the block, `tr`: the row of the Tux below it (row + 2); `y`: lower edge of the block. */
+export interface Block { id: number; x: number; y: number; row: number; tr: number; type: BlockType; state: "fresh" | "empty"; left: number; bump: number; age: number; gone: boolean }
 export interface Item { id: number; kind: ItemKind; x: number; y: number; by: number; vx: number; vy: number; state: "emerge" | "free" | "rest"; t: number; gone: boolean; life: number; floorY: number }
 export interface HuepferTux {
   id: number; x: number; y: number; vy: number; dir: Dir; state: HuepferState; t: number; anim: number; row: number; hvx: number;
@@ -13,6 +18,10 @@ export interface HuepferTux {
   dead: boolean; leaveT: number; baseY: number;
 }
 export const WALK = 42, HG = 900, SG = 520, PIPE_R = 50, POLE_X = 100, MAX_TUXES = 5, MAX_BLOCKS = 4, TOP_ROWS = 3, ENTRY_Y = 18;
+/** Upward speed of the crouched jump (v2: 330); at most so much that the apex stays 5 pixels below the next level. */
+export const CROUCH_V = 250, BUMP_V = 330, HOP_V = 235;
+/** Exit on activity: the leap away lasts this long. */
+export const LEAP_TIME = 0.55;
 /** Chance that a Tux changes direction after falling down into the next row (zigzag). */
 export const TURN_AFTER_FALL = 0.7;
 export const RAINBOW = ["#ff4d4d", "#ffd23f", "#4cd964", "#5cc8ff", "#e87cff"];
@@ -32,26 +41,23 @@ export class HuepferSim extends SimBase {
   flagLv = 0;
   flagHold = 0;
   spawnT = 1;
+  /** True once the first Tux came in: bricks replace the characters of the brick rows until the overlay ends. */
+  started = false;
   private readonly surfaces: Surfaces;
+  private readonly none: Plank[] = [];
   constructor(grid: Grid, readonly groundRow: number, rng: Rng, leaveAfter?: number) {
     super(grid, rng, leaveAfter);
     this.topRows = new Set(grid.textRows().slice(0, TOP_ROWS));
-    this.surfaces = new Surfaces(grid, groundRow, true, () => this.blocks.filter((b): boolean => b.state === "empty").map((b): Plank => ({ x1: b.x - 8, x2: b.x + 8, y: b.y - 16 })));
+    // Blocks sit inside the brick rows: no platforms of their own.
+    this.surfaces = new Surfaces(grid, groundRow, true, () => this.none);
   }
   get done(): boolean { return this.closing && this.tuxes.length === 0; }
-  /** Text rows covered by the drawn block over row r (16 pixels, from floorY - 60 to floorY - 44). */
-  blockRows(r: number): [number, number] {
-    const fy = this.grid.floorY(r);
-    return [Math.floor((fy - 60) / this.grid.ch), Math.ceil((fy - 44) / this.grid.ch) - 1];
-  }
-  /** Blocks may only stand over text rows; the drawn block must lie fully on screen and outside the top three text rows. */
-  blockRowOk(r: number): boolean {
-    if (r < 0 || r >= this.groundRow || this.grid.range(r) === null) return false;
-    const [r0, r1] = this.blockRows(r);
-    if (r0 < 0) return false;
-    for (let k = r0; k <= Math.max(r, r1); k++) if (this.topRows.has(k)) return false;
-    return true;
-  }
+  /** Brick view: only while Tuxes are active; idle shows the normal text. */
+  get tiles(): boolean { return this.started && !this.done; }
+  /** A brick row (with floor, above the ground). */
+  brickRow(r: number): boolean { return r >= 1 && r < this.groundRow && this.grid.floorRow(r); }
+  /** A ?-block may sit in brick row u: it has text and is none of the top three text rows. */
+  blockRowOk(u: number): boolean { return this.brickRow(u) && this.grid.range(u) !== null && !this.topRows.has(u); }
   private sparkle(x: number, y: number, cols: string[] = GOLD): void {
     for (let i = 0; i < 8; i++) this.parts.add(x, y, rnd(this.rng, -50, 50), rnd(this.rng, -70, 10), 0.5, pick(this.rng, cols), 2, 150);
   }
@@ -67,7 +73,7 @@ export class HuepferSim extends SimBase {
       id: this.nextId++, x, y: ENTRY_Y, vy: 0, dir: this.rng() < 0.5 ? -1 : 1, state: "enter", t: 0, anim: 0, row: -2, hvx: 0, pending: o.pending ?? null,
       goalBlock: null, goalItem: null, big: 0, star: 0, cool: 0, hit: false, done: false, dead: false, leaveT: rnd(this.rng, 0, 4), baseY: ENTRY_Y,
     };
-    this.tuxes.push(t); this.pipes.push({ x, t: 0 });
+    this.tuxes.push(t); this.pipes.push({ x, t: 0 }); this.started = true;
     return t;
   }
   /** Centres of the word gaps (floor over spaces) of a row. */
@@ -83,14 +89,18 @@ export class HuepferSim extends SimBase {
     }
     return out;
   }
-  /** A block over a word gap of the row; never in the top three text rows, at most four at a time. */
-  placeBlock(row: number, type: BlockType, tux?: HuepferTux): Block | null {
-    if (!this.blockRowOk(row) || this.blocks.length >= MAX_BLOCKS) return null;
-    const xs = this.gapsOf(row).filter(x => !this.blocks.some(b => b.row === row && Math.abs(b.x - x) < 36));
+  /**
+   * A block for a Tux on row r: it fills a word gap of the brick row u = r - 2 above, where row r has floor below it;
+   * never within the top three text rows, at most four at a time.
+   */
+  placeBlock(r: number, type: BlockType, tux?: HuepferTux): Block | null {
+    const u = r - 2;
+    if (!this.blockRowOk(u) || this.blocks.length >= MAX_BLOCKS) return null;
+    const xs = this.gapsOf(u).filter(x => this.surfaces.solidAt(r, this.grid.colOf(x)) && !this.blocks.some(b => b.row === u && Math.abs(b.x - x) < 36));
     if (!xs.length) return null;
     if (tux) xs.sort((a, b) => Math.abs(a - tux.x) - Math.abs(b - tux.x));
     const x = tux ? xs[Math.min(xs.length - 1, rint(this.rng, 0, 1))] : pick(this.rng, xs);
-    const b: Block = { id: this.nextId++, x, y: this.grid.floorY(row) - 44, row, type, state: type === "empty" ? "empty" : "fresh", left: type === "multi" ? 4 : 1, bump: 0, age: 0, gone: false };
+    const b: Block = { id: this.nextId++, x, y: (u + 1) * this.grid.ch, row: u, tr: r, type, state: type === "empty" ? "empty" : "fresh", left: type === "multi" ? 4 : 1, bump: 0, age: 0, gone: false };
     this.blocks.push(b); this.sparkle(x, b.y - 8);
     if (tux) tux.goalBlock = b;
     return b;
@@ -100,13 +110,13 @@ export class HuepferSim extends SimBase {
     t.state = "crouch"; t.t = 0; t.goalBlock = null; t.goalItem = null;
     return true;
   }
-  startHop(t: HuepferTux, across: boolean): void { t.state = "hop"; t.vy = -235; t.hvx = t.dir * WALK * (t.star > 0 ? 2 : 1) * (across ? 1.9 : 1.1); t.t = 0; t.baseY = t.y; }
+  startHop(t: HuepferTux, across: boolean): void { t.state = "hop"; t.vy = -HOP_V; t.hvx = t.dir * WALK * (t.star > 0 ? 2 : 1) * (across ? 1.9 : 1.1); t.t = 0; t.baseY = t.y; }
   private gapAhead(t: HuepferTux): number {
     for (let k = 1; k <= 5; k++) if (this.surfaces.solidAt(t.row, this.grid.colOf(t.x) + t.dir * k)) return k;
     return 99;
   }
   private newItem(kind: ItemKind, b: Block, floorY: number): Item {
-    return { id: this.nextId++, kind, x: b.x, y: b.y - 6, by: b.y, vx: 0, vy: 0, state: "emerge", t: 0, gone: false, life: 0, floorY };
+    return { id: this.nextId++, kind, x: b.x, y: b.y, by: b.y, vx: 0, vy: 0, state: "emerge", t: 0, gone: false, life: 0, floorY };
   }
   private bump(b: Block, t: HuepferTux): void {
     b.bump = 0.2;
@@ -116,11 +126,12 @@ export class HuepferSim extends SimBase {
       return;
     }
     if (b.type === "coin" || b.type === "multi") {
+      // Coins jump out at the top.
       const c = this.newItem("coin", b, t.baseY);
-      c.y = b.y - 16; c.vy = -260; this.items.push(c); this.stats.coins++; b.left--;
+      c.y = b.y - 12; c.vy = -260; this.items.push(c); this.stats.coins++; b.left--;
       if (b.left <= 0) { b.state = "empty"; t.goalBlock = null; } else t.cool = 0.35;
     } else {
-      // The item drops to the level of the Tux that hit the block and lands a little beside it.
+      // The item comes out below the block, drops to the level of the Tux that hit it and lands a little beside it.
       const it = this.newItem(b.type as ItemKind, b, t.baseY);
       this.items.push(it); b.state = "empty"; t.goalBlock = null; t.goalItem = it;
     }
@@ -145,18 +156,23 @@ export class HuepferSim extends SimBase {
     if (was === "fall" && this.rng() < TURN_AFTER_FALL) t.dir = flip(t.dir);
     if (was === "fall" && s.row < this.groundRow && this.rng() < 0.3) this.placeBlock(s.row, pick(this.rng, BLOCK_TYPES), t);
   }
+  /** Upward speed of the crouched jump: CROUCH_V, less if the levels are closer than 40 pixels. */
+  crouchV(): number { return Math.min(CROUCH_V, Math.sqrt(2 * HG * Math.max(1, 2 * this.grid.ch - 5))); }
   private air(t: HuepferTux, dt: number): void {
     t.vy += (t.state === "soar" ? SG : HG) * dt;
     if (t.state === "hop" || t.state === "soar") t.x = clamp(t.x + t.hvx * dt, 12, this.grid.width - 12);
     if (t.state === "bumpjump" && !t.hit && t.vy < 0) {
       const b = t.goalBlock;
-      if (b && b.state !== "empty" && t.y - 30 <= b.y) { t.hit = true; this.bump(b, t); t.vy = 80; }
+      // Block gone: no higher (it would land on the level above); otherwise the head hits it after 10 pixels.
+      if (!b || b.gone) t.vy = Math.max(t.vy, 0);
+      else if (t.y <= this.grid.floorY(b.tr) - 10) { t.hit = true; this.bump(b, t); t.vy = 80; }
     }
     if (t.state === "jumpup" && t.vy >= 0) { t.state = "slam"; t.vy = 480; t.t = 0; }
     const ny = t.y + t.vy * dt;
     if (t.vy > 0) {
-      // A hop lands on its starting level or lower, never on a floor above it: the Tuxes zigzag downwards.
-      const s = this.surfaces.landing(t.x, t.state === "hop" ? Math.max(t.y, t.baseY - 1) : t.y, ny);
+      // Hops, crouched jumps and bumps land on their starting level or lower, never on a floor above it.
+      const own = t.state === "hop" || t.state === "jumpup" || t.state === "slam" || t.state === "bumpjump";
+      const s = this.surfaces.landing(t.x, own ? Math.max(t.y, t.baseY - 1) : t.y, ny);
       if (s) { this.land(t, s); return; }
     }
     t.y = ny;
@@ -171,7 +187,7 @@ export class HuepferSim extends SimBase {
       const p = t.pending;
       if (p === "duck") {
         if (t.row >= 0 && t.row < this.groundRow) { t.pending = null; if (this.startDuck(t)) return; }
-      } else if (this.blockRowOk(t.row)) { t.pending = null; this.placeBlock(t.row, p.slice(6) as BlockType, t); }
+      } else if (t.row >= 0 && this.blockRowOk(t.row - 2)) { t.pending = null; this.placeBlock(t.row, p.slice(6) as BlockType, t); }
     }
     if (t.row === this.groundRow && !t.done && t.x <= POLE_X + 20) {
       t.done = true; t.state = "cheer"; t.t = 0; t.x = POLE_X + 20; t.dir = -1; this.flagHold = 5; this.stats.goal++;
@@ -183,12 +199,12 @@ export class HuepferSim extends SimBase {
     if (gi && !gi.gone && !(gi.state === "rest" && Math.abs(gi.y - t.y) > 8)) tx = gi.x; else t.goalItem = null;
     if (tx === null) {
       const gb = t.goalBlock;
-      if (gb && !gb.gone && gb.row === t.row) tx = gb.x; else t.goalBlock = null;
+      if (gb && !gb.gone && gb.tr === t.row) tx = gb.x; else t.goalBlock = null;
     }
     if (tx !== null) {
       if (Math.abs(tx - t.x) > 3) t.dir = tx > t.x ? 1 : -1;
       else if (t.goalBlock && t.cool <= 0 && tx === t.goalBlock.x) {
-        t.state = "bumpjump"; t.vy = t.goalBlock.state === "empty" ? -400 : -330; t.t = 0; t.hit = false; t.x = tx; t.baseY = t.y;
+        t.state = "bumpjump"; t.vy = -BUMP_V; t.t = 0; t.hit = false; t.x = tx; t.baseY = t.y;
         return;
       }
     } else if (t.row === this.groundRow) t.dir = -1;
@@ -232,7 +248,8 @@ export class HuepferSim extends SimBase {
         if (this.rng() < 14 * dt) this.parts.add(t.x + rnd(this.rng, -10, 10), t.y - 34, rnd(this.rng, -40, 40), rnd(this.rng, -70, -20), 0.9, pick(this.rng, CHEER), 2, 150);
         if (t.t > 1.6) { t.state = "walk"; t.t = 0; t.dir = -1; }
         break;
-      case "crouch": if (t.t > 0.45) { t.state = "jumpup"; t.vy = -330; t.t = 0; this.sparkle(t.x, t.y - 2, ["#c68a4e", "#fff4e0"]); } break;
+      // The apex stays below the next level, so the stomp always lands on its own brick row and breaks through it.
+      case "crouch": if (t.t > 0.45) { t.state = "jumpup"; t.vy = -this.crouchV(); t.t = 0; t.baseY = t.y; this.sparkle(t.x, t.y - 2, ["#c68a4e", "#fff4e0"]); } break;
       case "exit": t.x -= WALK * dt; if (t.x < PIPE_R - 34) { t.dead = true; this.stats.saved++; } break;
       case "vanish": if (t.t > 0.3) t.dead = true; break;
       default: this.air(t, dt);
@@ -256,12 +273,13 @@ export class HuepferSim extends SimBase {
       return;
     }
     if (it.state === "emerge") {
+      // Out of the block downwards (0.4 s), then it falls through the text row to the Tux's level.
       const u = Math.min(1, it.t / 0.4);
-      it.y = it.by - 16 + 10 - 10 * u;
+      it.y = it.by + 16 * u;
       if (u >= 1) {
-        it.state = "free"; it.vy = -140;
+        it.state = "free"; it.vy = 0;
         // Fall time to the Tux's level, so that the item lands exactly beside it.
-        const drop = Math.max(0, it.floorY - it.y), fall = (140 + Math.sqrt(140 * 140 + 2 * HG * drop)) / HG;
+        const drop = Math.max(0, it.floorY - it.y), fall = Math.max(0.05, Math.sqrt(2 * drop / HG));
         it.vx = this.dropOffset(it) / fall;
       }
       return;
@@ -306,5 +324,26 @@ export class HuepferSim extends SimBase {
     this.tuxes = this.tuxes.filter(t => !t.dead);
     this.items = this.items.filter(i => !i.gone);
     this.blocks = this.blocks.filter(b => !b.gone);
+  }
+  /** Every visible Tux jumps away with a coin sparkle (LEAP_TIME); Tuxes still in the pipe just go. */
+  protected startExit(): void {
+    this.tuxes = this.tuxes.filter(t => t.state !== "enter");
+    for (const t of this.tuxes) {
+      const dir: Dir = t.state === "walk" || t.state === "hop" || t.state === "exit" ? t.dir : t.x < this.grid.width / 2 ? -1 : 1;
+      t.state = "leap"; t.t = 0; t.vy = -300; t.hvx = dir * 80; t.dir = dir;
+      this.sparkle(t.x, t.y - 20);
+      this.items.push({ id: this.nextId++, kind: "coin", x: t.x, y: t.y - 34, by: t.y - 34, vx: 0, vy: -260, state: "free", t: 0, gone: false, life: 0, floorY: t.y });
+    }
+    this.items = this.items.filter(it => it.kind === "coin");
+  }
+  protected exitStep(dt: number): void {
+    this.flagHold = 0;
+    for (const t of this.tuxes) {
+      t.t += dt; t.vy += HG * dt; t.y += t.vy * dt; t.x += t.hvx * dt;
+      if (t.t > LEAP_TIME) t.dead = true;
+    }
+    for (const it of this.items) this.updateItem(it, dt);
+    this.tuxes = this.tuxes.filter(t => !t.dead);
+    this.items = this.items.filter(i => !i.gone);
   }
 }

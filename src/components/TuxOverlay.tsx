@@ -8,6 +8,12 @@ import { drawRetro } from "../lib/tux/retroDraw";
 import type { RetroStage } from "../lib/tux/retroGrid";
 
 export const tuxTestEvent = "werkterm:tux-test";
+/**
+ * Retro designs leave in their own way on activity (pop, leap, beam out); the overlay never stays longer than
+ * EXIT_MAX after the first activity. Activity within EXIT_GRACE belongs to the same keystroke (keydown, input, echo);
+ * later activity, resizing, a hidden tab or unmounting end the exit at once.
+ */
+const EXIT_GRACE = 250, EXIT_MAX = 1000;
 export function TuxOverlay({ terminal, enabled, minutes, count, visible, active, design }: { terminal: Terminal | null; enabled: boolean; minutes: number; count: number; visible: boolean; active: boolean; design: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   // Only the retro id restarts the overlay; switching between other designs keeps running tuxes.
@@ -21,6 +27,10 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
     const clock = new IdleClock(performance.now());
     const motion = matchMedia("(prefers-reduced-motion: reduce)");
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let startTimer: ReturnType<typeof setTimeout> | undefined;
+    let exitSince = 0;
+    // Hard stop for the exit phase that does not depend on requestAnimationFrame (throttled or dead draw loop).
+    let exitTimer: ReturnType<typeof setTimeout> | undefined;
     let frame = 0;
     let running = false;
     let last = 0;
@@ -34,7 +44,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
     let lines: string[] = [];
     let width = 0, height = 0, cellWidth = 0, cellHeight = 0;
     const available = () => visible && document.visibilityState === "visible" && target.getClientRects().length > 0 && target.clientWidth > 0 && target.clientHeight > 0;
-    const clear = () => { running = false; retroSim = null; stage = null; cancelAnimationFrame(frame); clearTimeout(timer); context.clearRect(0, 0, surface.width, surface.height); };
+    const clear = () => { running = false; retroSim = null; stage = null; exitSince = 0; cancelAnimationFrame(frame); clearTimeout(timer); clearTimeout(exitTimer); context.clearRect(0, 0, surface.width, surface.height); };
     const draw = (now: number) => {
       if (!running || !available()) { clear(); return; }
       if (now - last < 1000 / 30) { frame = requestAnimationFrame(draw); return; }
@@ -42,10 +52,10 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
       context.clearRect(0, 0, width, height);
       const ground = terminal.options.theme?.background ?? "#000000";
       if (retroSim && stage) {
-        // Retro design: its own simulation draws everything; it ends by itself after the idle limit (the Tuxes leave).
+        // Retro design: its own simulation draws everything; it ends by itself after the idle limit or the exit on activity.
         retroSim.update(dt);
         context.save(); context.scale(stage.scale, stage.scale); drawRetro(context, retroSim, ground); context.restore();
-        if (retroSim.done) clear(); else frame = requestAnimationFrame(draw);
+        if (retroSim.done || (exitSince > 0 && now - exitSince > EXIT_MAX)) clear(); else frame = requestAnimationFrame(draw);
         return;
       }
       // Dug holes hide the text beneath them with ragged, dirt-lined edges.
@@ -164,7 +174,8 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
       else frame = requestAnimationFrame(draw);
     };
     const start = () => {
-      clear(); if (!available()) return;
+      // A manual test run must not be restarted by the pending idle timer.
+      clearTimeout(startTimer); clear(); if (!available()) return;
       const screen = target.querySelector<HTMLElement>(".xterm-screen") ?? target;
       width = screen.clientWidth; height = screen.clientHeight;
       if (!width || !height) return;
@@ -186,21 +197,29 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
       } else tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2), index === 0 ? TUX_COLORS[0] : randomColor()));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);
     };
-    const schedule = () => { clearTimeout(timer); if (enabled && available()) timer = setTimeout(start, clock.remaining(performance.now(), minutes * 60000)); };
-    const activity = () => { clear(); clock.activity(performance.now()); schedule(); };
-    const visibility = () => { clear(); clock.activity(performance.now()); schedule(); };
+    const schedule = () => { clearTimeout(startTimer); if (enabled && available()) startTimer = setTimeout(start, clock.remaining(performance.now(), minutes * 60000)); };
+    // Activity: a running retro scene starts its short exit (input keeps flowing to the terminal); anything else clears at once.
+    const activity = () => {
+      const now = performance.now();
+      clock.activity(now);
+      if (running && retroSim && !exitSince) { retroSim.exit(); exitSince = now; exitTimer = setTimeout(clear, EXIT_MAX); }
+      else if (!exitSince || now - exitSince > EXIT_GRACE) clear();
+      schedule();
+    };
+    // Size, visibility or motion setting changed: the scene no longer matches the screen, so it ends at once.
+    const reset = () => { clear(); clock.activity(performance.now()); schedule(); };
     const test = () => { if (active) start(); };
     const events = ["tux-activity", "keydown", "pointerdown", "paste", "input", "wheel"];
     events.forEach(event => target.addEventListener(event, activity, true));
     const input = terminal.onData(activity);
     const output = terminal.onWriteParsed(activity);
     const scroll = terminal.onScroll(activity);
-    const resize = new ResizeObserver(activity); resize.observe(target);
-    document.addEventListener("visibilitychange", visibility);
+    const resize = new ResizeObserver(reset); resize.observe(target);
+    document.addEventListener("visibilitychange", reset);
     window.addEventListener(tuxTestEvent, test);
-    motion.addEventListener("change", activity);
+    motion.addEventListener("change", reset);
     schedule();
-    return () => { clear(); input.dispose(); output.dispose(); scroll.dispose(); resize.disconnect(); events.forEach(event => target.removeEventListener(event, activity, true)); document.removeEventListener("visibilitychange", visibility); window.removeEventListener(tuxTestEvent, test); motion.removeEventListener("change", activity); };
+    return () => { clear(); clearTimeout(startTimer); input.dispose(); output.dispose(); scroll.dispose(); resize.disconnect(); events.forEach(event => target.removeEventListener(event, activity, true)); document.removeEventListener("visibilitychange", reset); window.removeEventListener(tuxTestEvent, test); motion.removeEventListener("change", reset); };
   }, [terminal, enabled, minutes, count, visible, active, retro]);
   return <canvas ref={canvas} aria-hidden="true" style={{ position: "absolute", pointerEvents: "none", zIndex: 3 }} />;
 }

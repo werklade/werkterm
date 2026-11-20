@@ -30,7 +30,7 @@ const doorFrame = (kind: 0 | 1 | 2) => {
   rows.push("ssssssssss");
   return rows;
 };
-const lemmingePalette: Raster = { k: "#4a5d7a", w: "#f1f5ee", y: "#ffbe45", o: "#10161d", "-": "#4a5d7a", g: "#7ccf3a", G: "#4f9a22", b: "#3b6fd8", p: "#8a5a2b", s: "#c8cdd2", P: "#b57a3d", l: "#ffe9a8" };
+const lemmingePalette: Raster = { k: "#4a5d7a", w: "#f1f5ee", y: "#ffbe45", o: "#10161d", "-": "#4a5d7a", g: "#7ccf3a", G: "#4f9a22", b: "#3b6fd8", p: "#8a5a2b", s: "#c8cdd2", P: "#b57a3d", l: "#ffe9a8", n: "#6b4a2a", N: "#43301c", S: "#5f6b78", t: "#98a3ae" };
 const lemminge: RetroLook = {
   palette: lemmingePalette,
   tux: {
@@ -43,11 +43,23 @@ const lemminge: RetroLook = {
     // Hand digging: the hands scratch at the ground in turns.
     digA: editRows(lemmingeStand, [[11, 1, "k"], [12, 1, "k"], [13, 0, "kk"], [14, 0, "kkk"], [15, 0, "kk"], [10, 15, "k"], [11, 14, "k"]]),
     digB: editRows(lemmingeStand, [[10, 0, "k"], [11, 1, "k"], [11, 14, "k"], [12, 14, "k"], [13, 14, "kk"], [14, 13, "kkk"], [15, 14, "kk"]]),
+    // Side view, hands first: tunnel through a word or dig diagonally downwards.
+    tunA: editRows(lemmingeWalkA, [[9, 13, "kkk"], [10, 13, "kk"]]),
+    tunB: editRows(lemmingeWalkB, [[10, 13, "kkk"], [11, 13, "kk"]]),
+    /** Shoulders up: steel in the way, the Tux gives up and turns round. */
+    shrug: editRows(lemmingeStand, [[6, 0, "kk"], [6, 14, "kk"], [7, 0, "kkkk"], [7, 12, "kkkk"], [8, 0, "kkk"], [8, 13, "kkk"]]),
+    climbA: editRows(lemmingeStand, [[5, 0, "k"], [6, 0, "kk"], [7, 1, "kkkk"]]),
+    climbB: editRows(lemmingeStand, [[5, 15, "k"], [6, 14, "kk"], [7, 11, "kkkk"]]),
     squash: ["................", "................", "................", "................", "................", "................", "................", "................", "................", "................", "......gggg......", "....kkkkkkkk....", "..kkkwwkkwwkkk..", ".kkkbbbbbbbbkkk.", "kkkkbbbbbbbbkkkk", ".yyy........yyy."],
     plopp: ["................", "................", "................", "................", "......l..l......", "...w........w...", "..l....ww....l..", "......wllw......", ".w...wl..lw...w.", "......wllw......", "..l....ww....l..", "...w........w...", "......l..l......", "................", "................", "................"],
   },
   props: {
     badge: [prop([".wwwww.", "wgwgwgw", "...y...", "...y...", "..yy..."], lemmingePalette)],
+    /** Climber ability: blue ring. */
+    badgeClimb: [prop([".bbbbb.", "b.....b", "b..y..b", ".bbbbb.", "...y..."], lemmingePalette)],
+    /** Cell tiles (8 x 8, drawn at cell size): a clod of soil and a steel plate. */
+    earth: [prop(["gGgggGgg", "nnnnnnnn", "nNnnPnnn", "nnnnnnNn", "nnPnnnnn", "nnnnNnnn", "NnnnnnPn", "nNNnnNNn"], lemmingePalette)],
+    steel: [prop(["SSSSSSSS", "SwttttwS", "StttttsS", "StttttsS", "StttttsS", "StttttsS", "SwttttwS", "SSSSSSSS"], lemmingePalette)],
     hatchClosed: [prop(["ssssssssssssssss", "s" + "p".repeat(14) + "s", "s" + "p".repeat(14) + "s", "ssssssssssssssss"], lemmingePalette)],
     hatchOpen: [prop(["ssssssssssssssss", "s" + "o".repeat(14) + "s", "s" + "o".repeat(14) + "s", "ssssssssssssssss"], lemmingePalette)],
     canopy: [prop(["....gggggggg....", "..gggwwggwwggg..", ".gggwwwggwwwggg.", "gggwwwwggwwwwggg", "g.g..g.gg.g..g.g", ".g...g....g...g."], lemmingePalette)],
@@ -137,6 +149,8 @@ const huepfer: RetroLook = {
   },
   props: {
     block: [block, block.map(row => row.replace(/y/g, "g")), ["dddddddd", "dlEEEEld", "dEEEEEEd", "dEEEEEEd", "dEEEEEEd", "dEEEEEEd", "dlEEEEld", "dddddddd"]].map(rows => prop(rows, propPalette)),
+    /** Cell tile of the brick rows: 9 x 16, one tile pixel per virtual pixel (no stretched 8 x 8 brick). */
+    brickTile: [prop(["fBBBdfBBB", "BBBBdBBBB", "BBBBdBBBB", "ddddddddd", "dfBBBBBBB", "dBBBBBBBB", "dBBBBBBBB", "ddddddddd", "fBBBdfBBB", "BBBBdBBBB", "BBBBdBBBB", "ddddddddd", "dfBBBBBBB", "dBBBBBBBB", "dBBBBBBBB", "ddddddddd"], propPalette)],
     brick: [prop(["BBBBdBBB", "BBBBdBBB", "dddddddd", "BBdBBBBd", "BBdBBBBd", "dddddddd", "BBBBdBBB", "BBBBdBBB"], propPalette)],
     coin: [
       ["..dddd..", ".dyyyyd.", ".dygyyd.", ".dygyyd.", ".dyyyyd.", ".dyyyyd.", ".dyyyyd.", "..dddd.."],

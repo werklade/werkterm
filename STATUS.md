@@ -77,9 +77,10 @@ Hier nur, was nicht öffentlich geführt wird:
   Enthält zusätzlich #25 und #26. Ersetzt 1.2.1 als Testbuild; Branch test/1.2.1 und Download 1.2.1 können weg.
 - Testbuild 1.2.3 (Branch test/1.2.3 = main bis 366f35e plus Versionscommit, Run 44805811326, Versuch 2 nach
   hängendem Ubuntu-Spiegel) am 2026-11-20 im Testkanal und in APT `test`, von außen geprüft. Enthält das
-  eigenständige Retro-Verhalten (#25). Ersetzt 1.2.2; ältere Test-Branches und -Downloads können weg.
-  Testbuilds 1.0.1–1.0.3 liegen noch unter Downloads auf dem Server (Entfernen nur per Forced Command laut
-  Betriebshandbuch).
+  eigenständige Retro-Verhalten (#25). Ersetzt 1.2.2.
+- Server-Downloads aufgeräumt (2026-11-20, neue Regel: aktuelle stabile, vorherige stabile, neuester Test):
+  bleiben 1.1.0, 1.2.0, 1.2.3; 0.1.8–1.0.3, 1.2.1, 1.2.2 entfernt und in `withdrawn` gesperrt; Test-Branches
+  1.2.1 und 1.2.2 gelöscht.
 - #26 APT-Test-Kanal: Server am 2026-11-20 ausgerollt (APT-Distribution `test`, Forced Command `deb-test`,
   Sicherungen `*.bak-2026-11-20-1718` auf dem VPS); 1.2.1-.deb liegt in `test`, APT wählt bei `Suites: stable test`
   1.2.1 (in WSL mit isolierter APT-Konfiguration geprüft, nichts installiert). App-Hinweis mit Befehlen und
@@ -87,8 +88,10 @@ Hier nur, was nicht öffentlich geführt wird:
 - #25 (drei Retro-Designs): nach Rückmeldung zu 1.2.2 eigenständiges Verhalten je Design statt der normalen
   Tux-Simulation (Vorschau `tmp/retro-behaviour-preview.html` abgenommen), committet, Tests grün, kommt mit 1.2.3.
   Offen: Sichtprüfung in der laufenden App (Windows und Linux); Kopien eines Retro-Designs bekommen keinen Retro-Tux;
-  Tux-Anzahl aus den Einstellungen wirkt in Retro-Designs nicht. Nachtrag für danach (im Issue): Gerüst- und
-  Hüpfer-Ebenen auf 2 Zeilen, Hüpfer-Text als Bricks, Lemminge mit Erdreich, Stahl, weiteren Grabarten, Kletterer.
+  Tux-Anzahl aus den Einstellungen wirkt in Retro-Designs nicht.
+  v3 (Vorschau `tmp/retro-behaviour-preview-v3.html` abgenommen) auf main, noch in keinem Testbuild: Ebenen über
+  2 Zeilen (Gerüst, Hüpfer-Bricks, Lemminge-Erdreich mit Stahl), drei Grabarten, Kletterer, eigener Abgang je
+  Design bei Aktivität (< 1 s). Zeichnen und Abgangsphase ohne automatische Tests.
 - Im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet auf Bestätigung).
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.
