@@ -81,9 +81,11 @@ Hier nur, was nicht öffentlich geführt wird:
   Sicherungen `*.bak-2026-11-20-1718` auf dem VPS); 1.2.1-.deb liegt in `test`, APT wählt bei `Suites: stable test`
   1.2.1 (in WSL mit isolierter APT-Konfiguration geprüft, nichts installiert). App-Hinweis mit Befehlen und
   `publish-pkg` (Kanal test lädt das .deb per `deb-test`) committet, kommt mit dem nächsten Testbuild.
-- #25 (drei Retro-Designs mit Tux-Aktionen, höchstens eine Aktion je Leerlaufphase, Roboter nur bei freiem Bereich
-  oben rechts): committet, Tests grün; offen: Sichtprüfung in der laufenden App (Windows und Linux), Kopien eines
-  Retro-Designs bekommen keinen Retro-Tux (Abgleich über den Namen).
+- #25 (drei Retro-Designs): nach Rückmeldung zu 1.2.2 eigenständiges Verhalten je Design statt der normalen
+  Tux-Simulation (Vorschau `tmp/retro-behaviour-preview.html` abgenommen), committet, Tests grün, kommt mit 1.2.3.
+  Offen: Sichtprüfung in der laufenden App (Windows und Linux); Kopien eines Retro-Designs bekommen keinen Retro-Tux;
+  Tux-Anzahl aus den Einstellungen wirkt in Retro-Designs nicht. Nachtrag für danach (im Issue): Gerüst- und
+  Hüpfer-Ebenen auf 2 Zeilen, Hüpfer-Text als Bricks, Lemminge mit Erdreich, Stahl, weiteren Grabarten, Kletterer.
 - Im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet auf Bestätigung).
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.

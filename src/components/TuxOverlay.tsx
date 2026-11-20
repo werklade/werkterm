@@ -2,10 +2,10 @@ import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createTux, TUX_COLORS, MARGIN, DIG_TIME, digSpan, IdleClock, LEAVE, platformsFromLines, stepTux, type Hole } from "../lib/tux/simulation";
 import { helmet, palette, sprites } from "../lib/tux/sprites";
-import { ActionGate, actionDelay, actionsAllowed, planAction, type ActionPlan } from "../lib/tux/actions";
-import { retroIdForDesign, retroLooks } from "../lib/tux/retroSprites";
-import { createScene, drawScene, type RetroScene } from "../lib/tux/retroScenes";
-import { SCENE_TIMEOUT } from "../lib/tux/scene";
+import { retroIdForDesign } from "../lib/tux/retroSprites";
+import { createRetroSim, type RetroSim } from "../lib/tux/retroSim";
+import { drawRetro } from "../lib/tux/retroDraw";
+import type { RetroStage } from "../lib/tux/retroGrid";
 
 export const tuxTestEvent = "werkterm:tux-test";
 export function TuxOverlay({ terminal, enabled, minutes, count, visible, active, design }: { terminal: Terminal | null; enabled: boolean; minutes: number; count: number; visible: boolean; active: boolean; design: string }) {
@@ -25,35 +25,29 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
     let running = false;
     let last = 0;
     let tuxes = [createTux(0)];
-    // Retro designs: fixed body colour per design and their own sprite look; all other designs keep the random colours.
-    const look = retro ? retroLooks[retro] : null;
-    const tuxPalette = look ? { ...palette, ...look.palette } : palette;
-    const view = look ? { ...sprites, ...look.base } : sprites;
-    const bodyColor = look?.palette.k;
-    const randomColor = () => bodyColor ?? TUX_COLORS[Math.floor(Math.random() * TUX_COLORS.length)];
-    // Actions: at most one per idle phase (the gate is armed by activity), only with Tux enabled and motion allowed.
-    const gate = new ActionGate();
-    let scene: RetroScene | null = null, plan: ActionPlan | null = null, runTime = 0, actionAt = Infinity;
+    // Retro designs bring their own behaviour (lemminge.ts, geruest.ts, huepfer.ts); the normal simulation below is not used for them.
+    const randomColor = () => TUX_COLORS[Math.floor(Math.random() * TUX_COLORS.length)];
+    let retroSim: RetroSim | null = null, stage: RetroStage | null = null;
     const pixelSize = () => Math.max(1, Math.floor(cellHeight * 2 / 16));
-    const beginAction = () => {
-      actionAt = Infinity;
-      if (!retro || !gate.available || !actionsAllowed({ enabled, reducedMotion: motion.matches, design: retro })) return;
-      const next = planAction(retro, { lines, rows: terminal.rows, cols: terminal.cols, cellWidth, cellHeight, pixel: pixelSize() }, Math.random);
-      if (!next || !gate.take()) return;
-      plan = next; scene = createScene(next, Math.random); runTime = 0;
-    };
     let platforms = platformsFromLines([]);
     let holes: Hole[] = [];
     let lines: string[] = [];
     let width = 0, height = 0, cellWidth = 0, cellHeight = 0;
     const available = () => visible && document.visibilityState === "visible" && target.getClientRects().length > 0 && target.clientWidth > 0 && target.clientHeight > 0;
-    const clear = () => { running = false; scene = null; plan = null; actionAt = Infinity; cancelAnimationFrame(frame); clearTimeout(timer); context.clearRect(0, 0, surface.width, surface.height); };
+    const clear = () => { running = false; retroSim = null; stage = null; cancelAnimationFrame(frame); clearTimeout(timer); context.clearRect(0, 0, surface.width, surface.height); };
     const draw = (now: number) => {
       if (!running || !available()) { clear(); return; }
       if (now - last < 1000 / 30) { frame = requestAnimationFrame(draw); return; }
       const dt = Math.min((now - last) / 1000, .1); last = now;
       context.clearRect(0, 0, width, height);
       const ground = terminal.options.theme?.background ?? "#000000";
+      if (retroSim && stage) {
+        // Retro design: its own simulation draws everything; it ends by itself after the idle limit (the Tuxes leave).
+        retroSim.update(dt);
+        context.save(); context.scale(stage.scale, stage.scale); drawRetro(context, retroSim, ground); context.restore();
+        if (retroSim.done) clear(); else frame = requestAnimationFrame(draw);
+        return;
+      }
       // Dug holes hide the text beneath them with ragged, dirt-lined edges.
       const hole = (h: Hole, depth: number) => {
         const left = Math.max(0, h.start) * cellWidth, right = Math.min(terminal.cols, h.end) * cellWidth, top = h.row * cellHeight;
@@ -83,7 +77,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
         // The jackhammer shakes Tux quickly; the shovel only rocks him with each scoop.
         const wobble = tux.state !== "dig" ? 0 : hammering ? (Math.floor(now / 45) % 2 ? 1 : -1) * Math.max(1, cellWidth / 10) : (scoop === 1 ? 1 : scoop === 3 ? -1 : 0) * Math.max(1, cellWidth / 8);
         const x = tux.x * cellWidth + wobble, y = (tux.y + (tux.state === "dig" ? sink : 0)) * cellHeight + (hammering && Math.floor(now / 60) % 2 ? Math.max(1, cellHeight / 16) : 0);
-        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? view.blink : view.stand) : tux.sliding ? view.slide : tux.state === "fall" ? (tux.vy > 2 ? (Math.floor(now / 90) % 2 ? view.flapUp : view.flapDown) : view.fall) : tux.state === "dig" ? (hammering ? view.stand : (tux.age % .75) / .75 < .35 ? view.digDown : view.digUp) : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? view.wave : view.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? view.sideA : view.sideB) : view.wave;
+        const sprite = motion.matches ? (Math.floor(now / 180) % 24 === 0 ? sprites.blink : sprites.stand) : tux.sliding ? sprites.slide : tux.state === "fall" ? (tux.vy > 2 ? (Math.floor(now / 90) % 2 ? sprites.flapUp : sprites.flapDown) : sprites.fall) : tux.state === "dig" ? (hammering ? sprites.stand : (tux.age % .75) / .75 < .35 ? sprites.digDown : sprites.digUp) : tux.state === "exit" && tux.leave >= 0 && tux.leave <= LEAVE.wave ? (Math.floor(tux.leave * 5) % 2 ? sprites.wave : sprites.stand) : tux.state === "walk" || tux.state === "exit" ? (Math.floor(tux.age * (tux.state === "exit" ? 12 : 7)) % 2 ? sprites.sideA : sprites.sideB) : sprites.wave;
         const hidden = tux.state === "gone" || (tux.state === "exit" && tux.leave > LEAVE.wave + LEAVE.slip);
         if (tux.state === "dig") hole(digSpan(tux), sink);
         const corner = () => {
@@ -101,7 +95,7 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
         if (!hidden) {
         context.save(); context.translate(x, y - size);
         context.scale(tux.direction, 1);
-        const paint = (rows: string[]) => rows.forEach((row, sy) => [...row].forEach((color, sx) => { if (tuxPalette[color]) { context.fillStyle = color === "k" || color === "-" ? tux.color : tuxPalette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
+        const paint = (rows: string[]) => rows.forEach((row, sy) => [...row].forEach((color, sx) => { if (palette[color]) { context.fillStyle = color === "k" || color === "-" ? tux.color : palette[color]; context.fillRect((sx - 8) * pixel, sy * pixel, pixel, pixel); } }));
         paint(sprite);
         if (tux.state === "dig") {
           paint(helmet);
@@ -165,16 +159,6 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
           tuxes[i] = createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, 1 + Math.random() * 4, randomColor());
         }
       }
-      // Retro action: starts once per idle phase some seconds after the Tuxes arrived, drawn above them.
-      if (!motion.matches) {
-        runTime += dt;
-        if (!scene && runTime >= actionAt) beginAction();
-        if (scene && plan) {
-          scene.step(dt);
-          context.save(); context.scale(plan.stage.scale, plan.stage.scale); drawScene(context, scene, plan, ground); context.restore();
-          if (scene.done || scene.time > SCENE_TIMEOUT) { scene = null; plan = null; }
-        }
-      }
       // Reduced motion needs only occasional blink updates, no continuous RAF loop.
       if (motion.matches) timer = setTimeout(() => { frame = requestAnimationFrame(draw); }, 180);
       else frame = requestAnimationFrame(draw);
@@ -193,14 +177,19 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
       lines = Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + row)?.translateToString(false) ?? "");
       platforms = platformsFromLines(lines);
       holes = [];
-      tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2), index === 0 ? (bodyColor ?? TUX_COLORS[0]) : randomColor()));
-      runTime = 0; actionAt = retro && gate.available && actionsAllowed({ enabled, reducedMotion: motion.matches, design: retro }) ? actionDelay(Math.random) : Infinity;
+      if (retro) {
+        // Reduced motion: nothing runs. A terminal that is too small (or Retro Gerüst with fewer than two text rows) shows nothing either.
+        if (motion.matches) return;
+        const made = createRetroSim(retro, { lines, rows: terminal.rows, cols: terminal.cols, cellWidth, cellHeight, pixel: pixelSize() }, Math.random);
+        if (!made) return;
+        retroSim = made.sim; stage = made.stage;
+      } else tuxes = Array.from({ length: motion.matches ? 1 : count }, (_, index) => createTux(MARGIN + Math.random() * Math.max(0, terminal.cols - 2 * MARGIN), Math.random() < .5 ? -1 : 1, index * (.6 + Math.random() * 1.2), index === 0 ? TUX_COLORS[0] : randomColor()));
       running = true; last = performance.now(); frame = requestAnimationFrame(draw);
     };
     const schedule = () => { clearTimeout(timer); if (enabled && available()) timer = setTimeout(start, clock.remaining(performance.now(), minutes * 60000)); };
-    const activity = () => { clear(); gate.arm(); clock.activity(performance.now()); schedule(); };
-    const visibility = () => { clear(); gate.arm(); clock.activity(performance.now()); schedule(); };
-    const test = () => { if (active) { gate.arm(); start(); } };
+    const activity = () => { clear(); clock.activity(performance.now()); schedule(); };
+    const visibility = () => { clear(); clock.activity(performance.now()); schedule(); };
+    const test = () => { if (active) start(); };
     const events = ["tux-activity", "keydown", "pointerdown", "paste", "input", "wheel"];
     events.forEach(event => target.addEventListener(event, activity, true));
     const input = terminal.onData(activity);

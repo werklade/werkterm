@@ -1,5 +1,6 @@
 import { body, editRows, profile, type Prop } from "./sprites";
 // Original pixel art for the three retro designs (issue #25): Tux frames (16 x 16) and props with their own palettes.
+// Each design draws every state of its Tux itself; the normal sprites of sprites.ts are not used in retro designs.
 export type RetroId = "lemminge" | "geruest" | "huepfer";
 export type Raster = Record<string, string>;
 /** Edits as row -> replacement text (whole row, 16 characters). */
@@ -13,9 +14,7 @@ const prop = (rows: string[], palette: Raster): Prop => ({ rows, palette });
 export interface RetroLook {
   /** Sprite palette; `k` (and `-`) is the fixed body colour of this design's Tux. */
   palette: Raster;
-  /** Replaces stand, sideA and sideB of the ambient Tux; everything else comes from sprites.ts. */
-  base: { stand: string[]; sideA: string[]; sideB: string[] };
-  /** Tux frames used by the actions, all 16 x 16. */
+  /** Tux frames, all 16 x 16. */
   tux: Record<string, string[]>;
   /** Props, any size, each with its own palette. Animated props are lists. */
   props: Record<string, Prop[]>;
@@ -34,18 +33,23 @@ const doorFrame = (kind: 0 | 1 | 2) => {
 const lemmingePalette: Raster = { k: "#4a5d7a", w: "#f1f5ee", y: "#ffbe45", o: "#10161d", "-": "#4a5d7a", g: "#7ccf3a", G: "#4f9a22", b: "#3b6fd8", p: "#8a5a2b", s: "#c8cdd2", P: "#b57a3d", l: "#ffe9a8" };
 const lemminge: RetroLook = {
   palette: lemmingePalette,
-  base: { stand: lemmingeStand, sideA: lemmingeWalkA, sideB: lemmingeWalkB },
   tux: {
     stand: lemmingeStand, sideA: lemmingeWalkA, sideB: lemmingeWalkB,
     stopA: editRows(lemmingeStand, [[8, 0, "kkkk"], [8, 12, "kkkk"], [9, 0, "kkkk"], [9, 12, "kkkk"]]),
     stopB: editRows(lemmingeStand, [[7, 0, "kkkk"], [7, 12, "kkkk"], [8, 0, "kkkk"], [8, 12, "kkkk"]]),
-    digFA: editRows(lemmingeStand, [[10, 0, "kkkk"], [10, 12, "kkkk"], [11, 0, "k"], [11, 15, "k"]]),
-    digFB: editRows(lemmingeStand, armsUp),
     hang: editRows(lemmingeStand, [...armsUp, [14, 0, "....yy....yy...."], [15, 0, "....yy....yy...."]]),
     buildA: editRows(lemmingeWalkA, [[7, 12, "pppp"], [8, 13, "ppp"]]),
     buildB: editRows(lemmingeWalkB, [[10, 13, "ppp"], [11, 13, "ppp"]]),
+    // Hand digging: the hands scratch at the ground in turns.
+    digA: editRows(lemmingeStand, [[11, 1, "k"], [12, 1, "k"], [13, 0, "kk"], [14, 0, "kkk"], [15, 0, "kk"], [10, 15, "k"], [11, 14, "k"]]),
+    digB: editRows(lemmingeStand, [[10, 0, "k"], [11, 1, "k"], [11, 14, "k"], [12, 14, "k"], [13, 14, "kk"], [14, 13, "kkk"], [15, 14, "kk"]]),
+    squash: ["................", "................", "................", "................", "................", "................", "................", "................", "................", "................", "......gggg......", "....kkkkkkkk....", "..kkkwwkkwwkkk..", ".kkkbbbbbbbbkkk.", "kkkkbbbbbbbbkkkk", ".yyy........yyy."],
+    plopp: ["................", "................", "................", "................", "......l..l......", "...w........w...", "..l....ww....l..", "......wllw......", ".w...wl..lw...w.", "......wllw......", "..l....ww....l..", "...w........w...", "......l..l......", "................", "................", "................"],
   },
   props: {
+    badge: [prop([".wwwww.", "wgwgwgw", "...y...", "...y...", "..yy..."], lemmingePalette)],
+    hatchClosed: [prop(["ssssssssssssssss", "s" + "p".repeat(14) + "s", "s" + "p".repeat(14) + "s", "ssssssssssssssss"], lemmingePalette)],
+    hatchOpen: [prop(["ssssssssssssssss", "s" + "o".repeat(14) + "s", "s" + "o".repeat(14) + "s", "ssssssssssssssss"], lemmingePalette)],
     canopy: [prop(["....gggggggg....", "..gggwwggwwggg..", ".gggwwwggwwwggg.", "gggwwwwggwwwwggg", "g.g..g.gg.g..g.g", ".g...g....g...g."], lemmingePalette)],
     step: [prop(["PPPPPPPP", "pppppppp"], lemmingePalette)],
     door: [doorFrame(0), doorFrame(1), doorFrame(2)].map(rows => prop(rows, lemmingePalette)),
@@ -57,12 +61,25 @@ const geruestStand = frame({ 1: "......hhhh......", 2: "....hhhhhhhh....", 8: ".
 const geruestSide = { 1: "......hhhh......", 2: ".....hhhhhh.....", 3: "....kkkkkwokhh..", 9: "..kkkkkwrwwww...", 10: "..kkkkkrrrrrr...", 11: "..kkkkkrrrrrr...", 12: "...kkkkrrrrrr...", 13: "....kkkkrrrr...." };
 const geruestWalkA = side(geruestSide, feetA), geruestWalkB = side(geruestSide, feetB);
 const geruestPalette: Raster = { k: "#4b4f8a", w: "#f4efe6", y: "#ffb02e", o: "#05050a", "-": "#4b4f8a", h: "#ffd23f", H: "#fff0a0", r: "#e0245e", c: "#19e6ff" };
-const robot = [
-  "................", ".....yyyyyy.....", "....yyyyyyyy....", "....dddddddd....", "...dmmmmmmmmd...", "...dmrrmmrrmd...", "...dmmmmmmmmd...", "...dmmoooommd...",
-  "..dddddddddddd..", ".dmmmmmmmmmmmmd.", ".dmmlmmmmmmlmmd.", ".dmmmmmyymmmmmd.", ".dmmmmmmmmmmmmd.", "..dddddddddddd..", "...dd......dd...", "..ddd......ddd..",
-];
-const robotPalette: Raster = { d: "#3a3f5c", m: "#8c93b3", l: "#c9ceea", r: "#ff4d6d", y: "#ffd23f", o: "#05050a" };
-const robotLift: [number, number, string][] = [2, 3, 4, 5, 6, 7].flatMap(y => [[y, 1, "dm"], [y, 13, "md"]] as [number, number, string][]);
+const robotPalette: Raster = { d: "#3a3f5c", m: "#8c93b3", l: "#c9ceea", r: "#ff4d6d", y: "#ffd23f", Y: "#fff0a0", o: "#05050a" };
+/** The 24 x 24 robot in four frames; arms and mouth change with the pose. */
+function robotFrame(kind: "idle" | "lift" | "throw" | "stomp"): string[] {
+  const g = Array.from({ length: 24 }, () => Array<string>(24).fill("."));
+  const R = (x: number, y: number, w: number, h: number, c: string) => { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (g[j] && i >= 0 && i < 24) g[j][i] = c; };
+  const D = (x: number, y: number, c: string) => R(x, y, 1, 1, c);
+  const up = kind === "lift" || kind === "stomp";
+  if (up) { R(0, 7, 3, 9, "d"); R(1, 8, 1, 7, "m"); R(0, 5, 3, 2, "y"); R(21, 7, 3, 9, "d"); R(22, 8, 1, 7, "m"); R(21, 5, 3, 2, "y"); }
+  else if (kind === "throw") { R(0, 13, 3, 4, "d"); R(0, 17, 3, 2, "y"); R(21, 7, 3, 9, "d"); R(22, 8, 1, 7, "m"); R(21, 5, 3, 2, "y"); }
+  else { R(0, 15, 3, 7, "d"); R(1, 16, 1, 5, "m"); R(0, 22, 3, 2, "y"); R(21, 15, 3, 7, "d"); R(22, 16, 1, 5, "m"); R(21, 22, 3, 2, "y"); }
+  R(11, 0, 2, 2, "r"); R(11, 2, 2, 2, "d");
+  R(7, 4, 10, 1, "y"); R(5, 5, 14, 2, "y"); R(3, 7, 18, 1, "y"); D(8, 5, "Y"); D(9, 5, "Y");
+  R(5, 8, 14, 7, "d"); R(6, 9, 12, 5, "m"); R(7, 10, 3, 2, "r"); R(14, 10, 3, 2, "r");
+  D(7, 9, "o"); D(8, 9, "o"); D(9, 10, "o"); D(16, 9, "o"); D(15, 9, "o"); D(14, 10, "o");
+  if (kind === "stomp") R(8, 12, 8, 2, "o"); else { R(9, 12, 6, 1, "o"); D(8, 13, "o"); D(15, 13, "o"); }
+  R(3, 15, 18, 6, "d"); R(4, 16, 16, 4, "m"); R(4, 16, 16, 1, "l"); R(9, 17, 6, 2, "y"); D(6, 18, "r"); D(17, 18, "r");
+  R(3, 21, 7, 3, "d"); R(14, 21, 7, 3, "d"); R(10, 21, 4, 2, "d"); D(5, 22, "m"); D(7, 22, "m"); D(16, 22, "m"); D(18, 22, "m");
+  return g.map(row => row.join(""));
+}
 const barrelPalette: Raster = { d: "#5a2d12", B: "#c8641e", y: "#ffd23f", l: "#ffe0a0" };
 const flagFrame = (phase: number) => {
   const base = [9, 8, 6, 4, 2];
@@ -78,16 +95,16 @@ const flagFrame = (phase: number) => {
 };
 const geruest: RetroLook = {
   palette: geruestPalette,
-  base: { stand: geruestStand, sideA: geruestWalkA, sideB: geruestWalkB },
   tux: {
     stand: geruestStand, sideA: geruestWalkA, sideB: geruestWalkB,
     climbA: frame({ 5: "k...kkoyyokk....", 6: "kk..kkkyykkk....", 7: ".kkkkwwwwwwkk...", 14: "...yyy....yy....", 15: "..yyyy....yyy..." }, geruestStand),
     climbB: frame({ 5: "....kkoyyokk...k", 6: "....kkkyykkk..kk", 7: "...kkwwwwwwkkkk.", 14: "....yy....yyy...", 15: "...yyy....yyyy.." }, geruestStand),
     jumpG: editRows(geruestStand, [[8, 0, "kkkk"], [8, 12, "kkkk"], [9, 0, "kkkk"], [9, 12, "kkkk"], [14, 0, "....yyyyyyyy...."], [15, 0, "................"]]),
     cheer: editRows(geruestStand, armsUp),
+    hit: editRows(geruestStand, [...armsUp, [3, 0, "....kkokkokk...."]]),
   },
   props: {
-    robot: [robot, editRows(robot, robotLift), editRows(robot, [[6, 0, "dm"], [7, 0, "dm"], [8, 0, "dd"], [5, 13, "md"], [6, 13, "md"]])].map(rows => prop(rows, robotPalette)),
+    robot: (["idle", "lift", "throw", "stomp"] as const).map(kind => prop(robotFrame(kind), robotPalette)),
     barrel: [
       [".dddddd.", "dBBBBBBd", "dyyyyyyd", "dBlBBBBd", "dBBBBBBd", "dyyyyyyd", "dBBBBBBd", ".dddddd."],
       [".dddddd.", "dBBBBBBd", "dyyyyyyd", "dBBBBBBd", "dBBBBlBd", "dyyyyyyd", "dBBBBBBd", ".dddddd."],
@@ -104,14 +121,19 @@ const huepferPalette: Raster = { k: "#46589f", w: "#f1f5ee", y: "#ffbe45", o: "#
 const propPalette: Raster = { d: "#5a2a0c", y: "#fcc419", g: "#fff0a0", G: "#e0a800", E: "#9a5f2a", l: "#c68a4e", B: "#b5522a", f: "#ff8a5b", F: "#ffd0b0", e: "#0a1020", w: "#f1f5ee", c: "#9fd8ff", s: "#5aa0d8" };
 const block = ["dddddddd", "dyyyyyyd", "dyyddyyd", "dyyyydyd", "dyyydyyd", "dyyyyyyd", "dyyydyyd", "dddddddd"];
 const star = ["...yy...", "...yy...", "yyyyyyyy", ".yyggyy.", "..yggy..", "..yyyy..", ".yy..yy.", "yy....yy"];
+const huepferSoar = editRows(huepferStand, [[8, 0, "kkkk"], [8, 12, "kkkk"], [9, 0, "kkkk"], [9, 12, "kkkk"], [14, 0, "....yyyyyyyy...."], [15, 0, "................"]]);
 const huepfer: RetroLook = {
   palette: huepferPalette,
-  base: { stand: huepferStand, sideA: huepferWalkA, sideB: huepferWalkB },
   tux: {
     stand: huepferStand, sideA: huepferWalkA, sideB: huepferWalkB,
     jump: upOne(frame({ 5: "k...kkoyyokk...k", 6: "kk..kkkyykkk..kk", 7: ".kkkkwwwwwwkkkk.", 14: "....yy....yy....", 15: "....yy....yy...." }, huepferStand)),
     eatA: editRows(huepferWalkA, [[5, 11, "..."], [6, 11, "yy"]]),
     eatB: editRows(huepferWalkB, [[3, 9, "k-"]]),
+    crouch: [...Array<string>(4).fill("................"), ...[1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15].map(i => huepferStand[i])],
+    slam: editRows(huepferStand, [[14, 0, "....yyyyyyyy...."], [15, 0, "................"], [3, 0, "....kkokkokk...."]]),
+    fallA: editRows(huepferStand, [...armsUp, [14, 0, "..yyy.....yy...."], [15, 0, ".yyy......yyy..."]]),
+    fallB: editRows(huepferStand, [...armsUp, [14, 0, "....yy....yyy..."], [15, 0, "...yyy....yyyy.."]]),
+    soar: huepferSoar,
   },
   props: {
     block: [block, block.map(row => row.replace(/y/g, "g")), ["dddddddd", "dlEEEEld", "dEEEEEEd", "dEEEEEEd", "dEEEEEEd", "dEEEEEEd", "dlEEEEld", "dddddddd"]].map(rows => prop(rows, propPalette)),

@@ -1,112 +1,254 @@
-import { clamp, ease } from "./scene";
-import type { RetroLook } from "./retroSprites";
-import { blockFull } from "./actions";
-import type { BurrowScene, BurrowActor } from "./burrow";
-import type { ScaffoldScene } from "./scaffold";
-import type { JumperScene } from "./jumper";
-// Canvas drawing for the action scenes. The context is already scaled to virtual pixels (see Stage);
-// one sprite pixel is 2 virtual pixels, like in the approved preview.
+import { PX, clamp, type Grid, type Particles } from "./retroGrid";
+import { retroLooks, type RetroLook } from "./retroSprites";
+import type { Prop } from "./sprites";
+import type { LemmingeSim, LemmingeTux } from "./lemminge";
+import type { GeruestSim, GeruestTux } from "./geruest";
+import { RAINBOW, POLE_X, PIPE_R, type HuepferSim, type HuepferTux } from "./huepfer";
+import type { RetroSim } from "./retroSim";
+// Canvas drawing of the retro simulations. The context is already scaled to virtual pixels (one sprite pixel = 2).
 type Ctx = CanvasRenderingContext2D;
-export interface DrawOptions { ground: string }
-export function paintRows(ctx: Ctx, rows: string[], palette: Record<string, string>, x: number, y: number, scale: number, flip = false, tint: string | null = null): void {
-  const width = rows[0]?.length ?? 0;
-  for (let j = 0; j < rows.length; j++) for (let i = 0; i < rows[j].length; i++) {
-    const ch = rows[j][i];
-    if (ch === ".") continue;
-    let color = palette[ch];
-    if (!color) continue;
-    if (tint && (ch === "k" || ch === "-")) color = tint;
-    ctx.fillStyle = color;
-    ctx.fillRect(Math.round(x + (flip ? width - 1 - i : i) * scale), Math.round(y + j * scale), Math.ceil(scale), Math.ceil(scale));
+type Palette = Record<string, string>;
+
+const sheets = new WeakMap<string[], Map<Palette, HTMLCanvasElement>>();
+/** Each sprite is painted once into a small canvas per palette and then stamped. */
+function sheetFor(rows: string[], palette: Palette): HTMLCanvasElement {
+  let byPalette = sheets.get(rows);
+  if (!byPalette) { byPalette = new Map(); sheets.set(rows, byPalette); }
+  let canvas = byPalette.get(palette);
+  if (canvas) return canvas;
+  const w = rows[0].length, h = rows.length;
+  canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+  const g = canvas.getContext("2d");
+  if (g) {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const ch = rows[y][x], color = palette[ch];
+      if (ch === "." || ch === " " || !color) continue;
+      g.fillStyle = color; g.fillRect(x, y, 1, 1);
+    }
   }
+  byPalette.set(palette, canvas);
+  return canvas;
 }
-interface Figure { x: number; y: number; dir: number; scale?: number; clipY?: number | null; alpha?: number; sink?: number; yo?: number; tint?: string | null }
+const tints = new Map<Palette, Map<string, Palette>>();
+/** Same palette with the body colour (k and -) replaced. */
+function tinted(palette: Palette, color: string): Palette {
+  let m = tints.get(palette);
+  if (!m) { m = new Map(); tints.set(palette, m); }
+  let p = m.get(color);
+  if (!p) { p = { ...palette, k: color, "-": color }; m.set(color, p); }
+  return p;
+}
+function spr(ctx: Ctx, p: Prop, x: number, y: number, mirror = false, sc = PX): void {
+  const c = sheetFor(p.rows, p.palette), w = c.width * sc, h = c.height * sc;
+  if (mirror) { ctx.save(); ctx.translate(Math.round(x) + w, Math.round(y)); ctx.scale(-1, 1); ctx.drawImage(c, 0, 0, w, h); ctx.restore(); }
+  else ctx.drawImage(c, Math.round(x), Math.round(y), w, h);
+}
 /** x = centre, y = feet. */
-function figure(ctx: Ctx, a: Figure, rows: string[], palette: Record<string, string>, width: number): void {
-  const k = a.scale ?? 1, size = 32 * k;
-  ctx.save();
-  if (a.clipY != null) { ctx.beginPath(); ctx.rect(-1000, -1000, width + 2000, a.clipY + 1000); ctx.clip(); }
-  ctx.globalAlpha = clamp(a.alpha ?? 1, 0, 1);
-  paintRows(ctx, rows, palette, a.x - size / 2, a.y - size + (a.sink ?? 0) + (a.yo ?? 0), 2 * k, a.dir < 0, a.tint ?? null);
-  ctx.restore();
+function tux(ctx: Ctx, look: RetroLook, name: string, x: number, y: number, mirror: boolean, sc = PX, palette: Palette = look.palette): void {
+  spr(ctx, { rows: look.tux[name], palette }, x - 8 * sc, y - 16 * sc, mirror, sc);
 }
-const prop = (look: RetroLook, name: string, frame = 0) => look.props[name][frame % look.props[name].length];
-function particles(ctx: Ctx, parts: { x: number; y: number; life: number; c: string }[]): void {
-  for (const p of parts) { ctx.fillStyle = p.c; ctx.globalAlpha = clamp(p.life / .4, 0, 1); ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2); }
+const frameOf = (look: RetroLook, name: string, i = 0): Prop => look.props[name][i % look.props[name].length];
+function particles(ctx: Ctx, parts: Particles): void {
+  for (const p of parts.list) { ctx.globalAlpha = clamp(p.life / 0.25, 0, 1); ctx.fillStyle = p.color; ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size); }
   ctx.globalAlpha = 1;
 }
-
-export function drawBurrow(ctx: Ctx, s: BurrowScene, look: RetroLook, o: DrawOptions): void {
-  const { gy, width } = s.layout;
-  for (const h of s.holes) {
-    const depth = 18 * h.open;
-    ctx.globalAlpha = clamp(h.a, 0, 1);
-    ctx.fillStyle = o.ground; ctx.fillRect(h.x, gy, h.w, depth);
-    ctx.fillStyle = "#7a5a36";
-    for (let px = h.x; px < h.x + h.w; px += 3) ctx.fillRect(px, gy + depth - 2 - (((Math.floor(px) * 7) % 5) / 5) * 2, 2, 2);
-    ctx.fillRect(h.x, gy, 2, depth); ctx.fillRect(h.x + h.w - 2, gy, 2, depth);
-    ctx.globalAlpha = 1;
-  }
-  for (const st of s.steps) { ctx.globalAlpha = clamp(st.a, 0, 1); const p = prop(look, "step"); paintRows(ctx, p.rows, p.palette, st.x, st.y, 2); ctx.globalAlpha = 1; }
-  if (s.door) { ctx.globalAlpha = s.door.a; const p = prop(look, "door", s.door.f); paintRows(ctx, p.rows, p.palette, s.door.x, gy - 28, 2); ctx.globalAlpha = 1; }
-  for (const a of s.actors) if (!a.hidden) figure(ctx, a, look.tux[a.spr], look.palette, width);
-  for (const a of s.actors) if (a.mode === "chute" || a.mode === "land") canopy(ctx, a, look);
-  particles(ctx, s.parts);
-}
-function canopy(ctx: Ctx, a: BurrowActor, look: RetroLook): void {
-  const k = a.mode === "land" ? clamp(1 - a.mt / .55, 0, 1) : 1;
-  if (k <= 0) return;
-  const top = a.y - 32, cy = top - 14 + (1 - k) * 18, f = .4 + .6 * k, p = prop(look, "canopy");
-  ctx.save(); ctx.translate(a.x - 16, cy); ctx.scale(1, f); paintRows(ctx, p.rows, p.palette, 0, 0, 2); ctx.restore();
-  if (a.mode === "chute") {
-    ctx.strokeStyle = "rgba(241,245,238,.8)"; ctx.lineWidth = 1; ctx.beginPath();
-    ctx.moveTo(a.x - 15, cy + 12); ctx.lineTo(a.x - 11, top + 12); ctx.moveTo(a.x + 15, cy + 12); ctx.lineTo(a.x + 11, top + 12); ctx.stroke();
-  }
-}
-
-export function drawScaffold(ctx: Ctx, s: ScaffoldScene, look: RetroLook): void {
-  const pal = look.palette, G = s.girders, width = s.layout.width;
-  if (s.scaffold > 0) {
-    ctx.globalAlpha = s.scaffold * .85;
-    for (const g of G) { ctx.fillStyle = pal.r; ctx.fillRect(g.x0, g.y, g.x1 - g.x0, 2); ctx.fillStyle = "#8c1d4a"; for (let x = g.x0; x < g.x1; x += 12) ctx.fillRect(x, g.y + 2, 2, 2); }
-    ctx.globalAlpha = s.scaffold * .7; ctx.fillStyle = pal.c;
-    for (const l of s.ladders) { const t = G[l.top].y + 2, h = G[l.bot].y - t; ctx.fillRect(l.x - 8, t, 2, h); ctx.fillRect(l.x + 6, t, 2, h); for (let y = t + 4; y < t + h; y += 6) ctx.fillRect(l.x - 8, y, 16, 2); }
-    ctx.globalAlpha = 1;
-  }
-  if (s.flag) {
-    const t = s.flag.t, off = (1 - ease(t / .5) + (t > 3.2 ? ease((t - 3.2) / .4) : 0)) * 30, p = prop(look, "flag", Math.floor(t * 6));
-    ctx.save(); ctx.beginPath(); ctx.rect(-1000, -1000, width + 2000, G[0].y + 1000); ctx.clip();
-    paintRows(ctx, p.rows, p.palette, s.flagX + 12, G[0].y - 32 + off, 2); ctx.restore();
-  }
-  for (const b of s.barrels) { const p = prop(look, "barrel", Math.floor(b.t / .14)); paintRows(ctx, p.rows, p.palette, b.x - 8, b.y - 16, 2); }
-  for (const a of s.actors) figure(ctx, a, look.tux[a.spr], pal, width);
-  const r = s.robot;
-  if (r) {
-    ctx.globalAlpha = r.a;
-    const shake = r.s === "lift" ? Math.floor(r.t * 30) % 2 : 0, rx = s.robotX + shake, ry = s.girders[0].y - 32;
-    const p = prop(look, "robot", r.s === "lift" ? 1 : r.s === "throw" ? 2 : 0), barrel = prop(look, "barrel");
-    paintRows(ctx, p.rows, p.palette, rx, ry, 2);
-    if (r.s === "lift") paintRows(ctx, barrel.rows, barrel.palette, rx + 16 - 8, ry - 16, 2);
-    ctx.globalAlpha = 1;
-  }
-}
-
-export function drawJumper(ctx: Ctx, s: JumperScene, look: RetroLook, time: number): void {
-  const width = s.layout.width;
-  for (const it of s.items) {
-    const name = it.kind, frames = look.props[name];
-    const p = frames[(name === "coin" ? [0, 1, 2, 1][Math.floor(it.t * 14) % 4] : name === "fish" ? Math.floor(it.t * 5) : name === "star" ? Math.floor(it.t * 8) : 0) % frames.length];
-    ctx.globalAlpha = clamp(it.a, 0, 1); paintRows(ctx, p.rows, p.palette, it.x - 8, it.y - 8, 2, name === "feather" && Math.floor(it.t * 2) % 2 === 1); ctx.globalAlpha = 1;
-  }
-  if (s.blocksAlpha > 0) {
-    ctx.globalAlpha = s.blocksAlpha;
-    for (const b of s.blocks) {
-      const off = b.bump < 1 ? -7 * Math.sin(Math.PI * b.bump) : 0;
-      const p = b.brick ? prop(look, "brick") : prop(look, "block", blockFull(b) ? (Math.floor(time * 2) % 2 ? 1 : 0) : 2);
-      paintRows(ctx, p.rows, p.palette, b.x, s.ledgeTop + off, 3);
+type Layer = { canvas: CanvasImageSource; g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D };
+/** Cached cover per grid; rebuilt only when Grid.version, the background or the scale changes. Null: no canvas available. */
+const covers = new WeakMap<Grid, { layer: Layer | null; version: number; ground: string; scale: number }>();
+function newLayer(w: number, h: number): Layer | null {
+  try {
+    if (typeof document !== "undefined") {
+      const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+      const g = canvas.getContext("2d");
+      if (g) return { canvas, g };
     }
+    if (typeof OffscreenCanvas !== "undefined") {
+      const canvas = new OffscreenCanvas(w, h), g = canvas.getContext("2d");
+      if (g) return { canvas, g };
+    }
+  } catch { /* no canvas (tests): fall back to direct drawing */ }
+  return null;
+}
+function fillDestroyed(g: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, grid: Grid, ground: string): void {
+  g.fillStyle = ground;
+  for (const k of grid.destroyed) g.fillRect((k % grid.cols) * grid.cw, Math.floor(k / grid.cols) * grid.ch, grid.cw, grid.ch);
+}
+/** Destroyed characters are covered with the terminal background (overlay only, restored on activity). */
+function cover(ctx: Ctx, grid: Grid, ground: string): void {
+  if (!grid.destroyed.size) return;
+  const scale = typeof ctx.getTransform === "function" ? Math.abs(ctx.getTransform().a) || 1 : 1;
+  let c = covers.get(grid);
+  if (!c || c.version !== grid.version || c.ground !== ground || c.scale !== scale) {
+    const w = Math.max(1, Math.ceil(grid.width * scale)), h = Math.max(1, Math.ceil(grid.height * scale));
+    const layer = c?.layer && c.scale === scale ? c.layer : newLayer(w, h);
+    if (layer) {
+      layer.g.setTransform(1, 0, 0, 1, 0, 0); layer.g.clearRect(0, 0, w, h); layer.g.scale(scale, scale);
+      fillDestroyed(layer.g, grid, ground);
+    }
+    c = { layer, version: grid.version, ground, scale };
+    covers.set(grid, c);
+  }
+  // The layer has device resolution; drawn 1:1 under the scaled context (no stretching from rounding up).
+  if (c.layer) ctx.drawImage(c.layer.canvas, 0, 0, Math.max(1, Math.ceil(grid.width * scale)) / scale, Math.max(1, Math.ceil(grid.height * scale)) / scale);
+  else fillDestroyed(ctx, grid, ground);
+}
+
+// ---------- Retro Lemminge ----------
+function lemmingeTux(ctx: Ctx, sim: LemmingeSim, look: RetroLook, t: LemmingeTux): void {
+  if (t.state === "enter") return;
+  let name: string | null = "stand", mirror = t.dir < 0, sc = PX, alpha = 1;
+  switch (t.state) {
+    case "fall": case "float": name = "hang"; mirror = false; break;
+    case "walk": name = Math.floor(t.anim / 0.18) % 2 ? "sideB" : "sideA"; break;
+    case "dig": name = Math.floor(t.anim / 0.12) % 2 ? "digB" : "digA"; mirror = false; break;
+    case "stop": name = Math.floor(t.anim / 0.4) % 2 ? "stopB" : "stopA"; mirror = false; break;
+    case "build": name = Math.floor(t.t / 0.3) % 2 ? "buildB" : "buildA"; break;
+    case "die": name = t.t < 0.2 ? "squash" : t.t < 0.4 ? "plopp" : null; mirror = false; break;
+    case "exit": name = Math.floor(t.t / 0.1) % 2 ? "sideB" : "sideA"; mirror = false; sc = PX * (1 - 0.8 * Math.min(1, t.t / 0.5)); break;
+    case "vanish": name = "stand"; mirror = false; alpha = 1 - t.t / 0.3; break;
+  }
+  ctx.globalAlpha = clamp(alpha, 0, 1);
+  if (name) tux(ctx, look, name, t.x, t.y, mirror, sc);
+  ctx.globalAlpha = 1;
+  if (t.umbrella && (t.state === "walk" || t.state === "stop" || t.state === "dig" || t.state === "build" || t.state === "fall")) spr(ctx, frameOf(look, "badge"), t.x - 7, t.y - 44 + Math.round(Math.sin(sim.time * 5 + t.id)));
+  if (t.state === "float") {
+    spr(ctx, frameOf(look, "canopy"), t.x - 16, t.y - 42);
+    ctx.fillStyle = "#f1f5ee"; ctx.fillRect(Math.round(t.x - 15), Math.round(t.y - 30), 1, 8); ctx.fillRect(Math.round(t.x + 14), Math.round(t.y - 30), 1, 8);
+  }
+}
+function drawLemminge(ctx: Ctx, sim: LemmingeSim): void {
+  const look = retroLooks.lemminge, g = sim.grid, gy = g.floorY(sim.groundRow), w = g.width, bar = (sim.groundRow + 1) * g.ch - gy;
+  ctx.fillStyle = "#2a2117"; ctx.fillRect(0, gy, w, bar);
+  ctx.fillStyle = "#4f9a22"; ctx.fillRect(0, gy, w, 2);
+  ctx.fillStyle = "#7ccf3a"; for (let x = 3; x < w; x += 14) ctx.fillRect(x, gy, 2, 1);
+  ctx.fillStyle = "#3b2a18"; for (let x = 0; x < w; x += 12) { ctx.fillRect(x + 2, gy + 5, 3, 2); if (bar > 11) ctx.fillRect(x + 8, gy + 9, 3, 2); }
+  spr(ctx, frameOf(look, "door", sim.doorT > 0.45 ? 1 : sim.doorT > 0 ? 2 : 0), sim.doorX - 10, gy - 28);
+  for (const h of sim.hatches) spr(ctx, frameOf(look, h.t > 0.15 && h.t < 0.9 ? "hatchOpen" : "hatchClosed"), h.x - 16, 0);
+  for (const s of sim.steps) { if (s.age > 12 && Math.floor(s.age * 6) % 2) continue; spr(ctx, frameOf(look, "step"), s.x1, s.y); }
+  for (const t of sim.tuxes) lemmingeTux(ctx, sim, look, t);
+  particles(ctx, sim.parts);
+}
+
+// ---------- Retro Gerüst ----------
+function geruestTux(ctx: Ctx, look: RetroLook, t: GeruestTux): void {
+  if (t.state === "wait") return;
+  const mirror = t.dir < 0, y = t.y - t.lift;
+  if (t.state === "beam" || t.state === "beamout") {
+    const u = t.state === "beam" ? t.t / 0.6 : 1 - t.t / 0.6, h = Math.round(32 * clamp(u, 0, 1));
+    ctx.save(); ctx.beginPath(); ctx.rect(t.x - 16, t.y - h, 32, h); ctx.clip();
+    tux(ctx, look, t.state === "beam" ? "stand" : "cheer", t.x, t.y, false); ctx.restore();
+    ctx.fillStyle = "#19e6ff"; ctx.fillRect(t.x - 16, t.y - h, 32, 2);
+    ctx.globalAlpha = 0.2; ctx.fillRect(t.x - 14, t.y - 34, 28, 34); ctx.globalAlpha = 1;
+    return;
+  }
+  let name: string | null = "stand";
+  switch (t.state) {
+    case "walk": name = Math.floor(t.anim / 0.18) % 2 ? "sideB" : "sideA"; break;
+    case "climb": name = Math.floor(t.anim / 0.2) % 2 ? "climbB" : "climbA"; break;
+    case "jump": name = "jumpG"; break;
+    case "hit": name = Math.floor(t.t / 0.08) % 2 === 0 ? "hit" : null; break;
+    case "cheer": name = Math.floor(t.t / 0.25) % 2 ? "cheer" : "stand"; break;
+  }
+  if (name) tux(ctx, look, name, t.x, y, mirror && (t.state === "walk" || t.state === "jump"));
+}
+function drawGeruest(ctx: Ctx, sim: GeruestSim, time: number): void {
+  const look = retroLooks.geruest, G = sim.girders;
+  ctx.save();
+  if (sim.shake > 0) ctx.translate(Math.round(Math.sin(time * 90) * 2 * sim.shake / 0.45), 0);
+  for (const g of G) {
+    ctx.fillStyle = "#8c1d4a"; ctx.fillRect(g.x1, g.y, g.x2 - g.x1, 4);
+    ctx.fillStyle = "#ff4d6d"; ctx.fillRect(g.x1, g.y, g.x2 - g.x1, 1);
+    ctx.fillStyle = "#3a0c22"; for (let x = g.x1 + 2; x < g.x2 - 2; x += 8) ctx.fillRect(x, g.y + 1, 2, 2);
+  }
+  ctx.fillStyle = "#19e6ff";
+  for (const l of sim.ladders) {
+    const y0 = G[l.hi].y, y1 = G[l.lo].y;
+    ctx.fillRect(l.x - 4, y0, 2, y1 - y0); ctx.fillRect(l.x + 2, y0, 2, y1 - y0);
+    for (let y = y0 + 3; y < y1; y += 5) ctx.fillRect(l.x - 4, y, 8, 1);
+  }
+  const sg = sim.start;
+  ctx.fillRect(sg.x1 + 2, sg.y - 2, 24, 2); ctx.fillRect(sg.x1 + 2, sg.y - 6, 2, 4);
+  spr(ctx, frameOf(look, "flag", Math.floor(time * 5)), sim.flagX - 6, G[sim.goalG].y - 32);
+  const robot = sim.robot;
+  if (robot) {
+    const rf = robot.state === "idle" ? 0 : robot.state === "lift" ? 1 : robot.state === "throw" ? 2 : 3;
+    const off = robot.state === "stomp" && robot.t < 0.35 ? -Math.round(12 * Math.sin(Math.PI * robot.t / 0.35)) : 0, ry = G[sim.goalG].y - 48 + off;
+    spr(ctx, frameOf(look, "robot", rf), robot.x, ry);
+    if (robot.state === "lift") spr(ctx, frameOf(look, "barrel", 0), robot.x + 16, ry - 16);
+  }
+  for (const b of sim.barrels) spr(ctx, frameOf(look, "barrel", Math.floor(b.anim / 0.12)), b.x - 8, b.y - 8);
+  for (const t of sim.tuxes) geruestTux(ctx, look, t);
+  ctx.restore();
+  particles(ctx, sim.parts);
+}
+
+// ---------- Retro Hüpfer ----------
+function huepferTux(ctx: Ctx, sim: HuepferSim, look: RetroLook, t: HuepferTux): void {
+  if (t.state === "enter") return;
+  let name = "stand", mirror = t.dir < 0, alpha = 1;
+  switch (t.state) {
+    case "walk": case "exit": name = Math.floor(t.anim / 0.15) % 2 ? "sideB" : "sideA"; break;
+    case "hop": case "jumpup": case "bumpjump": name = "jump"; mirror = false; break;
+    case "fall": name = Math.floor(t.t / 0.12) % 2 ? "fallB" : "fallA"; mirror = false; break;
+    case "crouch": name = "crouch"; mirror = false; break;
+    case "slam": name = "slam"; mirror = false; break;
+    case "cheer": name = Math.floor(t.t / 0.2) % 2 ? "jump" : "stand"; mirror = false; break;
+    case "soar": name = "soar"; mirror = false; break;
+    case "eat": name = Math.floor(t.anim / 0.15) % 2 ? "eatB" : "eatA"; break;
+    case "vanish": mirror = false; alpha = 1 - t.t / 0.3; break;
+  }
+  const palette = t.star > 0 ? tinted(look.palette, RAINBOW[Math.floor(sim.time * 12) % RAINBOW.length]) : look.palette;
+  const big = t.big > 0 && !(t.big < 1 && Math.floor(sim.time * 10) % 2);
+  ctx.globalAlpha = clamp(alpha, 0, 1);
+  tux(ctx, look, name, t.x, t.y, mirror, big ? 3 : PX, palette);
+  ctx.globalAlpha = 1;
+}
+function pipeDown(ctx: Ctx, x: number, a: number): void {
+  ctx.globalAlpha = clamp(a, 0, 1);
+  ctx.fillStyle = "#14562a"; ctx.fillRect(x - 17, 0, 34, 14); ctx.fillRect(x - 20, 8, 40, 8);
+  ctx.fillStyle = "#2fa24a"; ctx.fillRect(x - 15, 0, 30, 8); ctx.fillRect(x - 18, 9, 36, 6);
+  ctx.fillStyle = "#4cd964"; ctx.fillRect(x - 14, 0, 4, 8); ctx.fillRect(x - 17, 9, 4, 6);
+  ctx.globalAlpha = 1;
+}
+function drawHuepfer(ctx: Ctx, sim: HuepferSim): void {
+  const look = retroLooks.huepfer, g = sim.grid, gy = g.floorY(sim.groundRow), time = sim.time;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, gy, g.width, (sim.groundRow + 1) * g.ch - gy); ctx.clip();
+  for (let x = 0; x < g.width; x += 16) spr(ctx, frameOf(look, "brick"), x, gy);
+  ctx.restore();
+  for (const it of sim.items) {
+    const f = it.kind === "coin" ? frameOf(look, "coin", Math.floor(it.t / 0.09)) : it.kind === "fish" ? frameOf(look, "fish", Math.floor(time * 4)) : it.kind === "star" ? frameOf(look, "star", Math.floor(time * 8)) : frameOf(look, "feather");
+    spr(ctx, f, it.x - 8, it.y - 16, it.kind === "fish" && it.vx < 0);
+  }
+  for (const b of sim.blocks) {
+    const off = b.bump > 0 ? Math.round(6 * Math.sin(Math.PI * (1 - b.bump / 0.2))) : 0, top = b.y - 16 - off;
+    ctx.globalAlpha = b.age > 28 ? 0.5 : 1;
+    spr(ctx, frameOf(look, "block", b.state === "empty" ? 2 : Math.floor(time * 2.5) % 2), b.x - 8, top);
+    if (b.type === "multi" && b.state !== "empty") { ctx.fillStyle = "#fcc419"; for (let i = 0; i < b.left; i++) ctx.fillRect(b.x - 8 + i * 4, top - 3, 3, 2); }
     ctx.globalAlpha = 1;
   }
-  for (const a of s.actors) figure(ctx, a, look.tux[a.spr], look.palette, width);
-  particles(ctx, s.parts);
+  for (const f of sim.flashes) {
+    const x = f.c * g.cw, y = f.r * g.ch + g.ch * 0.15, h = g.ch * 0.7;
+    ctx.fillStyle = "#5a2a0c"; ctx.fillRect(x, y, g.cw, h);
+    ctx.fillStyle = "#b5522a"; ctx.fillRect(x + 1, y + 1, g.cw - 2, h * 0.35); ctx.fillRect(x + 1, y + h * 0.5, g.cw / 2 - 1, h * 0.4); ctx.fillRect(x + g.cw / 2 + 1, y + h * 0.5, g.cw / 2 - 2, h * 0.4);
+  }
+  // Goal bottom left: the flag climbs the pole when a Tux touches it.
+  ctx.fillStyle = "#f1f5ee"; ctx.fillRect(POLE_X, gy - 100, 3, 100);
+  ctx.fillStyle = "#fcc419"; ctx.fillRect(POLE_X - 1, gy - 104, 5, 5);
+  const fy = gy - 18 - Math.round(sim.flagLv * 74);
+  ctx.fillStyle = "#e8412e";
+  for (let i = 0; i < 7; i++) ctx.fillRect(POLE_X + 3, fy + i * 2, 18 - i * 2 - (sim.flagLv > 0 && i % 2 ? Math.round(Math.sin(time * 8)) : 0), 2);
+  for (const t of sim.tuxes) huepferTux(ctx, sim, look, t);
+  for (const p of sim.pipes) pipeDown(ctx, p.x, p.t > 1.2 ? (1.5 - p.t) / 0.3 : 1);
+  ctx.fillStyle = "#14562a"; ctx.fillRect(0, gy - 38, PIPE_R, 38); ctx.fillRect(PIPE_R - 4, gy - 40, 8, 42);
+  ctx.fillStyle = "#2fa24a"; ctx.fillRect(2, gy - 36, PIPE_R - 6, 34); ctx.fillRect(PIPE_R - 2, gy - 38, 6, 38);
+  ctx.fillStyle = "#4cd964"; ctx.fillRect(2, gy - 36, PIPE_R - 6, 4); ctx.fillRect(PIPE_R + 2, gy - 38, 2, 38);
+  particles(ctx, sim.parts);
+}
+
+/** Paints one frame of a simulation; `ground` is the terminal background that hides destroyed characters. */
+export function drawRetro(ctx: Ctx, sim: RetroSim, ground: string): void {
+  cover(ctx, sim.grid, ground);
+  if (sim.id === "lemminge") drawLemminge(ctx, sim);
+  else if (sim.id === "geruest") drawGeruest(ctx, sim, sim.time);
+  else drawHuepfer(ctx, sim);
 }
