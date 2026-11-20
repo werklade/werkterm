@@ -18,6 +18,7 @@ import { answerHostKey, answerSecret, cancelSshConnect, closeSsh, connectSsh, re
 import { parseOsc7, type TerminalCwd } from "../lib/osc7";
 import { parseQuickConnect, quickConnectSshArgs } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
+import { createSessionEnd, endedText } from "../lib/sessionEnd";
 import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
 
 import { selectedTheme, type Settings } from "../lib/settings";
@@ -277,12 +278,35 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         terminal.write(new Uint8Array(buffer));
         promptCommand.receiveData();
       };
+      const endedTexts = () => ({ title: t("terminal.ended.title"), close: t("terminal.ended.close"), restart: t("terminal.ended.restart"), save: t("terminal.ended.save") });
+      // Every end (regular exit, lost connection, failed connect) leaves the same closed state:
+      // optional error line, Return/R/S hints, keys active, tab marked as exited.
+      const ending = createSessionEnd({
+        lost: () => {
+          const pending = serialFixCommands.get(id);
+          if (pending) { serialFixCommands.delete(id); pending.reject(new Error(t("terminal.shellExited"))); }
+          clearTimeout(permissionReadyTimer);
+          exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id);
+          if (kind === "ssh" || wire) callbacks.current.onStatus(t("terminal.connectionEnded"));
+          terminal.write(endedText(endedTexts()));
+          callbacks.current.onSession(id, null); callbacks.current.onExit(id);
+        },
+        failed: error => {
+          const permission = kind === "serial" ? parseSerialPermission(error) : null;
+          if (permission) callbacks.current.onSerialPermission(id, permission);
+          const pending = serialFixCommands.get(id);
+          if (pending) { serialFixCommands.delete(id); pending.reject(error); }
+          clearTimeout(permissionReadyTimer);
+          exited = true; terminalWriters.delete(id);
+          void stopLog(id).catch(report); logRef.current.onLog(id, null);
+          terminal.write(endedText(endedTexts(), `${kind === "ssh" ? t("terminal.failed.ssh") : wire ? t("terminal.failed.wire") : t("terminal.failed.pty")}: ${keyringErrorText(error)}`));
+          callbacks.current.onSession(id, null);
+          callbacks.current.onExit(id);
+          report(error);
+        },
+      });
       const onExitChannel = new Channel<number | null>();
-      onExitChannel.onmessage = () => { if (!cancelled && !exited) {
-        const pending = serialFixCommands.get(id);
-        if (pending) { serialFixCommands.delete(id); pending.reject(new Error(t("terminal.shellExited"))); }
-        clearTimeout(permissionReadyTimer);
-        exited = true; logRef.current.onLog(id, null); terminalWriters.delete(id); if (kind === "ssh" || wire) callbacks.current.onStatus(t("terminal.connectionEnded")); terminal.write(`\r\n\r\n\x1b[1;33m${t("terminal.ended.title")}\x1b[0m\r\n    - \x1b[1m<Return>\x1b[0m: ${t("terminal.ended.close")}\r\n    - \x1b[1mR\x1b[0m: ${t("terminal.ended.restart")}\r\n    - \x1b[1mS\x1b[0m: ${t("terminal.ended.save")}\r\n`); callbacks.current.onSession(id, null); callbacks.current.onExit(id); } };
+      onExitChannel.onmessage = () => { if (!cancelled) ending.exit(); };
       const onPromptChannel = new Channel<SshPrompt>();
       const rejectPrompt = (prompt: SshPrompt) => {
         void (prompt.type === "hostKey" ? answerHostKey(prompt.requestId, false) : answerSecret(prompt.requestId, null)).catch(() => undefined);
@@ -317,6 +341,8 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         if (cancelled) { void close(spawnedId).catch(() => undefined); return; }
         sessionId = spawnedId; wireSession.current = spawnedId;
         callbacks.current.onClearPrompts(id);
+        // The session may have ended while the start was still pending.
+        if (!ending.started()) return;
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(t("terminal.connected", { target: destination ? `${destination.user}@${destination.host}` : target ?? "", mode: result.mode }));
         if (typeof result !== "number" && !exited && result.weakAlgorithms?.length) terminal.write(`\x1b[33m${t("terminal.weakAlgorithms", { names: result.weakAlgorithms.join(", ") }).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
@@ -339,16 +365,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         connecting = false;
         callbacks.current.onClearPrompts(id);
         if (cancelled) return;
-        const permission = kind === "serial" ? parseSerialPermission(error) : null;
-        if (permission) callbacks.current.onSerialPermission(id, permission);
-        const pending = serialFixCommands.get(id);
-        if (pending) { serialFixCommands.delete(id); pending.reject(error); }
-        exited = true;
-        void stopLog(id).catch(report); logRef.current.onLog(id, null);
-        terminal.write(`\r\n\x1b[31m${kind === "ssh" ? t("terminal.failed.ssh") : wire ? t("terminal.failed.wire") : t("terminal.failed.pty")}: ${keyringErrorText(error).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
-        callbacks.current.onSession(id, null);
-        callbacks.current.onExit(id);
-        report(error);
+        ending.failed(error);
       });
       cleanup = () => {
         clearTimeout(permissionReadyTimer);

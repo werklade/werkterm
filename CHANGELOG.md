@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Terminal: a connection that fails to start (for example a connect, name resolution or address timeout, a rejected login or a cancelled password prompt) now ends like a regular disconnect. The error stays visible and is followed by the usual hints: Return closes the tab, R restarts the session, S saves the output. If the shell already ended while the connection was still being set up, the error is shown once, above the hints, instead of below them.
 - Paste dialog: Enter now confirms the paste as soon as the dialog opens, and Escape cancels. Focus used to land in the text field, so Enter only inserted a line break. In the text field Enter still inserts a line break; checkbox, selection and the other buttons keep their own Enter behaviour. The confirming Enter is no longer passed on to the terminal.
 
 ## [1.2.0] – 2026-11-20
