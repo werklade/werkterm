@@ -12,20 +12,21 @@ readonly KEY_FILE="${KEY_DIR}/werklade-archive-keyring.asc"
 readonly SOURCES_DIR="/etc/apt/sources.list.d"
 readonly SOURCES_FILE="${SOURCES_DIR}/werklade.sources"
 readonly MIN_GLIBC="2.39"
-# Same content as the manual procedure in README.md.
-readonly SOURCES_CONTENT="Types: deb
-URIs: https://pkg.werklade.de/apt
-Suites: stable
-Components: main
-Architectures: amd64
-Signed-By: ${KEY_FILE}
-"
 
 DRY_RUN=0
+TEST_CHANNEL=0
 MODE="setup"
 PACKAGES=()
 WORKDIR=""
 TMP_SOURCES=""
+
+# Same content as the manual procedure in README.md; --test adds the suite "test".
+sources_content() {
+  local suites="stable"
+  ((TEST_CHANNEL)) && suites="stable test"
+  printf 'Types: deb\nURIs: https://pkg.werklade.de/apt\nSuites: %s\nComponents: main\nArchitectures: amd64\nSigned-By: %s\n' \
+    "$suites" "$KEY_FILE"
+}
 
 log() { printf '%s\n' "$*"; }
 warn() { printf 'Warnung: %s\n' "$*" >&2; }
@@ -41,8 +42,10 @@ Aufruf: werklade-apt-setup.sh [Optionen]
 Bindet das Werklade-APT-Repository (pkg.werklade.de) ein.
 
 Optionen:
-  (keine)               Quelle und Schlüssel einrichten, dann apt-get update
+  (keine)               Quelle (Suites: stable) und Schlüssel einrichten, dann apt-get update
   --install <Paket>...  einrichten, dann die Pakete installieren (z. B. werkterm)
+  --test                Testkanal einbinden (Suites: stable test); kombinierbar mit --install.
+                        Ohne --test erneut ausführen: zurück auf stable
   --remove              Quelle und Schlüssel entfernen (Pakete bleiben installiert)
   --dry-run             Aktionen nur anzeigen, nichts ändern (ohne root möglich)
   -h, --help            diese Hilfe
@@ -88,6 +91,7 @@ parse_args() {
         [[ "$MODE" == "install" ]] && usage_error "--remove und --install schließen sich aus"
         MODE="remove"
         ;;
+      --test) TEST_CHANNEL=1 ;;
       --install)
         [[ "$MODE" == "remove" ]] && usage_error "--remove und --install schließen sich aus"
         MODE="install"
@@ -104,6 +108,9 @@ parse_args() {
     esac
     shift
   done
+  if [[ "$MODE" == "remove" ]] && ((TEST_CHANNEL)); then
+    usage_error "--test und --remove schließen sich aus"
+  fi
 }
 
 ensure_root() {
@@ -225,14 +232,14 @@ setup_key() {
 setup_sources() {
   if ((DRY_RUN)); then
     log "[dry-run] ${SOURCES_FILE} atomar schreiben (Modus 0644), Inhalt:"
-    printf '%s' "$SOURCES_CONTENT" | sed 's/^/[dry-run]   /'
+    sources_content | sed 's/^/[dry-run]   /'
     return 0
   fi
 
   install -d -m 0755 -- "$SOURCES_DIR"
   # Same directory so mv is an atomic rename; no .sources suffix so apt ignores it.
   TMP_SOURCES="$(mktemp "${SOURCES_DIR}/.werklade.sources.XXXXXX")"
-  printf '%s' "$SOURCES_CONTENT" >"$TMP_SOURCES"
+  sources_content >"$TMP_SOURCES"
   chmod 0644 -- "$TMP_SOURCES"
   if [[ -f "$SOURCES_FILE" ]] && cmp -s -- "$TMP_SOURCES" "$SOURCES_FILE"; then
     chmod 0644 -- "$SOURCES_FILE"
@@ -269,6 +276,41 @@ do_setup() {
   setup_key
   setup_sources
   run apt-get update
+  check_downgrade
+}
+
+# Stable mode only: an installed werkterm newer than anything APT offers is a
+# test build. Print the downgrade command, never run it.
+check_downgrade() {
+  ((TEST_CHANNEL)) && return 0
+  if ((DRY_RUN)); then
+    log "[dry-run] Prüfung: installiertes werkterm gegen höchste Version im APT-Repository vergleichen."
+    return 0
+  fi
+  local installed
+  installed="$(dpkg-query -W -f='${db:Status-Status} ${Version}\n' werkterm 2>/dev/null || true)"
+  [[ "$installed" == "installed "* ]] || return 0
+  installed="${installed#installed }"
+
+  # Only entries from the Werklade repository count (madison also lists the dpkg status).
+  local best="" v
+  while IFS= read -r v; do
+    [[ -n "$v" ]] || continue
+    if [[ -z "$best" ]] || dpkg --compare-versions "$v" gt "$best"; then
+      best="$v"
+    fi
+  done < <(apt-cache madison werkterm 2>/dev/null |
+    awk -F'|' '$3 ~ /pkg\.werklade\.de/ { gsub(/[[:space:]]/, "", $2); print $2 }' || true)
+  [[ -n "$best" ]] || return 0
+
+  if dpkg --compare-versions "$installed" gt "$best"; then
+    log "Hinweis: Installiert ist werkterm ${installed}, das stabile Repository bietet höchstens ${best}."
+    if [[ "$best" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      log "Zurück auf die stabile Version mit: sudo apt install werkterm=${best}"
+    else
+      warn "Stabile Version ${best} hat kein erwartetes Format; Downgrade-Befehl nicht ausgegeben."
+    fi
+  fi
 }
 
 do_remove() {
