@@ -3,6 +3,7 @@
 .update-meta, .update-note { color: var(--fg-secondary); overflow-wrap: anywhere; }
 .update-channel { display: inline-block; margin: 0 0 8px; padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--fg-secondary); font-size: 12px; }
 .update-error { color: var(--danger); overflow-wrap: anywhere; }
+.update-warning { padding: 6px 10px; border-left: 3px solid var(--warning); background: var(--warning-bg); border-radius: var(--radius); overflow-wrap: anywhere; }
 .update-dialog h3 { margin: 12px 0 4px; font-size: 14px; }
 .update-notes { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; background: var(--bg-input); border-radius: var(--radius); font-size: 13px; overflow-wrap: anywhere; user-select: text; }
 .update-notes h4, .update-notes h5 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }

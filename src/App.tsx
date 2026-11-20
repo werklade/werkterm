@@ -32,7 +32,7 @@ import { HelpDialog } from "./components/HelpDialog";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { UpdateTransfersDialog } from "./components/UpdateTransfersDialog";
 import { updateCheck, updateInfo, updateInstall } from "./lib/update";
-import { createStartupChecker, isRestartRequired, startCheckEnabled, withStoppedNote, type UpdateProgress } from "./lib/updateState";
+import { createStartupChecker, isRestartRequired, markerVersion, startCheckEnabled, withStoppedNote, type InstallRequest, type UpdateProgress } from "./lib/updateState";
 import { chooseSessionExport } from "./lib/sessionExport";
 import { WerktermImportDialog } from "./components/WerktermImportDialog";
 import { ImportDialog } from "./components/ImportDialog";
@@ -361,10 +361,11 @@ export default function App() {
   const [restartNotInstalled, setRestartNotInstalled] = useState(false);
   const [transfersPrompt, setTransfersPrompt] = useState<{ count: number; answer(accepted: boolean): void } | null>(null);
   // Opt-in start check: decided once, the first time the app is ready. With the setting off update_check is never called.
-  const startupUpdateCheck = useRef(createStartupChecker({ info: updateInfo, check: updateCheck }));
+  // The channel is read when the check runs (after settings_load), not when the checker is created.
+  const [startupUpdateCheck] = useState(() => createStartupChecker({ info: () => updateInfo(settingsRef.current.updateChannel), check: channel => updateCheck(channel) }));
   useEffect(() => {
     if (!dataReady) return;
-    void startupUpdateCheck.current.run(startCheckAllowed.current, true).then(update => { if (update) setUpdateVersion(update.version); });
+    void startupUpdateCheck.run(startCheckAllowed.current, true).then(update => { if (update) setUpdateVersion(update.version); });
   }, [dataReady]);
   const [importSource, setImportSource] = useState<"mobaxterm" | "windterm" | "werkterm" | null>(null);
   const fullscreenPending = useRef(false);
@@ -925,7 +926,7 @@ export default function App() {
   /** Switch from the settings dialog: same prompts as "Beenden", then data_dir_set and restart. Rejects with the error shown in the dialog. */
   const restartWithDataDir = async (path: string | null, copy: boolean) => { await closeRequest.current({ kind: "dataDir", path, copy }); };
   /** Update dialog: same sequence as the folder switch; the install replaces data_dir_set. False when the user declined a prompt. */
-  const installUpdate = (onProgress: (progress: UpdateProgress) => void): Promise<boolean> => closeRequest.current({ kind: "update", install: () => updateInstall(onProgress) });
+  const installUpdate = (request: InstallRequest, onProgress: (progress: UpdateProgress) => void): Promise<boolean> => closeRequest.current({ kind: "update", install: () => updateInstall(request, onProgress) });
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
     <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
@@ -990,7 +991,7 @@ export default function App() {
     {dataPhase === "error" && <DataDirErrorDialog message={dataError} busy={dataErrorBusy} error={dataErrorAction}
       onRetry={() => void runDataErrorAction(async () => { await bootstrapData(); })} onReset={() => void runDataErrorAction(resetPointer)} />}
     {transfersPrompt && <UpdateTransfersDialog count={transfersPrompt.count} onAnswer={transfersPrompt.answer} />}
-    {updateOpen && <UpdateDialog onInstall={installUpdate} onChecked={update => setUpdateVersion(update ? update.version : null)} onClose={() => setUpdateOpen(false)} />}
+    {updateOpen && <UpdateDialog channel={settings.updateChannel} onInstall={installUpdate} onChecked={update => setUpdateVersion(markerVersion(update))} onClose={() => setUpdateOpen(false)} />}
     {restartRequired && <RestartDialog busy={restartBusy} error={restartError} update={restartForUpdate} notInstalled={restartNotInstalled} onRestart={() => void retryRestart()} />}
     {serialPermission && <SerialPermissionDialog key={serialPermission.id} info={serialPermission.info}
       onClose={() => setSerialPermission(null)}
@@ -1001,7 +1002,7 @@ export default function App() {
         serialFixCommands.set(id, { command, resolve, reject });
         openTab("local");
       })} />}
-    {help && <HelpDialog about={help === "about"} onClose={() => setHelp(null)} />}
+    {help && <HelpDialog about={help === "about"} channel={settings.updateChannel} onClose={() => setHelp(null)} />}
     {importSource === "werkterm" && <WerktermImportDialog onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus([tp("app.import.result", result.imported, { skipped: result.skippedDuplicates }), ...(result.warnings ?? []).map(errorText)].join("; ")); }} />}
     {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(tp("app.import.done", result.imported)); }} />}
     {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}

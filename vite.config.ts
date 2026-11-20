@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
@@ -10,7 +11,8 @@ export default defineConfig(() => ({
   plugins: [react()],
   optimizeDeps: { exclude: ["@xterm/xterm"] },
   // German is the language of the existing assertions; tests that need English switch explicitly.
-  test: { setupFiles: ["src/test/setup.ts"] },
+  // Agent worktrees under .claude/ are full repo copies; their tests would run against this checkout.
+  test: { setupFiles: ["src/test/setup.ts"], exclude: [...configDefaults.exclude, ".claude/**"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

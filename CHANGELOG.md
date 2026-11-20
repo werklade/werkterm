@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Settings > Updates > Update channel: Stable or Test, stored per device and not synced (Stable by default). The test channel offers whichever is newer, the latest test build or the latest stable release; if one of the two cannot be read, the other one is used and the update dialog says which one was not checked. Back on Stable, the latest stable release is offered even when an installed test build is newer; installing that downgrade needs an explicit confirmation in the update dialog, which warns that settings only known to the newer version may be lost. The install only proceeds with the exact version the dialog showed. `WERKTERM_UPDATE_CHANNEL=test` or `=stable` still overrides the setting. .deb installs keep getting updates through APT; the settings say so.
+
 ## [1.1.0] – 2026-11-16
 
 ### Fixed

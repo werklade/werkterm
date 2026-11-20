@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   aptCommand, canCloseUpdateDialog, createStartupChecker, describeInstall, formatPubDate, initialUpdateState, installKindLabel, interpretCheck, invalidAnswerMessage,
   normalizeProgress, notesMaxChars, notesMaxLines, progressPercent, progressText, sanitizeNotes, sanitizeVersion, shouldCheckOnStart, updateAction, updateReducer,
-  updateStartNote, restartHints, withStoppedNote, isRestartRequired, restartRequiredMessage, transfersMessage, aptRepoNote, guardLate, startCheckEnabled, type UpdateCheck, type UpdateEvent, type UpdateInfo, type UpdateState,
+  updateStartNote, restartHints, withStoppedNote, isRestartRequired, restartRequiredMessage, transfersMessage, aptRepoNote, guardLate, startCheckEnabled, installRequest, markerVersion, skippedManifest, skippedNote, channelNotes, type UpdateCheck, type UpdateEvent, type UpdateInfo, type UpdateState,
 } from "./updateState";
 import { createMenus } from "./actions";
 import { defaultSettings, normalizeSettings, serializeSettings } from "./settings";
@@ -299,5 +299,80 @@ describe("Help menu", () => {
   });
   it("marks an available update in the entry", () => {
     expect(help("0.4.0")[1].label).toBe("Nach Updates suchen… (Version 0.4.0 verfügbar)");
+  });
+});
+
+describe("downgrade offers", () => {
+  it("carries the downgrade flag only when the backend sets it to true", () => {
+    const outcome = interpretCheck(available({ version: "1.1.0", downgrade: true }));
+    expect(outcome.ok && outcome.update).toMatchObject({ version: "1.1.0", downgrade: true });
+    for (const downgrade of [false, undefined, "true", 1] as unknown[]) {
+      const other = interpretCheck(available({ downgrade: downgrade as boolean }));
+      expect(other.ok && other.update && other.update.downgrade).toBe(false);
+    }
+  });
+  it("installs exactly the shown version and allows a downgrade only for a downgrade offer", () => {
+    const down = interpretCheck(available({ version: "1.1.0", downgrade: true }));
+    const up = interpretCheck(available({ version: "1.3.0" }));
+    if (!down.ok || !down.update || !up.ok || !up.update) throw new Error("offer expected");
+    expect(installRequest("stable", down.update)).toEqual({ channel: "stable", version: "1.1.0", allowDowngrade: true });
+    expect(installRequest("test", up.update)).toEqual({ channel: "test", version: "1.3.0", allowDowngrade: false });
+  });
+  it("puts no update marker in the status bar for a downgrade", () => {
+    const down = interpretCheck(available({ version: "1.1.0", downgrade: true }));
+    const up = interpretCheck(available({ version: "1.3.0" }));
+    expect(markerVersion(down.ok ? down.update : null)).toBeNull();
+    expect(markerVersion(up.ok ? up.update : null)).toBe("1.3.0");
+    expect(markerVersion(null)).toBeNull();
+  });
+  it("the start check ignores a downgrade offer", async () => {
+    const checker = createStartupChecker({ info: async () => info(), check: async () => available({ version: "1.1.0", downgrade: true }) });
+    expect(await checker.run(true, true)).toBeNull();
+  });
+});
+
+describe("partial check on the test channel", () => {
+  it("keeps a skipped manifest only with a known name and an error code", () => {
+    expect(skippedManifest(available({ skippedManifest: "test", partialError: "UPDATE_TIMEOUT" }))).toEqual({ manifest: "test", code: "UPDATE_TIMEOUT" });
+    expect(skippedManifest(available({ skippedManifest: "stable", partialError: "UPDATE_NO_PACKAGE" }))).toEqual({ manifest: "stable", code: "UPDATE_NO_PACKAGE" });
+    expect(skippedManifest(available())).toBeNull();
+    expect(skippedManifest(available({ skippedManifest: "beta" as "test", partialError: "UPDATE_TIMEOUT" }))).toBeNull();
+    expect(skippedManifest(available({ skippedManifest: "test", partialError: "<b>kaputt</b>" }))).toBeNull();
+    expect(skippedManifest(available({ skippedManifest: "test" }))).toBeNull();
+  });
+  it("carries the hint into the offer and into the up-to-date state", () => {
+    const offerState = updateReducer({ phase: "checking", info: info({ channel: "test" }) }, { type: "checked", check: available({ skippedManifest: "test", partialError: "UPDATE_TIMEOUT" }) });
+    expect(offerState.phase === "available" && offerState.update.skipped).toEqual({ manifest: "test", code: "UPDATE_TIMEOUT" });
+    const current = updateReducer({ phase: "checking", info: info({ channel: "test" }) }, { type: "checked", check: { available: false, version: "0.3.0", notes: null, pubDate: null, skippedManifest: "stable", partialError: "UPDATE_UNREACHABLE" } });
+    expect(current).toMatchObject({ phase: "current", skipped: { manifest: "stable", code: "UPDATE_UNREACHABLE" } });
+    const plain = updateReducer({ phase: "checking", info: info() }, { type: "checked", check: { available: false, version: null, notes: null, pubDate: null } });
+    expect(plain.phase === "current" && plain.skipped).toBeNull();
+  });
+  it("names which manifest was not checked", () => {
+    expect(skippedNote({ manifest: "test", code: "UPDATE_TIMEOUT" })).toBe("Testkanal nicht erreichbar, nur Stable geprüft.");
+    expect(skippedNote({ manifest: "stable", code: "UPDATE_TIMEOUT" })).toBe("Stable nicht erreichbar, nur Testkanal geprüft.");
+  });
+  it("the start check asks for the effective channel reported by update_info", async () => {
+    const check = vi.fn(async () => available());
+    await createStartupChecker({ info: async () => info({ channel: "test", channelFromEnv: true }), check }).run(true, true);
+    expect(check).toHaveBeenCalledWith("test");
+  });
+});
+
+describe("channel notes in the settings", () => {
+  const notes = (over: Partial<UpdateInfo>) => channelNotes(info(over));
+  it("says that installs without self-update only report, for every such kind", () => {
+    for (const installKind of ["deb", "rpm", "other"] as const) expect(notes({ installKind, selfUpdate: false })).toContain("Diese Installation aktualisiert sich nicht selbst. Der Kanal bestimmt nur, welche Version gemeldet wird.");
+  });
+  it("mentions the APT test suite only for deb", () => {
+    const apt = "DEB-Paket: Testversionen folgen über eine eigene APT-Suite.";
+    expect(notes({ installKind: "deb", selfUpdate: false })).toContain(apt);
+    expect(notes({ installKind: "rpm", selfUpdate: false })).not.toContain(apt);
+    expect(notes({ installKind: "other", selfUpdate: false })).not.toContain(apt);
+  });
+  it("has no notes for self-updating installs and names the environment override", () => {
+    for (const installKind of ["appimage", "nsis", "msi"] as const) expect(notes({ installKind, selfUpdate: true })).toEqual([]);
+    expect(notes({ channel: "test", channelFromEnv: true })).toEqual(["Die Umgebungsvariable WERKTERM_UPDATE_CHANNEL legt den Kanal fest (Test); diese Einstellung gilt dann nicht."]);
+    expect(channelNotes(null)).toEqual([]);
   });
 });

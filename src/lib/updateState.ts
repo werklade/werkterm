@@ -5,15 +5,31 @@ import { currentLocale, t, tp } from "../i18n";
 
 export type InstallKind = "appimage" | "deb" | "rpm" | "nsis" | "msi" | "other";
 export interface UpdateInfo {
-  currentVersion: string; installKind: InstallKind; selfUpdate: boolean; channel: "stable" | "test"; configured: boolean;
+  currentVersion: string; installKind: InstallKind; selfUpdate: boolean; channel: "stable" | "test";
+  /** true: WERKTERM_UPDATE_CHANNEL chose the channel and the setting has no effect. Missing in older backends. */
+  channelFromEnv?: boolean;
+  configured: boolean;
   /** false although selfUpdate: the install cannot run here (e.g. AppImage folder not writable); blockedReason says why. */
   canInstall: boolean; blockedReason: string | null;
 }
 /** Raw answer of update_check; every text field comes from the server and is untrusted. */
-export interface UpdateCheck { available: boolean; version: string | null; notes: string | null; pubDate: string | null }
+export interface UpdateCheck {
+  available: boolean; version: string | null; notes: string | null; pubDate: string | null;
+  /** The offered version is older than the installed one (stable channel while a test build is installed). */
+  downgrade?: boolean;
+  /** Test channel: manifest that could not be read while the other one was used, and its error code. */
+  skippedManifest?: "test" | "stable"; partialError?: string;
+}
+/** A manifest that was not checked; the result is based on the other one only. */
+export interface SkippedManifest { manifest: "test" | "stable"; code: string }
 export interface UpdateProgress { downloaded: number; total: number | null }
 /** An update announcement after sanitizing; safe to render as plain text. */
-export interface AvailableUpdate { version: string; notes: string; notesTruncated: boolean; pubDate: string | null }
+export interface AvailableUpdate { version: string; notes: string; notesTruncated: boolean; pubDate: string | null; downgrade: boolean; skipped: SkippedManifest | null }
+/** What update_install gets: the version the user saw and whether they confirmed it as a downgrade. */
+export interface InstallRequest { channel: "stable" | "test"; version: string; allowDowngrade: boolean }
+/** The install request for an offer the user accepted; a downgrade offer is only installed through its own confirm button. */
+export const installRequest = (channel: "stable" | "test", update: AvailableUpdate): InstallRequest =>
+  ({ channel, version: update.version, allowDowngrade: update.downgrade });
 
 export const updateDownloadUrl = "https://pkg.werklade.de/werkterm/";
 export const aptCommand = "sudo apt update && sudo apt install --only-upgrade werkterm";
@@ -100,6 +116,28 @@ export function sanitizeVersion(raw: string | null | undefined): string | null {
 }
 
 export const invalidAnswerMessage = (): string => t("update.invalidAnswer");
+const errorCodePattern = /^[A-Z][A-Z0-9_]{1,63}$/;
+/** Only a known manifest name with an error code counts; anything else from the backend is dropped. */
+export function skippedManifest(check: UpdateCheck | null | undefined): SkippedManifest | null {
+  if (!check || typeof check !== "object") return null;
+  const { skippedManifest: manifest, partialError: code } = check;
+  if ((manifest !== "test" && manifest !== "stable") || typeof code !== "string" || !errorCodePattern.test(code)) return null;
+  return { manifest, code };
+}
+/** "Testkanal nicht erreichbar, nur Stable geprüft." – the reason is added by the view. */
+export const skippedNote = (skipped: SkippedManifest): string => t(skipped.manifest === "test" ? "update.skipped.test" : "update.skipped.stable");
+/**
+ * Notes under the channel setting: the environment variable overrides it; installs that do not update themselves
+ * only report versions (deb additionally waits for the APT test suite, #15).
+ */
+export function channelNotes(info: Pick<UpdateInfo, "channel" | "channelFromEnv" | "selfUpdate" | "installKind"> | null): string[] {
+  if (!info) return [];
+  const notes: string[] = [];
+  if (info.channelFromEnv) notes.push(t("settings.updates.channel.env", { channel: t(info.channel === "test" ? "settings.updates.channel.test" : "settings.updates.channel.stable") }));
+  if (!info.selfUpdate) notes.push(t("settings.updates.channel.noSelfUpdate"));
+  if (info.installKind === "deb") notes.push(t("settings.updates.channel.deb"));
+  return notes;
+}
 export type CheckOutcome = { ok: true; update: AvailableUpdate | null } | { ok: false; message: string };
 /** available=false -> up to date. available=true needs a usable version, otherwise the answer is rejected. */
 export function interpretCheck(check: UpdateCheck): CheckOutcome {
@@ -108,7 +146,7 @@ export function interpretCheck(check: UpdateCheck): CheckOutcome {
   const version = sanitizeVersion(check.version);
   if (!version) return { ok: false, message: invalidAnswerMessage() };
   const notes = sanitizeNotes(check.notes);
-  return { ok: true, update: { version, notes: notes.text, notesTruncated: notes.truncated, pubDate: typeof check.pubDate === "string" ? check.pubDate : null } };
+  return { ok: true, update: { version, notes: notes.text, notesTruncated: notes.truncated, pubDate: typeof check.pubDate === "string" ? check.pubDate : null, downgrade: check.downgrade === true, skipped: skippedManifest(check) } };
 }
 
 /** Local date in the UI language (dd.mm.yyyy in German); null for missing or unparsable input. */
@@ -142,7 +180,8 @@ export type UpdateState =
   | { phase: "loading" }
   | { phase: "notConfigured"; info: UpdateInfo }
   | { phase: "checking"; info: UpdateInfo }
-  | { phase: "current"; info: UpdateInfo }
+  /** skipped: the result rests on one manifest only (test channel, the other one failed). */
+  | { phase: "current"; info: UpdateInfo; skipped?: SkippedManifest | null }
   | { phase: "available"; info: UpdateInfo; update: AvailableUpdate }
   | { phase: "installing"; info: UpdateInfo; update: AvailableUpdate; progress: UpdateProgress }
   | { phase: "restarting"; info: UpdateInfo; update: AvailableUpdate }
@@ -169,7 +208,7 @@ export function updateReducer(state: UpdateState, event: UpdateEvent): UpdateSta
       if (state.phase !== "checking") return state;
       const outcome = interpretCheck(event.check);
       if (!outcome.ok) return { phase: "error", info: state.info, update: null, message: outcome.message, retry: "check" };
-      return outcome.update ? { phase: "available", info: state.info, update: outcome.update } : { phase: "current", info: state.info };
+      return outcome.update ? { phase: "available", info: state.info, update: outcome.update } : { phase: "current", info: state.info, skipped: skippedManifest(event.check) };
     }
     case "install":
       if (state.phase !== "available" || updateAction(state.info) !== "install") return state;
@@ -201,11 +240,15 @@ export function shouldCheckOnStart(input: { enabled: boolean; dataReady: boolean
   return input.enabled && input.dataReady && !input.alreadyDecided;
 }
 
-export interface StartupDeps { info(): Promise<UpdateInfo>; check(): Promise<UpdateCheck> }
+/** check gets the effective channel reported by info (environment variable or setting). */
+export interface StartupDeps { info(): Promise<UpdateInfo>; check(channel: UpdateInfo["channel"]): Promise<UpdateCheck> }
+/** Version for the status bar marker; a downgrade is not an update and gets no marker. */
+export const markerVersion = (update: AvailableUpdate | null): string | null => update && !update.downgrade ? update.version : null;
+
 /**
  * Start check, at most once per program run. The decision is made the first time the app is ready: a setting
  * switched on later does not trigger a check before the next start. Errors are discarded; the result is only
- * the version of an available update.
+ * the version of an available update; a downgrade offer (back to stable) is only shown in the update dialog.
  */
 export function createStartupChecker(deps: StartupDeps) {
   let decided = false;
@@ -218,8 +261,8 @@ export function createStartupChecker(deps: StartupDeps) {
       try {
         const info = await deps.info();
         if (!info.configured) return null;
-        const outcome = interpretCheck(await deps.check());
-        return outcome.ok ? outcome.update : null;
+        const outcome = interpretCheck(await deps.check(info.channel));
+        return outcome.ok && outcome.update && !outcome.update.downgrade ? outcome.update : null;
       } catch { return null; }
     },
   };

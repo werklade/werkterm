@@ -3,15 +3,18 @@ import { errorText } from "../lib/backendError";
 import { writeClipboardText } from "../lib/clipboard";
 import { t } from "../i18n";
 import { updateCheck, updateInfo } from "../lib/update";
-import { guardLate, initialUpdateState, interpretCheck, updateReducer, type AvailableUpdate, type UpdateCheck, type UpdateProgress } from "../lib/updateState";
+import { guardLate, initialUpdateState, installRequest, interpretCheck, updateReducer, type AvailableUpdate, type InstallRequest, type UpdateCheck, type UpdateProgress } from "../lib/updateState";
+import type { UpdateChannelSetting } from "../lib/settings";
 import { UpdateDialogView } from "./UpdateDialogView";
 
 export interface UpdateDialogProps {
+  /** Per-device channel setting; the backend lets WERKTERM_UPDATE_CHANNEL override it. */
+  channel: UpdateChannelSetting;
   /**
    * Runs the whole install: confirmations (SSH, editors), preparation, download with progress, restart.
    * Resolves true when it ran through, false when the user declined a confirmation; rejects with the message to show.
    */
-  onInstall(onProgress: (progress: UpdateProgress) => void): Promise<boolean>;
+  onInstall(request: InstallRequest, onProgress: (progress: UpdateProgress) => void): Promise<boolean>;
   /** Result of a completed check (not called on errors); null = up to date. */
   onChecked?(update: AvailableUpdate | null): void;
   onClose(): void;
@@ -24,7 +27,7 @@ const message = (reason: unknown): string => errorText(reason);
  * network call). The phase transitions are in updateReducer; this component only starts the call that belongs to
  * a phase, once per entry into the phase.
  */
-export function UpdateDialog({ onInstall, onChecked, onClose }: UpdateDialogProps) {
+export function UpdateDialog({ channel, onInstall, onChecked, onClose }: UpdateDialogProps) {
   const [state, dispatch] = useReducer(updateReducer, initialUpdateState);
   const [copyNote, setCopyNote] = useState("");
   const [copyFailed, setCopyFailed] = useState(false);
@@ -37,15 +40,17 @@ export function UpdateDialog({ onInstall, onChecked, onClose }: UpdateDialogProp
     if (entered.current === state.phase) return; // StrictMode probe and progress updates do not start a second call
     entered.current = state.phase;
     if (state.phase === "loading") {
-      updateInfo().then(info => dispatch({ type: "info", info })).catch((reason: unknown) => dispatch({ type: "failed", message: message(reason) }));
+      updateInfo(channel).then(info => dispatch({ type: "info", info })).catch((reason: unknown) => dispatch({ type: "failed", message: message(reason) }));
     } else if (state.phase === "checking") {
-      updateCheck().then(late((check: UpdateCheck) => {
+      // The effective channel from update_info (environment variable or setting), the same one the install uses.
+      updateCheck(state.info.channel).then(late((check: UpdateCheck) => {
         const outcome = interpretCheck(check);
         if (outcome.ok) onChecked?.(outcome.update);
         dispatch({ type: "checked", check });
       })).catch((reason: unknown) => dispatch({ type: "failed", message: message(reason) }));
     } else if (state.phase === "installing") {
-      onInstall(progress => dispatch({ type: "progress", progress }))
+      // Exactly the version that was shown; the backend refuses when it now finds another one.
+      onInstall(installRequest(state.info.channel, state.update), progress => dispatch({ type: "progress", progress }))
         .then(done => dispatch({ type: done ? "installed" : "declined" }))
         .catch((reason: unknown) => dispatch({ type: "failed", message: message(reason) }));
     }

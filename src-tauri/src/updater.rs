@@ -4,6 +4,11 @@
 //! action in the frontend. `update_info` and plugin registration stay offline.
 //! Self-update is limited to AppImage, NSIS and MSI; .deb/.rpm installs are updated by the
 //! package manager (APT repository), so they only get the version information.
+//!
+//! Channel: WERKTERM_UPDATE_CHANNEL ("test"/"stable") wins over the per-device setting the
+//! frontend passes in. The test channel reads the test and the stable manifest and offers the
+//! newer release; the stable channel offers the stable release, also as a downgrade from a test
+//! build (only with the user's confirmation in update_install).
 
 use crate::ui_error::ui_code;
 use serde::Serialize;
@@ -38,6 +43,10 @@ const MSG_NO_PACKAGE: &str = ui_code("UPDATE_NO_PACKAGE");
 const MSG_INSTALL: &str = ui_code("UPDATE_INSTALL_FAILED");
 const MSG_INVALID_DATA: &str = ui_code("UPDATE_INVALID_DATA");
 const MSG_NOT_WRITABLE: &str = ui_code("UPDATE_NOT_WRITABLE");
+/// The offer found by the install differs from the one the user saw (other version).
+const MSG_CHANGED: &str = ui_code("UPDATE_CHANGED");
+/// A downgrade reached update_install without the user's confirmation.
+const MSG_DOWNGRADE_UNCONFIRMED: &str = ui_code("UPDATE_DOWNGRADE_UNCONFIRMED");
 /// Exact error string: the shutdown hook already ran, so the frontend must force a restart.
 pub const RESTART_REQUIRED: &str = ui_code("UPDATE_RESTART_REQUIRED");
 /// The only host packages may be downloaded from.
@@ -99,16 +108,41 @@ pub enum UpdateChannel {
 }
 
 impl UpdateChannel {
-    /// `WERKTERM_UPDATE_CHANNEL=test` selects the test channel; anything else is stable.
-    pub fn from_env_value(value: Option<&str>) -> Self {
-        match value {
-            Some(v) if v.trim().eq_ignore_ascii_case("test") => Self::Test,
-            _ => Self::Stable,
+    /// "test" or "stable" (trimmed, any case); anything else is no channel.
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("test") {
+            Some(Self::Test)
+        } else if value.eq_ignore_ascii_case("stable") {
+            Some(Self::Stable)
+        } else {
+            None
         }
     }
 
-    pub fn current() -> Self {
-        Self::from_env_value(std::env::var(CHANNEL_ENV).ok().as_deref())
+    /// The environment variable wins when it names a channel ("test" or "stable"); otherwise the
+    /// per-device setting from the frontend; otherwise stable. The flag tells whether the
+    /// environment decided.
+    pub fn resolve(env: Option<&str>, setting: Option<&str>) -> (Self, bool) {
+        if let Some(channel) = env.and_then(Self::parse) {
+            return (channel, true);
+        }
+        (setting.and_then(Self::parse).unwrap_or(Self::Stable), false)
+    }
+
+    /// Effective channel for this process and the given setting.
+    pub fn current(setting: Option<&str>) -> (Self, bool) {
+        Self::resolve(std::env::var(CHANNEL_ENV).ok().as_deref(), setting)
+    }
+
+    /// Manifests that are fetched for this channel, in order of preference on equal versions.
+    /// The test channel also reads the stable manifest, so a stable release newer than the
+    /// last test build is offered there too.
+    pub fn manifests(self) -> &'static [UpdateChannel] {
+        match self {
+            Self::Stable => &[Self::Stable],
+            Self::Test => &[Self::Test, Self::Stable],
+        }
     }
 
     pub fn as_str(self) -> &'static str {
@@ -338,15 +372,105 @@ fn current_block(app: &AppHandle, kind: InstallKind) -> Option<&'static str> {
     install_block(kind, appimage_ok)
 }
 
+/// Direction of an offered release relative to the installed version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Direction {
+    Upgrade,
+    /// Only on the stable channel: the installed (test) build is newer than the stable release.
+    Downgrade,
+}
+
+/// Whether `release` is offered on `channel`. Newer is always an update; older only on the
+/// stable channel (back from a test build) and only where the app installs itself; equal is
+/// never offered.
+fn offer<V: Ord>(
+    channel: UpdateChannel,
+    self_update: bool,
+    current: &V,
+    release: &V,
+) -> Option<Direction> {
+    match release.cmp(current) {
+        std::cmp::Ordering::Greater => Some(Direction::Upgrade),
+        std::cmp::Ordering::Less if channel == UpdateChannel::Stable && self_update => {
+            Some(Direction::Downgrade)
+        }
+        _ => None,
+    }
+}
+
+/// A manifest that could not be read while another one could; shown as a hint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Skipped {
+    manifest: UpdateChannel,
+    error: String,
+}
+
+/// Picks the newest of the fetched manifests (first one wins on equal versions). Manifests
+/// that failed are skipped and the first such failure is returned alongside; when all failed,
+/// the first error is returned.
+fn newest<T, V: Ord>(
+    results: Vec<(UpdateChannel, Result<T, String>)>,
+    version: impl Fn(&T) -> &V,
+) -> Result<(T, Option<Skipped>), String> {
+    let mut best: Option<T> = None;
+    let mut skipped: Option<Skipped> = None;
+    for (manifest, result) in results {
+        match result {
+            Ok(found) => {
+                if best
+                    .as_ref()
+                    .is_none_or(|current| version(&found) > version(current))
+                {
+                    best = Some(found);
+                }
+            }
+            Err(error) => {
+                skipped.get_or_insert(Skipped { manifest, error });
+            }
+        }
+    }
+    match best {
+        Some(found) => Ok((found, skipped)),
+        None => Err(skipped.map_or_else(|| MSG_INVALID_DATA.to_owned(), |s| s.error)),
+    }
+}
+
+/// Error of update_install when the offer cannot be confirmed: if the version changed while a
+/// manifest failed in this run, that failure is the likely reason and is reported instead.
+fn install_refusal(refusal: &'static str, skipped: Option<&Skipped>) -> String {
+    match skipped {
+        Some(skipped) if refusal == MSG_CHANGED => skipped.error.clone(),
+        _ => refusal.to_owned(),
+    }
+}
+
+/// The install must act on exactly what the check showed: same version, and a downgrade only
+/// after the user confirmed it.
+fn confirm_offer(
+    direction: Option<Direction>,
+    found_version: &str,
+    expected_version: &str,
+    allow_downgrade: bool,
+) -> Result<(), &'static str> {
+    let direction = direction.ok_or(MSG_NONE)?;
+    if found_version != expected_version.trim() {
+        return Err(MSG_CHANGED);
+    }
+    if direction == Direction::Downgrade && !allow_downgrade {
+        return Err(MSG_DOWNGRADE_UNCONFIRMED);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Announced {
     version: String,
     notes: Option<String>,
     pub_date: Option<String>,
-    newer: bool,
+    direction: Option<Direction>,
 }
 
-fn announced(release: &RemoteRelease, newer: bool) -> Announced {
+fn announced(release: &RemoteRelease, direction: Option<Direction>) -> Announced {
     Announced {
         version: release.version.to_string(),
         notes: limit_notes(release.notes.clone()),
@@ -354,18 +478,33 @@ fn announced(release: &RemoteRelease, newer: bool) -> Announced {
             date.format(&time::format_description::well_known::Rfc3339)
                 .ok()
         }),
-        newer,
+        direction,
     }
 }
 
-type Seen = Arc<Mutex<Option<Announced>>>;
+type Seen = Arc<Mutex<Option<RemoteRelease>>>;
+
+/// What one manifest announced, plus the installable update when its version differs from the
+/// installed one and the manifest has a package for this install kind.
+struct Fetched {
+    release: RemoteRelease,
+    update: Option<tauri_plugin_updater::Update>,
+}
+
+/// The release chosen across the channel's manifests, with the decision shown to the user.
+struct Selection {
+    fetched: Fetched,
+    direction: Option<Direction>,
+    skipped: Option<Skipped>,
+}
 
 fn build_updater(
     app: &AppHandle,
     kind: InstallKind,
+    manifest: UpdateChannel,
     seen: Seen,
 ) -> Result<tauri_plugin_updater::Updater, String> {
-    let endpoint: Url = UpdateChannel::current()
+    let endpoint: Url = manifest
         .endpoint()
         .parse()
         .map_err(|_| ui_code("UPDATE_BAD_URL").to_owned())?;
@@ -376,13 +515,15 @@ fn build_updater(
         .timeout(CHECK_TIMEOUT)
         .configure_client(client_policy)
         // Records what the server announced, so deb/rpm/other can report a newer version
-        // even when the manifest has no package for them.
+        // even when the manifest has no package for them. Every version other than the
+        // installed one yields an Update; whether it is offered (newer, or a downgrade on the
+        // stable channel) is decided afterwards by `offer`, the same way for check and install.
         .version_comparator(move |current, release| {
-            let newer = release.version > current;
+            let differs = release.version != current;
             if let Ok(mut slot) = seen.lock() {
-                *slot = Some(announced(&release, newer));
+                *slot = Some(release);
             }
-            newer
+            differs
         });
     if let Some(target) = target_key(kind, std::env::consts::OS, std::env::consts::ARCH) {
         builder = builder.target(target);
@@ -399,6 +540,61 @@ fn build_updater(
         });
     }
     builder.build().map_err(|e| message(&e))
+}
+
+/// Fetches one manifest. A missing package entry only counts as an error where the app
+/// installs itself; deb/rpm/other just need the announced version.
+async fn fetch(
+    app: &AppHandle,
+    kind: InstallKind,
+    manifest: UpdateChannel,
+) -> Result<Fetched, String> {
+    let seen: Seen = Arc::default();
+    let updater = build_updater(app, kind, manifest, seen.clone())?;
+    let result = updater.check().await;
+    let release = seen.lock().ok().and_then(|mut slot| slot.take());
+    match (result, release) {
+        (Ok(update), Some(release)) => Ok(Fetched { release, update }),
+        (
+            Err(UpdaterError::TargetNotFound(_) | UpdaterError::TargetsNotFound(_)),
+            Some(release),
+        ) if !kind.self_update() => Ok(Fetched {
+            release,
+            update: None,
+        }),
+        (Err(error), _) => Err(message(&error)),
+        (Ok(_), None) => Err(MSG_INVALID_DATA.to_owned()),
+    }
+}
+
+/// Fetches the manifests of `channel` (both at once on the test channel) and decides what is
+/// offered. update_check and update_install both go through here, so they decide alike.
+async fn select(
+    app: &AppHandle,
+    kind: InstallKind,
+    channel: UpdateChannel,
+) -> Result<Selection, String> {
+    let results = match channel.manifests() {
+        [only] => vec![(*only, fetch(app, kind, *only).await)],
+        [first, second] => {
+            let (a, b) = tokio::join!(fetch(app, kind, *first), fetch(app, kind, *second));
+            vec![(*first, a), (*second, b)]
+        }
+        _ => return Err(MSG_INVALID_DATA.to_owned()),
+    };
+    let (fetched, skipped) = newest(results, |found: &Fetched| &found.release.version)?;
+    let current = &app.package_info().version;
+    let direction = offer(
+        channel,
+        kind.self_update(),
+        current,
+        &fetched.release.version,
+    );
+    Ok(Selection {
+        fetched,
+        direction,
+        skipped,
+    })
 }
 
 fn require_key(app: &AppHandle) -> Result<(), String> {
@@ -433,7 +629,10 @@ pub struct UpdateInfo {
     current_version: String,
     install_kind: &'static str,
     self_update: bool,
+    /// Effective channel: the environment variable, else the setting passed in, else stable.
     channel: &'static str,
+    /// True when WERKTERM_UPDATE_CHANNEL decided the channel (the setting is ignored then).
+    channel_from_env: bool,
     configured: bool,
     can_install: bool,
     blocked_reason: Option<&'static str>,
@@ -446,26 +645,36 @@ pub struct CheckResult {
     version: Option<String>,
     notes: Option<String>,
     pub_date: Option<String>,
+    /// The offered version is older than the installed one (stable channel, from a test build).
+    downgrade: bool,
+    /// Manifest ("test" or "stable") that could not be read while the other one was used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skipped_manifest: Option<&'static str>,
+    /// Error code of that manifest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    partial_error: Option<String>,
 }
 
 impl CheckResult {
-    fn none() -> Self {
-        Self {
-            available: false,
-            version: None,
-            notes: None,
-            pub_date: None,
+    fn with_skipped(mut self, skipped: Option<Skipped>) -> Self {
+        if let Some(skipped) = skipped {
+            self.skipped_manifest = Some(skipped.manifest.as_str());
+            self.partial_error = Some(skipped.error);
         }
+        self
     }
 }
 
 impl From<Announced> for CheckResult {
     fn from(seen: Announced) -> Self {
         Self {
-            available: seen.newer,
+            available: seen.direction.is_some(),
             version: Some(seen.version),
             notes: seen.notes,
             pub_date: seen.pub_date,
+            downgrade: seen.direction == Some(Direction::Downgrade),
+            skipped_manifest: None,
+            partial_error: None,
         }
     }
 }
@@ -478,52 +687,49 @@ pub enum InstallEvent {
 }
 
 /// Offline: version, install kind, channel and whether this build carries an update key.
+/// `channel` is the per-device setting of the frontend ("stable" or "test").
 #[tauri::command]
-pub fn update_info(app: AppHandle) -> UpdateInfo {
+pub fn update_info(app: AppHandle, channel: Option<String>) -> UpdateInfo {
     let kind = InstallKind::current();
     let blocked = current_block(&app, kind);
+    let (channel, channel_from_env) = UpdateChannel::current(channel.as_deref());
     UpdateInfo {
         current_version: app.package_info().version.to_string(),
         install_kind: kind.as_str(),
         self_update: kind.self_update(),
-        channel: UpdateChannel::current().as_str(),
+        channel: channel.as_str(),
+        channel_from_env,
         configured: pubkey_configured(&configured_pubkey(&app)),
         can_install: blocked.is_none(),
         blocked_reason: blocked,
     }
 }
 
-/// Fetches the manifest of the selected channel. Never downloads a package.
+/// Fetches the manifest(s) of the effective channel. Never downloads a package.
 #[tauri::command]
-pub async fn update_check(app: AppHandle) -> Result<CheckResult, String> {
+pub async fn update_check(app: AppHandle, channel: Option<String>) -> Result<CheckResult, String> {
     require_key(&app)?;
     let kind = InstallKind::current();
-    let seen: Seen = Arc::default();
-    let updater = build_updater(&app, kind, seen.clone())?;
-    let result = updater.check().await;
-    let seen = seen.lock().ok().and_then(|mut slot| slot.take());
-    match result {
-        Ok(_) => Ok(seen
-            .map(CheckResult::from)
-            .unwrap_or_else(CheckResult::none)),
-        // deb/rpm/other only need the version; a missing package entry does not matter.
-        Err(UpdaterError::TargetNotFound(_) | UpdaterError::TargetsNotFound(_))
-            if !kind.self_update() =>
-        {
-            Ok(seen
-                .map(CheckResult::from)
-                .unwrap_or_else(CheckResult::none))
-        }
-        Err(error) => Err(message(&error)),
-    }
+    let (channel, _) = UpdateChannel::current(channel.as_deref());
+    let selection = select(&app, kind, channel).await?;
+    Ok(
+        CheckResult::from(announced(&selection.fetched.release, selection.direction))
+            .with_skipped(selection.skipped),
+    )
 }
 
 /// Downloads, verifies and installs the update for AppImage/NSIS/MSI. Does not restart:
 /// on Linux the frontend calls `app_restart` afterwards; on Windows the installer ends this
 /// process and starts the new version itself, so this command never returns there on success.
+///
+/// `version` is the version the check showed; the install repeats the same selection and stops
+/// when it now finds another one. A downgrade needs `allow_downgrade` (the user confirmed it).
 #[tauri::command]
 pub async fn update_install(
     app: AppHandle,
+    channel: Option<String>,
+    version: String,
+    allow_downgrade: bool,
     on_progress: Channel<InstallEvent>,
 ) -> Result<(), String> {
     let kind = InstallKind::current();
@@ -533,11 +739,18 @@ pub async fn update_install(
     }
     require_key(&app)?;
     let _guard = RunGuard::acquire().ok_or_else(|| MSG_RUNNING.to_owned())?;
-    let updater = build_updater(&app, kind, Arc::default())?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| message(&e))?
+    let (channel, _) = UpdateChannel::current(channel.as_deref());
+    let selection = select(&app, kind, channel).await?;
+    confirm_offer(
+        selection.direction,
+        &selection.fetched.release.version.to_string(),
+        &version,
+        allow_downgrade,
+    )
+    .map_err(|refusal| install_refusal(refusal, selection.skipped.as_ref()))?;
+    let update = selection
+        .fetched
+        .update
         .ok_or_else(|| MSG_NONE.to_owned())?;
     if !package_url_allowed(&update.download_url, kind) {
         return Err(MSG_INVALID_DATA.to_owned());
@@ -608,27 +821,17 @@ mod tests {
 
     #[test]
     fn selects_channel_only_for_test() {
-        assert_eq!(UpdateChannel::from_env_value(None), UpdateChannel::Stable);
+        // Without a setting, only the environment variable decides.
+        let env_only = |value| UpdateChannel::resolve(value, None).0;
+        assert_eq!(env_only(None), UpdateChannel::Stable);
+        assert_eq!(env_only(Some("")), UpdateChannel::Stable);
+        assert_eq!(env_only(Some("beta")), UpdateChannel::Stable);
         assert_eq!(
-            UpdateChannel::from_env_value(Some("")),
+            env_only(Some("https://example.org/x.json")),
             UpdateChannel::Stable
         );
-        assert_eq!(
-            UpdateChannel::from_env_value(Some("beta")),
-            UpdateChannel::Stable
-        );
-        assert_eq!(
-            UpdateChannel::from_env_value(Some("https://example.org/x.json")),
-            UpdateChannel::Stable
-        );
-        assert_eq!(
-            UpdateChannel::from_env_value(Some("test")),
-            UpdateChannel::Test
-        );
-        assert_eq!(
-            UpdateChannel::from_env_value(Some(" TEST ")),
-            UpdateChannel::Test
-        );
+        assert_eq!(env_only(Some("test")), UpdateChannel::Test);
+        assert_eq!(env_only(Some(" TEST ")), UpdateChannel::Test);
         assert_eq!(UpdateChannel::Stable.endpoint(), STABLE_ENDPOINT);
         assert_eq!(UpdateChannel::Test.endpoint(), TEST_ENDPOINT);
         assert_eq!(UpdateChannel::Test.as_str(), "test");
@@ -742,17 +945,229 @@ mod tests {
             version: "0.2.0".into(),
             notes: Some("Neu".into()),
             pub_date: Some("2026-11-13T10:00:00Z".into()),
-            newer: true,
+            direction: Some(Direction::Upgrade),
         };
         let result = CheckResult::from(seen.clone());
         assert!(result.available);
+        assert!(!result.downgrade);
         assert_eq!(result.version.as_deref(), Some("0.2.0"));
         let older = CheckResult::from(Announced {
-            newer: false,
-            ..seen
+            direction: None,
+            ..seen.clone()
         });
         assert!(!older.available);
-        assert_eq!(CheckResult::none().version, None);
+        assert!(!older.downgrade);
+        let downgrade = CheckResult::from(Announced {
+            direction: Some(Direction::Downgrade),
+            ..seen
+        });
+        assert!(downgrade.available);
+        assert!(downgrade.downgrade);
+    }
+
+    #[test]
+    fn env_channel_wins_over_the_setting() {
+        let resolve = UpdateChannel::resolve;
+        assert_eq!(resolve(None, None), (UpdateChannel::Stable, false));
+        assert_eq!(resolve(None, Some("test")), (UpdateChannel::Test, false));
+        assert_eq!(
+            resolve(None, Some("stable")),
+            (UpdateChannel::Stable, false)
+        );
+        assert_eq!(resolve(None, Some("beta")), (UpdateChannel::Stable, false));
+        assert_eq!(
+            resolve(Some("test"), Some("stable")),
+            (UpdateChannel::Test, true)
+        );
+        assert_eq!(
+            resolve(Some(" Stable "), Some("test")),
+            (UpdateChannel::Stable, true)
+        );
+        // Unknown or empty env values do not override the setting.
+        assert_eq!(
+            resolve(Some(""), Some("test")),
+            (UpdateChannel::Test, false)
+        );
+        assert_eq!(
+            resolve(Some("beta"), Some("test")),
+            (UpdateChannel::Test, false)
+        );
+        assert_eq!(UpdateChannel::parse("TEST"), Some(UpdateChannel::Test));
+        assert_eq!(UpdateChannel::parse("https://example.org/x.json"), None);
+        assert_eq!(UpdateChannel::Stable.manifests(), &[UpdateChannel::Stable]);
+        assert_eq!(
+            UpdateChannel::Test.manifests(),
+            &[UpdateChannel::Test, UpdateChannel::Stable]
+        );
+    }
+
+    #[test]
+    fn test_channel_offers_the_newer_of_test_and_stable() {
+        fn version<'a>(found: &'a (&'static str, u32)) -> &'a u32 {
+            &found.1
+        }
+        use UpdateChannel::{Stable, Test};
+        let pick = |results: Vec<Result<(&'static str, u32), String>>| {
+            let tagged = [Test, Stable].into_iter().zip(results).collect();
+            newest(tagged, version).map(|(found, _)| found)
+        };
+        // Test build newer than stable.
+        assert_eq!(
+            pick(vec![Ok(("test", 12)), Ok(("stable", 11))]),
+            Ok(("test", 12))
+        );
+        // A stable release that overtook the last test build.
+        assert_eq!(
+            pick(vec![Ok(("test", 11)), Ok(("stable", 12))]),
+            Ok(("stable", 12))
+        );
+        // Equal versions: the first manifest (test) is kept.
+        assert_eq!(
+            pick(vec![Ok(("test", 12)), Ok(("stable", 12))]),
+            Ok(("test", 12))
+        );
+        // One manifest fails: the other one is used.
+        assert_eq!(
+            pick(vec![Err("UPDATE_TIMEOUT".into()), Ok(("stable", 11))]),
+            Ok(("stable", 11))
+        );
+        assert_eq!(
+            pick(vec![Ok(("test", 12)), Err("UPDATE_UNREACHABLE".into())]),
+            Ok(("test", 12))
+        );
+        // Both fail: the first error is reported.
+        assert_eq!(
+            pick(vec![
+                Err("UPDATE_TIMEOUT".into()),
+                Err("UPDATE_UNREACHABLE".into())
+            ]),
+            Err("UPDATE_TIMEOUT".into())
+        );
+        // The test channel never offers an older version.
+        assert_eq!(
+            offer(UpdateChannel::Test, true, &12, &13),
+            Some(Direction::Upgrade)
+        );
+        assert_eq!(offer(UpdateChannel::Test, true, &12, &11), None);
+        assert_eq!(offer(UpdateChannel::Test, true, &12, &12), None);
+    }
+
+    #[test]
+    fn stable_channel_offers_a_downgrade_from_a_test_build() {
+        assert_eq!(
+            offer(UpdateChannel::Stable, true, &11, &12),
+            Some(Direction::Upgrade)
+        );
+        assert_eq!(
+            offer(UpdateChannel::Stable, true, &12, &11),
+            Some(Direction::Downgrade)
+        );
+        assert_eq!(offer(UpdateChannel::Stable, true, &12, &12), None);
+        // deb/rpm/other only report updates; a downgrade is left to the package manager.
+        assert_eq!(offer(UpdateChannel::Stable, false, &12, &11), None);
+        assert_eq!(
+            offer(UpdateChannel::Stable, false, &11, &12),
+            Some(Direction::Upgrade)
+        );
+    }
+
+    #[test]
+    fn compares_real_semver_versions() {
+        let v = |s: &str| -> RemoteRelease {
+            serde_json::from_value(serde_json::json!({"version": s, "url": "https://pkg.werklade.de/w/W-setup.exe", "signature": "x"}))
+                .unwrap()
+        };
+        let current = v("1.2.0").version;
+        assert_eq!(
+            offer(UpdateChannel::Stable, true, &current, &v("1.1.0").version),
+            Some(Direction::Downgrade)
+        );
+        assert_eq!(
+            offer(UpdateChannel::Stable, true, &current, &v("1.10.0").version),
+            Some(Direction::Upgrade)
+        );
+        assert_eq!(
+            offer(UpdateChannel::Stable, true, &current, &v("1.2.0").version),
+            None
+        );
+    }
+
+    #[test]
+    fn reports_the_manifest_that_was_skipped() {
+        use UpdateChannel::{Stable, Test};
+        let skipped = |manifest, error: &str| Skipped {
+            manifest,
+            error: error.into(),
+        };
+        let pick =
+            |results: Vec<(UpdateChannel, Result<u32, String>)>| newest(results, |v: &u32| v);
+        assert_eq!(pick(vec![(Test, Ok(12)), (Stable, Ok(11))]), Ok((12, None)));
+        assert_eq!(
+            pick(vec![(Test, Err("UPDATE_TIMEOUT".into())), (Stable, Ok(11))]),
+            Ok((11, Some(skipped(Test, "UPDATE_TIMEOUT"))))
+        );
+        assert_eq!(
+            pick(vec![
+                (Test, Ok(12)),
+                (Stable, Err("UPDATE_NO_PACKAGE".into()))
+            ]),
+            Ok((12, Some(skipped(Stable, "UPDATE_NO_PACKAGE"))))
+        );
+
+        let seen = Announced {
+            version: "1.1.0".into(),
+            notes: None,
+            pub_date: None,
+            direction: None,
+        };
+        let plain = serde_json::to_value(CheckResult::from(seen.clone())).unwrap();
+        assert!(plain.get("skippedManifest").is_none());
+        assert!(plain.get("partialError").is_none());
+        let partial = serde_json::to_value(
+            CheckResult::from(seen).with_skipped(Some(skipped(Test, "UPDATE_TIMEOUT"))),
+        )
+        .unwrap();
+        assert_eq!(partial["skippedManifest"], "test");
+        assert_eq!(partial["partialError"], "UPDATE_TIMEOUT");
+        assert_eq!(partial["available"], false);
+    }
+
+    #[test]
+    fn install_reports_the_failed_manifest_instead_of_a_changed_offer() {
+        let failed = Skipped {
+            manifest: UpdateChannel::Test,
+            error: "UPDATE_UNREACHABLE".into(),
+        };
+        assert_eq!(
+            install_refusal(MSG_CHANGED, Some(&failed)),
+            "UPDATE_UNREACHABLE"
+        );
+        assert_eq!(install_refusal(MSG_CHANGED, None), MSG_CHANGED);
+        // Other refusals are not caused by the failed manifest.
+        assert_eq!(install_refusal(MSG_NONE, Some(&failed)), MSG_NONE);
+        assert_eq!(
+            install_refusal(MSG_DOWNGRADE_UNCONFIRMED, Some(&failed)),
+            MSG_DOWNGRADE_UNCONFIRMED
+        );
+    }
+
+    #[test]
+    fn install_acts_only_on_the_confirmed_offer() {
+        let up = Some(Direction::Upgrade);
+        let down = Some(Direction::Downgrade);
+        assert_eq!(confirm_offer(up, "1.2.0", "1.2.0", false), Ok(()));
+        assert_eq!(confirm_offer(up, "1.2.0", " 1.2.0 ", false), Ok(()));
+        assert_eq!(confirm_offer(up, "1.3.0", "1.2.0", false), Err(MSG_CHANGED));
+        assert_eq!(confirm_offer(None, "1.2.0", "1.2.0", true), Err(MSG_NONE));
+        assert_eq!(
+            confirm_offer(down, "1.1.0", "1.1.0", false),
+            Err(MSG_DOWNGRADE_UNCONFIRMED)
+        );
+        assert_eq!(confirm_offer(down, "1.1.0", "1.1.0", true), Ok(()));
+        assert_eq!(
+            confirm_offer(down, "1.0.0", "1.1.0", true),
+            Err(MSG_CHANGED)
+        );
     }
 
     #[test]
@@ -762,17 +1177,21 @@ mod tests {
             version: Some("0.2.0".into()),
             notes: None,
             pub_date: Some("2026-11-13T10:00:00Z".into()),
+            downgrade: false,
+            skipped_manifest: None,
+            partial_error: None,
         })
         .unwrap();
         assert_eq!(
             check,
-            serde_json::json!({"available": true, "version": "0.2.0", "notes": null, "pubDate": "2026-11-13T10:00:00Z"})
+            serde_json::json!({"available": true, "version": "0.2.0", "notes": null, "pubDate": "2026-11-13T10:00:00Z", "downgrade": false})
         );
         let info = serde_json::to_value(UpdateInfo {
             current_version: "0.1.8".into(),
             install_kind: "deb",
             self_update: false,
             channel: "stable",
+            channel_from_env: false,
             configured: false,
             can_install: false,
             blocked_reason: Some(MSG_PACKAGE_MANAGED),
@@ -785,6 +1204,7 @@ mod tests {
                 "installKind": "deb",
                 "selfUpdate": false,
                 "channel": "stable",
+                "channelFromEnv": false,
                 "configured": false,
                 "canInstall": false,
                 "blockedReason": MSG_PACKAGE_MANAGED

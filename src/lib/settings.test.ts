@@ -166,6 +166,27 @@ describe("mergeSettings (write conflict)", () => {
   it("always keeps the local language", () => {
     expect(mergeSettings(base, { ...base, language: "en" }, { ...base, language: "de" }).language).toBe("en");
   });
+  it("always keeps the local update channel", () => {
+    expect(mergeSettings(base, { ...base, updateChannel: "test" }, { ...base, updateChannel: "stable" }).updateChannel).toBe("test");
+    expect(mergeSettings(base, { ...base, updateChannel: "stable" }, { ...base, updateChannel: "test" }).updateChannel).toBe("stable");
+  });
+});
+
+describe("update channel setting", () => {
+  it("defaults to stable and accepts only stable or test", () => {
+    expect(defaultSettings.updateChannel).toBe("stable");
+    expect(normalizeSettings({}).updateChannel).toBe("stable");
+    expect(normalizeSettings(null).updateChannel).toBe("stable");
+    for (const updateChannel of ["stable", "test"] as const) expect(normalizeSettings({ updateChannel }).updateChannel).toBe(updateChannel);
+    for (const updateChannel of ["beta", "", "TEST", " test", null, 1, true, {}, ["test"]]) expect(normalizeSettings({ updateChannel }).updateChannel).toBe("stable");
+  });
+  it("stays per device: not written to the file, taken from the cache when loading", () => {
+    expect(JSON.parse(serializeSettings({ ...defaultSettings, updateChannel: "test" }))).not.toHaveProperty("updateChannel");
+    const outcome = interpretLoaded('{"updateChannel":"stable","fontSize":20}', '{"updateChannel":"test"}');
+    expect(outcome.ok && outcome.settings).toMatchObject({ updateChannel: "test", fontSize: 20 });
+    const without = interpretLoaded('{"updateChannel":"test"}', null);
+    expect(without.ok && without.settings.updateChannel).toBe("stable");
+  });
 });
 
 describe("language setting", () => {

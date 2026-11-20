@@ -3,8 +3,8 @@ import { errorText } from "../lib/backendError";
 import { useModal } from "./useModal";
 import { t, useT } from "../i18n";
 import {
-  aptCommand, aptRepoNote, blockedFallback, canCloseUpdateDialog, formatPubDate, installKindLabel, progressPercent, restartHints, progressText, updateAction, updateDownloadUrl,
-  type AvailableUpdate, type UpdateInfo, type UpdateState,
+  aptCommand, aptRepoNote, blockedFallback, canCloseUpdateDialog, formatPubDate, installKindLabel, progressPercent, restartHints, progressText, skippedNote, updateAction, updateDownloadUrl,
+  type AvailableUpdate, type SkippedManifest, type UpdateInfo, type UpdateState,
 } from "../lib/updateState";
 import { parseNotes, type Inline, type ListItem } from "../lib/notesMarkdown";
 import "./UpdateDialog.css";
@@ -27,6 +27,9 @@ export const aptNote = (): string => t("update.aptNote");
 export const downloadNote = (): string => t("update.downloadNote");
 export const cancelBlockedNote = (): string => t("update.cancelBlocked");
 export const notConfiguredNote = (): string => t("update.notConfigured");
+/** Hint that only one manifest was checked, with the reason in the UI language. */
+export const skippedText = (skipped: SkippedManifest): string => `${skippedNote(skipped)} (${errorText(skipped.code)})`;
+export const downgradeQuestion = (info: UpdateInfo, update: AvailableUpdate): string => t("update.downgrade.question", { version: update.version, current: info.currentVersion });
 
 const copyField = (p: UpdateDialogViewProps, text: string) => <div className="update-copy">
   <code>{text}</code>
@@ -58,8 +61,11 @@ function offer(p: UpdateDialogViewProps, info: UpdateInfo, update: AvailableUpda
   const action = updateAction(info);
   const date = formatPubDate(update.pubDate);
   return <>
-    <p role="status" className="update-headline">{t("update.available", { version: update.version })}</p>
+    <p role="status" className="update-headline">{t(update.downgrade ? "update.downgrade.available" : "update.available", { version: update.version })}</p>
+    {/* Back from a test build: the install button itself is the confirmation and says so. */}
+    {update.downgrade && <p role="alert" className="update-warning">{downgradeQuestion(info, update)}</p>}
     {date && <p className="update-meta">{t("update.published", { date })}</p>}
+    {update.skipped && <p className="update-warning">{skippedText(update.skipped)}</p>}
     {update.notes && <>
       <h3 id="update-notes-title">{t("update.notes")}</h3>
       {/* Server text: parsed into React elements (text children only, no links), scrollable via keyboard. */}
@@ -92,7 +98,7 @@ export function UpdateDialogView(p: UpdateDialogViewProps) {
     {info?.channel === "test" && <p className="update-channel">{t("update.channel.test")}</p>}
     {busy && <p role="status" className="update-headline">{t("update.searching")}</p>}
     {state.phase === "notConfigured" && <><p role="status">{notConfiguredNote()}</p>{details(state.info)}</>}
-    {state.phase === "current" && <><p role="status" className="update-headline">{t("update.current", { version: state.info.currentVersion })}</p>{details(state.info)}</>}
+    {state.phase === "current" && <><p role="status" className="update-headline">{t("update.current", { version: state.info.currentVersion })}</p>{state.skipped && <p role="alert" className="update-warning">{skippedText(state.skipped)}</p>}{details(state.info)}</>}
     {state.phase === "available" && offer(p, state.info, state.update)}
     {(state.phase === "installing" || state.phase === "restarting") && <>
       <p className="update-headline">{state.phase === "restarting" ? t("update.restarting") : t("update.installing", { version: state.update.version })}</p>
@@ -111,7 +117,7 @@ export function UpdateDialogView(p: UpdateDialogViewProps) {
     </>}
     <div className="dialog-actions">
       <button type="button" disabled={!canClose} onClick={p.onClose} {...(canInstall || state.phase === "error" || installing ? {} : { "data-initial-focus": "" })}>{closeLabel}</button>
-      {canInstall && <button type="submit" data-initial-focus="" onClick={p.onInstall}>{t("update.install")}</button>}
+      {canInstall && <button type="submit" data-initial-focus="" onClick={p.onInstall}>{state.update.downgrade ? t("update.downgrade.confirm") : t("update.install")}</button>}
       {state.phase === "error" && <button type="submit" data-initial-focus="" onClick={p.onRetry}>{t("update.retry")}</button>}
     </div>
   </dialog>;

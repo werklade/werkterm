@@ -270,3 +270,41 @@ describe("dialog basics and wording", () => {
     for (const state of states) expect(primaries(render(state)).length).toBeLessThanOrEqual(1);
   });
 });
+
+describe("downgrade back to stable", () => {
+  const downgrade = () => offer({ currentVersion: "1.2.0" }, { version: "1.1.0", downgrade: true });
+  it("warns with both versions and makes the only primary button the explicit confirmation", () => {
+    const tree = render(downgrade());
+    const text = textOf(tree);
+    expect(text).toContain("Stable-Version 1.1.0 ist verfügbar");
+    expect(alerts(tree)).toEqual(["Version 1.1.0 ist älter als die installierte Version 1.2.0. Einstellungen, die es nur in der neueren Version gibt, können verloren gehen. Auf Stable zurückwechseln?"]);
+    expect(primaries(tree)).toEqual(["Auf Stable zurückwechseln"]);
+    expect(labels(tree)).not.toContain("Herunterladen und installieren");
+    (button(tree, "Auf Stable zurückwechseln")!.props.onClick as () => void)();
+    expect(handlers.onInstall).toHaveBeenCalledTimes(1);
+  });
+  it("shows no warning for a normal update", () => {
+    const tree = render(offer());
+    expect(alerts(tree)).toEqual([]);
+    expect(primaries(tree)).toEqual(["Herunterladen und installieren"]);
+  });
+});
+
+describe("only one manifest checked", () => {
+  it("does not claim up to date without saying which manifest was skipped", () => {
+    const tree = render(run([{ type: "info", info: info({ channel: "test" }) }, { type: "checked", check: { available: false, version: "0.3.0", notes: null, pubDate: null, skippedManifest: "test", partialError: "UPDATE_TIMEOUT" } }]));
+    expect(textOf(tree)).toContain("Werkterm ist aktuell");
+    expect(alerts(tree)).toHaveLength(1);
+    expect(alerts(tree)[0]).toContain("Testkanal nicht erreichbar, nur Stable geprüft.");
+  });
+  it("shows the hint with an offer when stable failed", () => {
+    const text = textOf(render(offer({ channel: "test" }, { skippedManifest: "stable", partialError: "UPDATE_UNREACHABLE" })));
+    expect(text).toContain("Stable nicht erreichbar, nur Testkanal geprüft.");
+  });
+  it("shows no hint when both manifests were read", () => {
+    expect(textOf(render(offer({ channel: "test" })))).not.toContain("nicht erreichbar, nur");
+  });
+  it("warns that settings of the newer version may be lost on a downgrade", () => {
+    expect(alerts(render(offer({ currentVersion: "1.2.0" }, { version: "1.1.0", downgrade: true }))).join(" ")).toContain("Einstellungen, die es nur in der neueren Version gibt, können verloren gehen.");
+  });
+});
