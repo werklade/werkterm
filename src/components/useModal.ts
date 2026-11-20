@@ -8,7 +8,9 @@ export function useModal() {
     if (!element) return;
     const previousFocus = document.activeElement;
     element.showModal();
-    element.querySelector<HTMLElement>("[autofocus]")?.focus();
+    // React's autoFocus prop does not render the autofocus attribute (it calls focus() while the dialog is still closed,
+    // so showModal() ends up focusing the first control). data-autofocus marks the intended initial focus explicitly.
+    element.querySelector<HTMLElement>("[autofocus],[data-autofocus]")?.focus();
     return () => {
       element.close();
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();

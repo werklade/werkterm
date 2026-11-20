@@ -26,6 +26,51 @@ const render = (props: { text?: string; multiExec?: boolean; hasProfile?: boolea
 const options = (tree: ReactNode) => findAll(tree, e => e.type === "option").map(e => ({ value: e.props.value as string, disabled: !!e.props.disabled }));
 beforeEach(() => vi.clearAllMocks());
 
+const keyEvent = (target: { hasAttribute(name: string): boolean }, currentTarget: unknown, init: Record<string, unknown> = {}) =>
+  ({ key: "Enter", repeat: false, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, target, currentTarget, preventDefault: vi.fn(), stopPropagation: vi.fn(), ...init });
+const dialogOf = (tree: ReactNode) => findAll(tree, e => e.type === "dialog")[0];
+const press = (tree: ReactNode, target: { hasAttribute(name: string): boolean } | "dialog", init?: Record<string, unknown>) => {
+  const dialog = dialogOf(tree);
+  const current = { hasAttribute: () => false };
+  const event = keyEvent(target === "dialog" ? current : target, current, init);
+  (dialog.props.onKeyDown as (e: unknown) => void)(event);
+  return event;
+};
+const plain = { hasAttribute: () => false };
+
+describe("PasteDialog keyboard", () => {
+  it("marks the confirm button as initial focus for useModal", () => {
+    const button = findAll(render({}), e => e.type === "button" && e.props.children === "Einfügen")[0];
+    expect(button.props["data-autofocus"]).toBe(true);
+  });
+  it("Enter with focus on the dialog pastes and is consumed", () => {
+    const event = press(render({}), "dialog");
+    expect(onAnswer).toHaveBeenCalledWith("a\nb", null);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+  });
+  it("Enter on the confirm button pastes exactly once", () => {
+    press(render({}), { hasAttribute: (n: string) => n === "data-paste-confirm" });
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+  });
+  it("Enter in the textarea or another control does not paste", () => {
+    const event = press(render({}), plain);
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+  it("ignores key repeat and modified Enter", () => {
+    press(render({}), "dialog", { repeat: true });
+    press(render({}), "dialog", { ctrlKey: true });
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+  it("Escape (dialog cancel event) answers null", () => {
+    const preventDefault = vi.fn();
+    (dialogOf(render({})).props.onCancel as (e: unknown) => void)({ preventDefault });
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onAnswer).toHaveBeenCalledWith(null);
+  });
+});
+
 describe("PasteDialog remember selection", () => {
   it("cancel answers null without a remember request", () => {
     const button = findAll(render({}), e => e.type === "button" && e.props.children === "Abbrechen")[0];

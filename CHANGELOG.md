@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Paste dialog: Enter now confirms the paste as soon as the dialog opens, and Escape cancels. Focus used to land in the text field, so Enter only inserted a line break. In the text field Enter still inserts a line break; checkbox, selection and the other buttons keep their own Enter behaviour. The confirming Enter is no longer passed on to the terminal.
+
 ## [1.2.0] – 2026-11-20
 
 ### Added

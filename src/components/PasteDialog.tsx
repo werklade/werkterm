@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type KeyboardEvent } from "react";
 import { useModal } from "./useModal";
 import { availableScopes, effectiveScope, hasPasteControls, singleLinePaste, stripLastNewline, type PasteChoice, type RememberScope } from "../lib/paste";
 import { tp, useT } from "../i18n";
@@ -18,7 +18,15 @@ export function PasteDialog({ text, count, multiExec, hasProfile, onAnswer }: { 
     onAnswer(single ? singleLinePaste(value) : value, active === "none" ? null : { scope: active, choice: { action: single ? "single-line" : "paste", trim } });
   };
   const hintId = `${rememberId}-hint`;
-  return <dialog ref={dialog} className="ssh-dialog paste-dialog" aria-label={t("paste.title")} onCancel={e => { e.preventDefault(); onAnswer(null); }}>
+  // Enter confirms unless focus sits in a control with its own Enter behaviour (textarea, checkbox, select, other buttons).
+  // preventDefault keeps the key from becoming a keypress in the terminal that regains focus when the dialog closes.
+  const onKeyDown = (e: KeyboardEvent<HTMLDialogElement>) => {
+    if (e.key !== "Enter" || e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    const target = e.target as HTMLElement;
+    if (target !== e.currentTarget && !target.hasAttribute("data-paste-confirm")) return;
+    e.preventDefault(); e.stopPropagation(); send(false);
+  };
+  return <dialog ref={dialog} className="ssh-dialog paste-dialog" aria-label={t("paste.title")} onKeyDown={onKeyDown} onCancel={e => { e.preventDefault(); onAnswer(null); }}>
     <h2>{t("paste.title")}</h2>{multiExec && <p>{tp("paste.sendTo", count)}</p>}
     <textarea aria-label={t("paste.textLabel")} spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)} />
     <p>{tp("paste.lines", draft.split(/\r\n|\r|\n/).length)} · {tp("paste.chars", draft.length)}</p>
@@ -34,7 +42,7 @@ export function PasteDialog({ text, count, multiExec, hasProfile, onAnswer }: { 
         </select>
       </label>
       {controls && <small id={hintId} className="paste-remember-hint">{t("paste.controlsHint")}</small>}
-      <button autoFocus onClick={() => send(false)}>{t("paste.confirm")}</button><button onClick={() => send(true)}>{t("paste.singleLine")}</button><button onClick={() => onAnswer(null)}>{t("common.cancel")}</button>
+      <button autoFocus data-autofocus data-paste-confirm onClick={() => send(false)}>{t("paste.confirm")}</button><button onClick={() => send(true)}>{t("paste.singleLine")}</button><button onClick={() => onAnswer(null)}>{t("common.cancel")}</button>
     </div>
   </dialog>;
 }
