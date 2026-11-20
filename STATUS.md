@@ -1,6 +1,6 @@
 # STATUS – Werkterm
 
-Stand: 2026-11-16
+Stand: 2026-11-20
 
 Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 
@@ -41,7 +41,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.2.0: #1, #3–#6, #11, #14, #15, #20, #23–#25; Sammelliste: #7–#10, #12, #13, #19).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.2.0: nur #14; Meilenstein 1.3.0: #1, #3–#6, #11, #15, #20, #23–#25; Sammelliste: #7–#10, #12, #13, #19).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
@@ -63,8 +63,9 @@ Hier nur, was nicht öffentlich geführt wird:
   Icon-Änderung.
 
 ## Nächster Schritt
-- Plan für 2026-11-20: #20 (Enter im Einfüge-Dialog), #24 (Hinweise nach Zeitüberschreitung), #23 (eigene
-  SSH-Optionen `-o`), #25 (drei Retro-Designs mit Tux-Varianten; Entwürfe erst als Varianten zur Abnahme).
+- 1.2.0 (#14 Update-Kanal in den Einstellungen): getaggt, CI und Veröffentlichen (erst test, dann stable) laufen.
+  Danach Reihenfolge laut Nutzer: #20 (Enter im Einfüge-Dialog), #23 (eigene SSH-Optionen `-o`), #25 (drei
+  Retro-Designs mit Tux-Varianten; Entwürfe erst zur Abnahme), #24 (Hinweise nach Zeitüberschreitung).
 - Release 1.1.0 am 2026-11-16 veröffentlicht: CI-Lauf 43865852492, GitHub-Release (Latest), pkg.werklade.de stable und
   test. Offene Issues liegen im Meilenstein 1.2.0; im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet
   auf Bestätigung).
