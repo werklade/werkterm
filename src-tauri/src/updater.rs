@@ -8,7 +8,8 @@
 //! Channel: WERKTERM_UPDATE_CHANNEL ("test"/"stable") wins over the per-device setting the
 //! frontend passes in. The test channel reads the test and the stable manifest and offers the
 //! newer release; the stable channel offers the stable release, also as a downgrade from a test
-//! build (only with the user's confirmation in update_install).
+//! build (only with the user's confirmation in update_install). A .deb install gets that
+//! downgrade as information too; its dialog shows the apt commands, the app never runs them.
 
 use crate::ui_error::ui_code;
 use serde::Serialize;
@@ -98,6 +99,13 @@ impl InstallKind {
     /// Only these kinds may download and install an update themselves.
     pub fn self_update(self) -> bool {
         matches!(self, Self::AppImage | Self::Nsis | Self::Msi)
+    }
+
+    /// Kinds that are offered the stable release as a downgrade from a test build: the
+    /// self-updating ones, and deb, whose update dialog shows the apt commands for it (the app
+    /// never runs them). rpm and other installs have no such path.
+    fn offers_downgrade(self) -> bool {
+        self.self_update() || self == Self::Deb
     }
 }
 
@@ -381,17 +389,17 @@ enum Direction {
 }
 
 /// Whether `release` is offered on `channel`. Newer is always an update; older only on the
-/// stable channel (back from a test build) and only where the app installs itself; equal is
-/// never offered.
+/// stable channel (back from a test build) and only for kinds with a downgrade path
+/// (`InstallKind::offers_downgrade`); equal is never offered.
 fn offer<V: Ord>(
     channel: UpdateChannel,
-    self_update: bool,
+    downgrade_path: bool,
     current: &V,
     release: &V,
 ) -> Option<Direction> {
     match release.cmp(current) {
         std::cmp::Ordering::Greater => Some(Direction::Upgrade),
-        std::cmp::Ordering::Less if channel == UpdateChannel::Stable && self_update => {
+        std::cmp::Ordering::Less if channel == UpdateChannel::Stable && downgrade_path => {
             Some(Direction::Downgrade)
         }
         _ => None,
@@ -586,7 +594,7 @@ async fn select(
     let current = &app.package_info().version;
     let direction = offer(
         channel,
-        kind.self_update(),
+        kind.offers_downgrade(),
         current,
         &fetched.release.version,
     );
@@ -1053,6 +1061,17 @@ mod tests {
     }
 
     #[test]
+    fn only_self_updating_kinds_and_deb_get_a_downgrade_offer() {
+        use InstallKind::*;
+        for kind in [AppImage, Nsis, Msi, Deb] {
+            assert!(kind.offers_downgrade(), "{kind:?}");
+        }
+        for kind in [Rpm, Other] {
+            assert!(!kind.offers_downgrade(), "{kind:?}");
+        }
+    }
+
+    #[test]
     fn stable_channel_offers_a_downgrade_from_a_test_build() {
         assert_eq!(
             offer(UpdateChannel::Stable, true, &11, &12),
@@ -1063,7 +1082,7 @@ mod tests {
             Some(Direction::Downgrade)
         );
         assert_eq!(offer(UpdateChannel::Stable, true, &12, &12), None);
-        // deb/rpm/other only report updates; a downgrade is left to the package manager.
+        // rpm/other only report updates; a downgrade is left to the package manager.
         assert_eq!(offer(UpdateChannel::Stable, false, &12, &11), None);
         assert_eq!(
             offer(UpdateChannel::Stable, false, &11, &12),

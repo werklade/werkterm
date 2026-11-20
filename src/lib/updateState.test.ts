@@ -365,7 +365,7 @@ describe("channel notes in the settings", () => {
     for (const installKind of ["deb", "rpm", "other"] as const) expect(notes({ installKind, selfUpdate: false })).toContain("Diese Installation aktualisiert sich nicht selbst. Der Kanal bestimmt nur, welche Version gemeldet wird.");
   });
   it("mentions the APT test suite only for deb", () => {
-    const apt = "DEB-Paket: Testversionen folgen über eine eigene APT-Suite.";
+    const apt = "DEB-Paket: Testversionen kommen aus der APT-Distribution „test“, der Update-Dialog zeigt die Befehle dafür.";
     expect(notes({ installKind: "deb", selfUpdate: false })).toContain(apt);
     expect(notes({ installKind: "rpm", selfUpdate: false })).not.toContain(apt);
     expect(notes({ installKind: "other", selfUpdate: false })).not.toContain(apt);

@@ -6,9 +6,10 @@
 //                          [--host <ssh alias>] [--dry-run]
 // The SSH alias (default "werklade-pkg") comes from the user's ~/.ssh/config; host, user and
 // key never live in this repository. ssh asks for a passphrase itself or uses the ssh-agent.
-// Channel "test" uploads only the release tar to updates-test; channel "stable" uploads the
-// .deb to APT and the release tar to updates (after saving the current latest.json to a fixed
-// backup folder, see backupDir). Every abort states what has already changed on the server.
+// Channel "test" uploads the .deb to the APT distribution "test" (deb-test) and the release tar
+// to updates-test; channel "stable" uploads the .deb to the APT distribution "stable" (deb) and
+// the release tar to updates (after saving the current latest.json to a fixed backup folder,
+// see backupDir). Every abort states what has already changed on the server.
 // Node >= 22, no dependencies. Exit codes: 0 ok, 1 check failed, 2 usage error, otherwise the
 // exit code of gh or of the server (ssh).
 import { spawn } from "node:child_process";
@@ -35,6 +36,12 @@ export const DEFAULT_HOST = "werklade-pkg";
 export const LATEST_URL = `${BASE_URL}/${PRODUCT}/updates/latest.json`;
 /** Server limit of version folders per product under downloads/. */
 export const MAX_VERSIONS = 40;
+/**
+ * Field of "status werkterm" with the version(s) in the APT distribution "test". A server without
+ * deb-test does not send it; the test channel then stops before any upload. null means the
+ * distribution is still empty.
+ */
+export const APT_TEST_FIELD = "apt_test";
 const HOST_RE = /^[A-Za-z0-9_][A-Za-z0-9._@-]{0,254}$/;
 const RUN_RE = /^[1-9][0-9]{0,19}$/;
 
@@ -83,13 +90,17 @@ export function parsePublishArgs(argv) {
 /** Remote command for werklade-publish, built only from fixed words and a validated version. */
 export function remoteCommand(kind, version) {
   if (kind === "status") return `status ${PRODUCT}`;
-  if (!["deb", "release", "release-test"].includes(kind)) throw new Error(`Unbekannter Befehl: ${kind}`);
+  if (!["deb", "deb-test", "release", "release-test"].includes(kind)) throw new Error(`Unbekannter Befehl: ${kind}`);
   if (!isValidVersion(version)) throw new Error(`Version ungültig: ${version}`);
   return `${kind} ${PRODUCT} ${version}`;
 }
 
 export function releaseKind(channel) {
   return channel === "stable" ? "release" : "release-test";
+}
+
+export function debKind(channel) {
+  return channel === "stable" ? "deb" : "deb-test";
 }
 
 /** ssh argument array; "--" ends option parsing so the alias can never act as an option. */
@@ -146,11 +157,22 @@ export function parseStatus(text) {
   if (
     typeof status !== "object" || status === null || status.product !== PRODUCT ||
     !versionOrNull(status.release) || !versionOrNull(status.release_test) ||
-    !stringList(status.downloads) || !stringList(status.apt) || !stringList(status.withdrawn ?? [])
+    !stringList(status.downloads) || !stringList(status.apt) || !stringList(status.withdrawn ?? []) ||
+    !aptTestValue(status[APT_TEST_FIELD])
   ) {
     throw new Error("Status des Servers hat ein unerwartetes Format");
   }
-  return { ...status, withdrawn: status.withdrawn ?? [] };
+  return { ...status, withdrawn: status.withdrawn ?? [], aptTest: aptTestList(status[APT_TEST_FIELD]) };
+}
+
+/** The APT test field may be absent, null, one version or a list of versions. */
+const aptTestValue = value => value === undefined || versionOrNull(value) || stringList(value);
+
+/** Normalizes the APT test field: null when the server does not send it, otherwise a list. */
+function aptTestList(value) {
+  if (value === undefined) return null;
+  if (value === null) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 export function formatStatus(status) {
@@ -158,7 +180,8 @@ export function formatStatus(status) {
   return [
     `  stable (updates):       ${status.release ?? "-"}`,
     `  test (updates-test):    ${status.release_test ?? "-"}`,
-    `  APT:                    ${list(status.apt)}`,
+    `  APT (stable):           ${list(status.apt)}`,
+    `  APT (test):             ${status.aptTest ? list(status.aptTest) : "- (vom Server nicht gemeldet)"}`,
     `  Downloads:              ${list(status.downloads)}`,
     `  Zurückgenommen:         ${list(status.withdrawn)}`,
   ].join("\n");
@@ -186,6 +209,10 @@ export function preflight({ channel, version, status }) {
     }
     const newerDeb = status.apt.filter(v => isValidVersion(v) && compareVersions(v, version) > 0);
     if (newerDeb.length) return { error: `APT enthält bereits die höhere Version ${newerDeb.join(", ")}` };
+  } else {
+    if (status.aptTest === null) return { error: `Server kennt deb-test noch nicht (${APT_TEST_FIELD} fehlt im Status)` };
+    const newerTest = status.aptTest.filter(v => isValidVersion(v) && compareVersions(v, version) > 0);
+    if (newerTest.length) return { error: `APT (test) enthält bereits die höhere Version ${newerTest.join(", ")}` };
   }
   return { notes, compareDownloads: published };
 }
@@ -256,25 +283,26 @@ export function verifyFinalStatus({ channel, version, status }) {
   if (channel === "stable") {
     if (status.release !== version) errors.push(`stable steht auf ${status.release ?? "-"}, erwartet ${version}`);
     if (!status.apt.includes(version)) errors.push(`APT enthält ${version} nicht`);
-  } else if (status.release_test !== version) {
-    errors.push(`test steht auf ${status.release_test ?? "-"}, erwartet ${version}`);
+  } else {
+    if (status.release_test !== version) errors.push(`test steht auf ${status.release_test ?? "-"}, erwartet ${version}`);
+    if (!(status.aptTest ?? []).includes(version)) errors.push(`APT (test) enthält ${version} nicht`);
   }
   return errors;
 }
 
 /**
  * What has changed on the server when the run stops in the given phase: "before" (nothing
- * uploaded yet), "deb", "release" (on stable after a successful deb) or "verify".
+ * uploaded yet), "deb", "release" (after a successful deb) or "verify".
  */
 export function serverState({ phase, channel, version }) {
-  const channelDir = channel === "stable" ? "updates" : "updates-test";
+  const stable = channel === "stable";
+  const channelDir = stable ? "updates" : "updates-test";
+  const distribution = stable ? "stable" : "test";
   switch (phase) {
     case "deb":
-      return 'Stand: Downloads und latest.json unverändert; das APT-Repo übernimmt das .deb nur bei Erfolg (mit "status werkterm" prüfen). Nach Behebung denselben Aufruf wiederholen.';
-    case "release": {
-      const deb = channel === "stable" ? `.deb ${version} ist im APT-Repo, ` : "";
-      return `Stand: ${deb}latest.json (${channelDir}) unverändert, downloads/${version}/ eventuell schon angelegt. Denselben Aufruf wiederholen (idempotent), sofern der Server keinen Inhaltskonflikt meldet.`;
-    }
+      return `Stand: Downloads und latest.json unverändert; das APT-Repo (Distribution ${distribution}) übernimmt das .deb nur bei Erfolg (mit "status werkterm" prüfen). Nach Behebung denselben Aufruf wiederholen.`;
+    case "release":
+      return `Stand: .deb ${version} ist im APT-Repo (Distribution ${distribution}), latest.json (${channelDir}) unverändert, downloads/${version}/ eventuell schon angelegt. Denselben Aufruf wiederholen (idempotent), sofern der Server keinen Inhaltskonflikt meldet.`;
     case "verify":
       return 'Stand: Uploads abgeschlossen, der Serverstatus entspricht aber nicht der Erwartung. Mit "status werkterm" prüfen.';
     default:
@@ -385,7 +413,7 @@ async function main() {
   };
 
   const cache = cacheDir(version);
-  const total = stable ? 6 : 5;
+  const total = 6;
   let number = 0;
   console.log(`Werkterm ${version} veröffentlichen, Kanal ${channel}, SSH-Alias ${host}${dryRun ? " (Probelauf, nur Befehle)" : ""}`);
 
@@ -430,7 +458,7 @@ async function main() {
   const tar = join(dir, `release-${version}.tar`);
   const deb = join(dir, artifactNames(version).deb);
   const statusCommand = remoteCommand("status");
-  const debCommand = remoteCommand("deb", version);
+  const debCommand = remoteCommand(debKind(channel), version);
   const releaseCommand = remoteCommand(releaseKind(channel), version);
   const backups = backupDir();
 
@@ -464,17 +492,14 @@ async function main() {
     }
   }
 
-  if (stable) {
-    step(++number, total, ".deb ins APT-Repository laden");
-    console.log(`  ${displayCommand("ssh", sshArgs(host, debCommand), deb)}`);
-    if (!dryRun) {
-      context.phase = "deb";
-      await runChecked("ssh", sshArgs(host, debCommand), `ssh "${debCommand}"`, { inputPath: deb });
-    }
+  step(++number, total, `.deb ins APT-Repository laden (Distribution ${stable ? "stable" : "test"})`);
+  console.log(`  ${displayCommand("ssh", sshArgs(host, debCommand), deb)}`);
+  if (!dryRun) {
+    context.phase = "deb";
+    await runChecked("ssh", sshArgs(host, debCommand), `ssh "${debCommand}"`, { inputPath: deb });
   }
 
   step(++number, total, `Release hochladen (${stable ? "updates" : "updates-test"})`);
-  if (!stable) console.log("  .deb wird im Kanal test nicht hochgeladen (APT kennt nur stable)");
   console.log(`  ${displayCommand("ssh", sshArgs(host, releaseCommand), tar)}`);
   if (!dryRun) {
     context.phase = "release";

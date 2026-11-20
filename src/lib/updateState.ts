@@ -128,7 +128,7 @@ export function skippedManifest(check: UpdateCheck | null | undefined): SkippedM
 export const skippedNote = (skipped: SkippedManifest): string => t(skipped.manifest === "test" ? "update.skipped.test" : "update.skipped.stable");
 /**
  * Notes under the channel setting: the environment variable overrides it; installs that do not update themselves
- * only report versions (deb additionally waits for the APT test suite, #15).
+ * only report versions (deb additionally points to the APT distribution "test", see aptHint.ts).
  */
 export function channelNotes(info: Pick<UpdateInfo, "channel" | "channelFromEnv" | "selfUpdate" | "installKind"> | null): string[] {
   if (!info) return [];

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  APT_TEST_FIELD,
   DEFAULT_HOST,
   LATEST_URL,
   MAX_VERSIONS,
@@ -13,6 +14,7 @@ import {
   backupLatest,
   cacheDir,
   comparePublishedSums,
+  debKind,
   displayCommand,
   ghDownloadArgs,
   parsePublishArgs,
@@ -137,6 +139,9 @@ describe("commands", () => {
     expect(remoteCommand("release", V)).toBe("release werkterm 1.2.3");
     expect(remoteCommand(releaseKind("test"), V)).toBe("release-test werkterm 1.2.3");
     expect(releaseKind("stable")).toBe("release");
+    expect(remoteCommand(debKind("test"), V)).toBe("deb-test werkterm 1.2.3");
+    expect(remoteCommand(debKind("stable"), V)).toBe("deb werkterm 1.2.3");
+    expect(() => remoteCommand("deb-test", "1.2.3 x")).toThrow();
     expect(() => remoteCommand("shell", V)).toThrow();
     expect(() => remoteCommand("deb", "1.2.3 && id")).toThrow();
     expect(() => remoteCommand("deb", undefined)).toThrow();
@@ -182,6 +187,7 @@ const status = overrides =>
       release_test: "1.2.3",
       downloads: ["1.2.2", "1.2.3"],
       apt: ["1.2.2"],
+      apt_test: ["1.2.3"],
       withdrawn: [],
       ...overrides,
     }),
@@ -196,6 +202,15 @@ describe("server status", () => {
     expect(() => status({ apt: "1.2.2" })).toThrow(/Format/);
   });
 
+  it("reads the optional APT test field as a list", () => {
+    expect(APT_TEST_FIELD).toBe("apt_test");
+    expect(status({ [APT_TEST_FIELD]: undefined }).aptTest).toBeNull();
+    expect(status({ [APT_TEST_FIELD]: null }).aptTest).toEqual([]);
+    expect(status({ [APT_TEST_FIELD]: V }).aptTest).toEqual([V]);
+    expect(status({ [APT_TEST_FIELD]: ["1.2.2", V] }).aptTest).toEqual(["1.2.2", V]);
+    expect(() => status({ [APT_TEST_FIELD]: 3 })).toThrow(/Format/);
+  });
+
   it("blocks downgrades and withdrawn versions on stable", () => {
     expect(preflight({ channel: "stable", version: "1.2.4", status: status({}) })).toEqual({ notes: [], compareDownloads: false });
     expect(preflight({ channel: "stable", version: "1.2.4", status: status({ release: null, apt: [] }) })).toEqual({ notes: [], compareDownloads: false });
@@ -207,7 +222,21 @@ describe("server status", () => {
   });
 
   it("allows any version on the test channel", () => {
-    expect(preflight({ channel: "test", version: "0.0.1", status: status({ release: "9.0.0", apt: ["9.0.0"] }) })).toEqual({ notes: [], compareDownloads: false });
+    expect(preflight({ channel: "test", version: "0.0.1", status: status({ release: "9.0.0", apt: ["9.0.0"], apt_test: [] }) })).toEqual({ notes: [], compareDownloads: false });
+  });
+
+  it("stops on a higher version in the APT test distribution", () => {
+    const check = preflight({ channel: "test", version: "1.2.4", status: status({ [APT_TEST_FIELD]: "1.3.0" }) });
+    expect(check.error).toMatch(/APT \(test\) enthält bereits die höhere Version 1\.3\.0/);
+    expect(preflight({ channel: "test", version: "1.2.4", status: status({ [APT_TEST_FIELD]: "1.2.4" }) }).error).toBeUndefined();
+  });
+
+  it("stops on the test channel when the server does not know deb-test", () => {
+    expect(preflight({ channel: "test", version: "1.2.4", status: status({ [APT_TEST_FIELD]: undefined }) }).error).toBe(
+      "Server kennt deb-test noch nicht (apt_test fehlt im Status)",
+    );
+    expect(preflight({ channel: "test", version: "1.2.4", status: status({ [APT_TEST_FIELD]: null }) }).error).toBeUndefined();
+    expect(preflight({ channel: "stable", version: "1.2.4", status: status({ [APT_TEST_FIELD]: undefined }) }).error).toBeUndefined();
   });
 
   it("asks for a content comparison when downloads/<v>/ exists", () => {
@@ -218,7 +247,7 @@ describe("server status", () => {
   it("stops at the server limit of version folders, unless the version is a repeat", () => {
     const full = Array.from({ length: MAX_VERSIONS }, (_, i) => `0.0.${i}`);
     expect(preflight({ channel: "test", version: V, status: status({ downloads: full }) }).error).toMatch(/40 Versionsordner/);
-    expect(preflight({ channel: "test", version: "0.0.5", status: status({ release: null, downloads: full }) }).error).toBeUndefined();
+    expect(preflight({ channel: "test", version: "0.0.5", status: status({ release: null, downloads: full, apt_test: [] }) }).error).toBeUndefined();
     expect(preflight({ channel: "test", version: V, status: status({ downloads: full.slice(1) }) }).error).toBeUndefined();
   });
 
@@ -228,6 +257,14 @@ describe("server status", () => {
     expect(verifyFinalStatus({ channel: "stable", version: V, status: status({ release: V }) })).toEqual(["APT enthält 1.2.3 nicht"]);
     expect(verifyFinalStatus({ channel: "stable", version: V, status: status({ apt: [V] }) })[0]).toMatch(/stable steht auf 1.2.2/);
     expect(verifyFinalStatus({ channel: "test", version: V, status: status({ release_test: null }) })[0]).toMatch(/test steht auf -/);
+  });
+
+  it("checks the APT test distribution on the test channel", () => {
+    expect(verifyFinalStatus({ channel: "test", version: V, status: status({ [APT_TEST_FIELD]: V }) })).toEqual([]);
+    expect(verifyFinalStatus({ channel: "test", version: V, status: status({ [APT_TEST_FIELD]: "1.2.2" }) })).toEqual(["APT (test) enthält 1.2.3 nicht"]);
+    expect(verifyFinalStatus({ channel: "test", version: V, status: status({ [APT_TEST_FIELD]: null }) })).toEqual(["APT (test) enthält 1.2.3 nicht"]);
+    expect(verifyFinalStatus({ channel: "test", version: V, status: status({ [APT_TEST_FIELD]: undefined }) })).toEqual(["APT (test) enthält 1.2.3 nicht"]);
+    expect(verifyFinalStatus({ channel: "stable", version: V, status: status({ release: V, apt: [V], [APT_TEST_FIELD]: "1.2.2" }) })).toEqual([]);
   });
 });
 
@@ -292,9 +329,11 @@ describe("serverState", () => {
     expect(release).toMatch(/\.deb 1\.2\.3 ist im APT-Repo/);
     expect(release).toMatch(/latest.json \(updates\) unverändert/);
     expect(release).toMatch(/idempotent/);
+    expect(release).toMatch(/Distribution stable/);
     const test = serverState({ phase: "release", channel: "test", version: V });
-    expect(test).not.toMatch(/APT/);
-    expect(test).toMatch(/updates-test/);
+    expect(test).toMatch(/\.deb 1\.2\.3 ist im APT-Repo \(Distribution test\)/);
+    expect(test).toMatch(/latest.json \(updates-test\) unverändert/);
+    expect(serverState({ phase: "deb", channel: "test", version: V })).toMatch(/Distribution test/);
     expect(serverState({ phase: "verify", channel: "test", version: V })).toMatch(/Uploads abgeschlossen/);
   });
 });

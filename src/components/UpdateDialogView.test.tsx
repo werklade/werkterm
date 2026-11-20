@@ -148,6 +148,46 @@ describe("update available", () => {
     (button(tree, "Kopieren")!.props.onClick as () => void)();
     expect(handlers.onCopy).toHaveBeenCalledWith(aptCommand);
   });
+  it("deb on the test channel: steps for the APT test distribution and a copyable one-liner", () => {
+    const tree = render(offer({ selfUpdate: false, installKind: "deb", channel: "test" }, { version: "0.4.0" }));
+    const text = textOf(tree);
+    expect(text).toContain("Testversionen kommen aus der APT-Distribution „test“.");
+    expect(text).toContain("In /etc/apt/sources.list.d/werklade.sources die Zeile setzen:");
+    expect(text).not.toContain(aptNote());
+    const codes = findAll(tree, e => e.type === "code").map(e => textOf(e));
+    const command = "grep -q '^Suites:' /etc/apt/sources.list.d/werklade.sources && sudo sed -i 's/^Suites:.*$/Suites: stable test/' /etc/apt/sources.list.d/werklade.sources && sudo apt update && sudo apt install werkterm";
+    expect(codes).toEqual(["Suites: stable test", "sudo apt update", "sudo apt install werkterm", command]);
+    expect(labels(tree)).toEqual(["Kopieren", "Schließen"]);
+    expect(primaries(tree)).toEqual([]);
+    (button(tree, "Kopieren")!.props.onClick as () => void)();
+    expect(handlers.onCopy).toHaveBeenCalledWith(command);
+  });
+  it("deb back to stable: warning without question, pinned stable version, no install button", () => {
+    const tree = render(offer({ selfUpdate: false, installKind: "deb", currentVersion: "1.3.0", canInstall: false }, { version: "1.2.0", downgrade: true }));
+    const text = textOf(tree);
+    expect(alerts(tree).join(" ")).toContain("Version 1.2.0 ist älter als die installierte Version 1.3.0.");
+    expect(alerts(tree).join(" ")).not.toContain("zurückwechseln?");
+    expect(text).toContain("apt fragt vor dem Downgrade nach einer Bestätigung.");
+    expect(text).toContain("Installiert ist eine neuere Version als die stabile.");
+    expect(text).toContain("„apt policy werkterm“ zeigt, welche stabile Version verfügbar ist.");
+    const command = "grep -q '^Suites:' /etc/apt/sources.list.d/werklade.sources && sudo sed -i 's/^Suites:.*$/Suites: stable/' /etc/apt/sources.list.d/werklade.sources && sudo apt update && sudo apt install werkterm=1.2.0";
+    expect(findAll(tree, e => e.type === "code").map(e => textOf(e))).toEqual(["Suites: stable", "sudo apt update", "sudo apt install werkterm=1.2.0", command]);
+    expect(labels(tree)).toEqual(["Kopieren", "Schließen"]);
+    expect(primaries(tree)).toEqual([]);
+    (button(tree, "Kopieren")!.props.onClick as () => void)();
+    expect(handlers.onCopy).toHaveBeenCalledWith(command);
+  });
+  it("deb back to stable with a non-SemVer offer: no command with that version", () => {
+    const tree = render(offer({ selfUpdate: false, installKind: "deb", currentVersion: "1.3.0" }, { version: "1.2.0-x", downgrade: true }));
+    expect(textOf(tree)).toContain("Die angebotene Versionsnummer ist ungültig.");
+    expect(findAll(tree, e => e.type === "code").map(e => textOf(e))).toEqual(["Suites: stable", "sudo apt update"]);
+    expect(labels(tree)).toEqual(["Schließen"]);
+  });
+  it("rpm keeps the generic apt-free hint", () => {
+    const tree = render(offer({ selfUpdate: false, installKind: "rpm", channel: "test" }));
+    expect(textOf(tree)).not.toContain("APT-Distribution");
+    expect(textOf(findAll(tree, e => e.type === "code")[0])).toBe(updateDownloadUrl);
+  });
   it("self-update blocked here: reason as note, download address to copy, no install button", () => {
     const tree = render(offer({ canInstall: false, blockedReason: "UPDATE_NOT_WRITABLE" }));
     expect(textOf(tree)).toContain("Der Ordner des AppImage ist nicht beschreibbar");

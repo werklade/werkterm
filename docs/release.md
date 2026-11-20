@@ -105,7 +105,7 @@ Inhalt von `werkterm-<version>`:
 | Datei | Zweck |
 |---|---|
 | `Werkterm_<v>_amd64.AppImage`, `Werkterm_<v>_x64-setup.exe`, `Werkterm_<v>_x64_en-US.msi` und je `.sig` | Updater-Artefakte |
-| `Werkterm_<v>_amd64.deb` | APT |
+| `Werkterm_<v>_amd64.deb` | APT (Distribution `test` bzw. `stable`) |
 | `SHA256SUMS` | Server-Fassung (ohne .deb) |
 | `latest.json` | Update-Daten |
 | `release-<v>.tar` | Eingabe für `release`/`release-test` |
@@ -164,12 +164,20 @@ Ablauf des Skripts (Abbruch beim ersten Fehler, der Exit-Code des Servers wird d
 3. `ssh werklade-pkg "status werkterm"` anzeigen. Abbruch, wenn die Version zurückgenommen ist, bei einer neuen
    Version schon 40 Versionsordner auf dem Server liegen oder bei `stable` eine höhere Version auf `stable` oder in
    APT steht (Downgrade). Liegt `downloads/<v>/` schon auf dem Server, wird dessen `SHA256SUMS` geladen und
-   byteweise mit dem lokalen verglichen; bei Abweichung Abbruch, bevor etwas hochgeladen wird. Bei `stable`:
-   `latest.json` sichern.
-4. Nur `stable`: `ssh werklade-pkg "deb werkterm <v>" < Werkterm_<v>_amd64.deb`. Im Kanal `test` wird das .deb
-   nicht hochgeladen, weil das APT-Repo nur `stable` kennt und jedes eingespielte Paket sofort öffentlich ist.
+   byteweise mit dem lokalen verglichen; bei Abweichung Abbruch, bevor etwas hochgeladen wird. Bei `test`:
+   Abbruch, wenn der Server `apt_test` nicht meldet oder die APT-Distribution `test` schon eine höhere Version
+   enthält. Bei `stable`: `latest.json` sichern.
+4. `ssh werklade-pkg "deb-test werkterm <v>"` (Kanal `test`, APT-Distribution `test`) bzw. `"deb werkterm <v>"`
+   (Kanal `stable`, APT-Distribution `stable`) mit `Werkterm_<v>_amd64.deb`. Pakete in `test` bekommen nur
+   Rechner, die `test` in `Suites:` ihrer `werklade.sources` eingetragen haben.
 5. `ssh werklade-pkg "release-test werkterm <v>"` bzw. `"release werkterm <v>"` mit `release-<v>.tar`.
-6. Erneut `status`: `release_test` bzw. `release` muss `<v>` sein, bei `stable` muss APT `<v>` enthalten.
+6. Erneut `status`: `release_test` bzw. `release` muss `<v>` sein. Bei `stable` muss `apt` `<v>` enthalten, bei
+   `test` das Feld `apt_test` (Feldname als `APT_TEST_FIELD` in `scripts/publish-release.mjs`).
+
+Der Kanal `test` braucht auf dem Server den Befehl `deb-test` (Rollout nach dem internen Betriebshandbuch,
+privates Repo `werklade/packages`, docs/betrieb.md, Abschnitt 7a). `test` und `stable` teilen sich den APT-Pool:
+Dieselbe Version muss in beiden Kanälen aus demselben Build stammen (derselbe `--run`), sonst scheitert `deb`
+(includedeb nach `stable`) mit einem Prüfsummenkonflikt.
 
 Ein Wiederholungslauf derselben Version mit demselben Artefakt ist unkritisch (Server antwortet idempotent).
 
@@ -181,8 +189,9 @@ curl -fsS https://pkg.werklade.de/werkterm/updates/latest.json | head -c 300
 curl -fsS https://pkg.werklade.de/werkterm/updates-test/latest.json | head -c 300
 ```
 
-Scheitert `release`/`release-test` nach einem erfolgreichen `deb`, ist das .deb im APT-Repo, `latest.json` aber
-unverändert. Denselben Aufruf wiederholen: `deb` und `release` sind für denselben Inhalt idempotent.
+Scheitert `release`/`release-test` nach einem erfolgreichen `deb`/`deb-test`, ist das .deb im APT-Repo,
+`latest.json` aber unverändert. Denselben Aufruf wiederholen: `deb`, `deb-test` und `release` sind für denselben
+Inhalt idempotent.
 
 ## Hinweis für Tests unter Windows
 

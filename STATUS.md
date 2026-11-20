@@ -74,7 +74,12 @@ Hier nur, was nicht öffentlich geführt wird:
   (Hinweise nach Zeitüberschreitung), alle `testing`. Test-Branch nicht mergen, nach den Tests löschen.
   Testbuilds 1.0.1–1.0.3 liegen noch unter Downloads auf dem Server (Entfernen nur per Forced Command laut
   Betriebshandbuch).
-- Weiter laut Nutzer: #25 (drei Retro-Designs; Entwürfe `tmp/retro-designs-preview.html` warten auf Abnahme).
+- #26 APT-Test-Kanal: Server am 2026-11-20 ausgerollt (APT-Distribution `test`, Forced Command `deb-test`,
+  Sicherungen `*.bak-2026-11-20-1718` auf dem VPS); 1.2.1-.deb liegt in `test`, APT wählt bei `Suites: stable test`
+  1.2.1 (in WSL mit isolierter APT-Konfiguration geprüft, nichts installiert). App-Hinweis mit Befehlen und
+  `publish-pkg` (Kanal test lädt das .deb per `deb-test`) committet, kommt mit dem nächsten Testbuild.
+- #25 (drei Retro-Designs): Namen, Tux-Farbe pro Design, keine helle Variante abgenommen; Vorschau mit typischen
+  Aktionen in `tmp/retro-designs-preview.html` wartet auf Abnahme.
 - Im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet auf Bestätigung).
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.

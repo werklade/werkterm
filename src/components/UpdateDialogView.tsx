@@ -7,6 +7,7 @@ import {
   type AvailableUpdate, type SkippedManifest, type UpdateInfo, type UpdateState,
 } from "../lib/updateState";
 import { parseNotes, type Inline, type ListItem } from "../lib/notesMarkdown";
+import { aptHint, aptSourcesFile, type AptHint } from "../lib/aptHint";
 import "./UpdateDialog.css";
 
 export interface UpdateDialogViewProps {
@@ -30,6 +31,8 @@ export const notConfiguredNote = (): string => t("update.notConfigured");
 /** Hint that only one manifest was checked, with the reason in the UI language. */
 export const skippedText = (skipped: SkippedManifest): string => `${skippedNote(skipped)} (${errorText(skipped.code)})`;
 export const downgradeQuestion = (info: UpdateInfo, update: AvailableUpdate): string => t("update.downgrade.question", { version: update.version, current: info.currentVersion });
+/** Same warning without the question, for installs where the app does not run the downgrade itself. */
+export const downgradeWarning = (info: UpdateInfo, update: AvailableUpdate): string => t("update.downgrade.warning", { version: update.version, current: info.currentVersion });
 
 const copyField = (p: UpdateDialogViewProps, text: string) => <div className="update-copy">
   <code>{text}</code>
@@ -53,6 +56,27 @@ export function notesView(notes: string) {
   });
 }
 
+/** apt steps for a .deb install (test distribution on or off); the app only shows and copies the commands. */
+function aptGuide(p: UpdateDialogViewProps, hint: Exclude<AptHint, { kind: "upgrade" }>) {
+  return <>
+    <p className="update-note">{t(hint.kind === "enableTest" ? "update.apt.test.intro" : "update.apt.stable.intro")}</p>
+    <ol className="update-steps">{hint.steps.map(step => <li key={step.labelKey}>
+      <span>{t(step.labelKey, { file: aptSourcesFile })}</span> <code>{step.code}</code>
+    </li>)}</ol>
+    {hint.command
+      ? <><p className="update-note">{t("update.apt.oneLiner")}</p>{copyField(p, hint.command)}</>
+      : <p className="update-warning">{t("update.apt.noVersion")}</p>}
+    {hint.kind === "leaveTest" && <><p className="update-note">{t("update.apt.policy")}</p><p className="update-note">{t("update.apt.downgradeConfirm")}</p></>}
+    <p className="update-note">{aptRepoNote()}</p>
+  </>;
+}
+
+function aptOffer(p: UpdateDialogViewProps, info: UpdateInfo, update: AvailableUpdate) {
+  const hint = aptHint(info, update);
+  if (hint && hint.kind !== "upgrade") return aptGuide(p, hint);
+  return <><p className="update-note">{aptNote()}</p>{copyField(p, aptCommand)}<p className="update-note">{aptRepoNote()}</p></>;
+}
+
 function details(info: UpdateInfo) {
   return <p className="update-meta">{t("update.installed", { version: info.currentVersion, kind: installKindLabel(info.installKind) })}{info.channel === "test" ? ` · ${t("update.channel.test")}` : ""}</p>;
 }
@@ -63,7 +87,7 @@ function offer(p: UpdateDialogViewProps, info: UpdateInfo, update: AvailableUpda
   return <>
     <p role="status" className="update-headline">{t(update.downgrade ? "update.downgrade.available" : "update.available", { version: update.version })}</p>
     {/* Back from a test build: the install button itself is the confirmation and says so. */}
-    {update.downgrade && <p role="alert" className="update-warning">{downgradeQuestion(info, update)}</p>}
+    {update.downgrade && <p role="alert" className="update-warning">{action === "install" ? downgradeQuestion(info, update) : downgradeWarning(info, update)}</p>}
     {date && <p className="update-meta">{t("update.published", { date })}</p>}
     {update.skipped && <p className="update-warning">{skippedText(update.skipped)}</p>}
     {update.notes && <>
@@ -73,7 +97,7 @@ function offer(p: UpdateDialogViewProps, info: UpdateInfo, update: AvailableUpda
     </>}
     {action === "install" && restartHints(info.installKind).map(hint => <p key={hint} className="update-note">{hint}</p>)}
     {action === "blocked" && <><p className="update-note">{info.blockedReason?.trim() ? errorText(info.blockedReason.trim()) : blockedFallback()}</p><p className="update-note">{downloadNote()}</p>{copyField(p, updateDownloadUrl)}</>}
-    {action === "apt" && <><p className="update-note">{aptNote()}</p>{copyField(p, aptCommand)}<p className="update-note">{aptRepoNote()}</p></>}
+    {action === "apt" && aptOffer(p, info, update)}
     {action === "download" && <><p className="update-note">{downloadNote()}</p>{copyField(p, updateDownloadUrl)}</>}
     {p.copyNote && <p role={p.copyFailed ? "alert" : "status"} className={p.copyFailed ? "update-error" : "update-note"}>{p.copyNote}</p>}
   </>;
