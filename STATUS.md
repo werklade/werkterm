@@ -66,11 +66,15 @@ Hier nur, was nicht öffentlich geführt wird:
 ## Nächster Schritt
 - Release 1.2.0 (#14 Update-Kanal) am 2026-11-20 veröffentlicht: CI-Lauf 44736285252, pkg.werklade.de test und
   stable, APT; ausgelieferte Dateien von außen gegen das CI-Artefakt geprüft. Vorher Server-Sicherung (Handbuch
-  Abschnitt 1) lokal verschlüsselt abgelegt, nicht auf dem VPS. Offen: GitHub-Release (Nutzer), echter Update-Test
-  1.1.0 -> 1.2.0 und Rückwechsel Test -> Stable (Downgrade) unter NSIS/MSI/AppImage; #14 steht auf `testing`.
-- Auf main für 1.3.0 (Label `testing`): #20 (Enter im Einfüge-Dialog), #23 (eigene SSH-Optionen `-o`).
-  Weiter laut Nutzer: #25 (drei Retro-Designs; Entwürfe `tmp/retro-designs-preview.html` warten auf Abnahme),
-  #24 (Hinweise nach Zeitüberschreitung).
+  Abschnitt 1) lokal verschlüsselt abgelegt, nicht auf dem VPS. GitHub-Release v1.2.0 (Latest) angelegt. Offen:
+  echter Update-Test 1.1.0 -> 1.2.0 und Rückwechsel Test -> Stable (Downgrade) unter NSIS/MSI/AppImage; #14 steht
+  auf `testing`.
+- Testbuild 1.2.1 (Branch test/1.2.1 = main bis 67d4eb9 plus Versionscommit, Run 44747338745) am 2026-11-20 im
+  Testkanal, von außen geprüft. Enthält #20 (Enter im Einfüge-Dialog), #23 (eigene SSH-Optionen `-o`), #24
+  (Hinweise nach Zeitüberschreitung), alle `testing`. Test-Branch nicht mergen, nach den Tests löschen.
+  Testbuilds 1.0.1–1.0.3 liegen noch unter Downloads auf dem Server (Entfernen nur per Forced Command laut
+  Betriebshandbuch).
+- Weiter laut Nutzer: #25 (drei Retro-Designs; Entwürfe `tmp/retro-designs-preview.html` warten auf Abnahme).
 - Im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet auf Bestätigung).
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.
