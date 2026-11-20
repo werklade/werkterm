@@ -1,6 +1,6 @@
-import { activateIconSet } from "./lib/iconSets";
+import { activateIconSet, reloadIconSet } from "./lib/iconSets";
 import { errorCode, errorText } from "./lib/backendError";
-import { applyDesign, getDesign, getUserDesigns, registerUserDesign, designsChangedEvent, type StoredDesign } from "./lib/designs";
+import { applyDesign, getDesign, getUserDesigns, registerUserDesign, syncUserDesigns, designWritesPending, designsChangedEvent, type StoredDesign } from "./lib/designs";
 import { SerialPermissionDialog } from "./components/SerialPermissionDialog";
 import { serialFixCommands, type SerialPermission } from "./lib/serialPermission";
 import { FolderDiffView } from "./components/FolderDiffView";
@@ -867,6 +867,10 @@ export default function App() {
   // Changes made outside (another device via the cloud folder): compare file fingerprints when the window gets focus.
   const lastFingerprintCheck = useRef(0);
   const checkingFingerprint = useRef(false);
+  /** Active design that was missing in the last designs sync; it is only removed if it is missing again. */
+  const missingDesign = useRef<string | null>(null);
+  /** Directory stamp whose reload failed, per name: a failure is retried once per state, a lasting one is accepted. */
+  const failedReloads = useRef(new Map<string, string>());
   const checkExternal = async () => {
     if (!dataReadyRef.current || checkingFingerprint.current || settingsSync.isLocked) return;
     const now = Date.now();
@@ -875,8 +879,17 @@ export default function App() {
     checkingFingerprint.current = true;
     try {
       const fresh = await dataDirFingerprint();
-      const plan = planReload(fingerprint.current, fresh, settingsSync.hasPending());
+      const previous = fingerprint.current;
+      // Outstanding own design writes: leave designs/ for a later check instead of replacing unsaved edits.
+      const plan = planReload(previous, fresh, settingsSync.hasPending(), designWritesPending() ? ["designs/"] : []);
       fingerprint.current = plan.baseline;
+      /** Puts the old baseline entry back, so the next focus check sees the change again. */
+      const retryLater = (name: string) => { fingerprint.current = mergeEntry(fingerprint.current, previous ?? [], name); };
+      const failed = (name: string) => {
+        const state = JSON.stringify(fresh.find(entry => entry.name === name) ?? null);
+        if (failedReloads.current.get(name) !== state) { failedReloads.current.set(name, state); retryLater(name); }
+      };
+      const notes: string[] = [];
       let reloaded = false;
       if (plan.reload.includes("sessions.json")) { reloadSessions(); reloaded = true; }
       if (plan.reload.includes("tunnels.json")) { await reloadTunnels(); reloaded = true; }
@@ -885,7 +898,35 @@ export default function App() {
         const loaded = await settingsSync.reloadExternal();
         if (loaded) { applyLoadedSettings(loaded); reloaded = true; }
       }
-      if (reloaded) setStatus(t("app.status.dataReloaded"));
+      // Designs and icon sets after settings.json, so a renamed or switched design is matched against the new settings.
+      // Own writes also change the directory stamps; they only count when the loaded content really differs.
+      let removedDesign = "";
+      if (plan.reload.includes("designs/")) {
+        try {
+          const rows = await invoke<StoredDesign[]>("designs_list");
+          failedReloads.current.delete("designs/");
+          if (designWritesPending()) retryLater("designs/");
+          else {
+            const active = settingsRef.current.design;
+            const result = syncUserDesigns(rows, active, missingDesign.current);
+            missingDesign.current = result.missing;
+            // Missing for the first time: kept, checked again on the next focus.
+            if (result.missing) retryLater("designs/");
+            // An active design that changed is reapplied through designsChangedEvent; a removed one falls back in getDesign.
+            if (result.activeRemoved) removedDesign = active;
+            if (result.changed) reloaded = true;
+          }
+        } catch { failed("designs/"); notes.push(t("app.status.designsLoadFailed")); }
+      }
+      if (plan.reload.includes("icon-sets/")) {
+        try {
+          if (await reloadIconSet(settingsRef.current.iconSet)) reloaded = true;
+          failedReloads.current.delete("icon-sets/");
+        } catch (reason) { failed("icon-sets/"); notes.push(errorText(reason)); }
+      }
+      const summary = removedDesign ? t("app.status.designRemoved", { name: removedDesign }) : reloaded ? t("app.status.dataReloaded") : "";
+      const message = [summary, ...notes].filter(Boolean).join("; ");
+      if (message) setStatus(message);
     } catch (reason) { setStatus(t("app.status.dataDirUnreadable", { reason: errorText(reason) })); }
     finally { checkingFingerprint.current = false; }
   };

@@ -162,6 +162,7 @@
   "app.status.promptAnswerFailed": "Could not answer the SSH prompt.",
   "app.status.log": "Log: {reason}",
   "app.status.dataReloaded": "Data reloaded",
+  "app.status.designRemoved": "Design “{name}” no longer exists, default design active",
   "app.status.dataDirUnreadable": "Data folder not readable: {reason}",
   "app.status.choiceNotRemembered": "Choice not remembered",
   "app.status.sessionSaved": "Session saved",

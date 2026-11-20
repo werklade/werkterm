@@ -82,7 +82,29 @@ pub struct FileStamp {
     name: String,
     modified_ms: u64,
     size: u64,
+    /// Only for directories: digest over name, kind, size and modification time of every
+    /// entry, so renames and changes below the newest timestamp are noticed as well.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    digest: Option<u64>,
+    /// Only for directories whose root could not be read: the frontend keeps its old baseline.
+    #[serde(skip_serializing_if = "is_false")]
+    unreadable: bool,
 }
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+/// Bounds for the directory fingerprint: designs/ is flat, icon-sets/ has one level of sets.
+#[derive(Clone, Copy)]
+struct TreeLimits {
+    depth: usize,
+    entries: usize,
+}
+const TREE_LIMITS: TreeLimits = TreeLimits {
+    depth: 3,
+    entries: 5000,
+};
+/// JavaScript numbers are exact up to 2^53; the digest is masked so it survives JSON.
+const DIGEST_MASK: u64 = (1 << 53) - 1;
 
 fn config(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -566,6 +588,15 @@ fn save_settings(dir: &Path, json: &str, base: Option<Stamp>) -> Result<Stamp, S
 }
 
 fn fingerprint_at(dir: &Path) -> Result<Vec<FileStamp>, String> {
+    fingerprint_with(dir, directory_stamp)
+}
+
+/// File stamps plus one aggregate per data directory. A directory that cannot be read is
+/// reported as `unreadable` instead of failing the whole fingerprint.
+fn fingerprint_with(
+    dir: &Path,
+    directory: impl Fn(&Path) -> std::io::Result<Option<FileStamp>>,
+) -> Result<Vec<FileStamp>, String> {
     let mut stamps = Vec::new();
     for name in FILES {
         let metadata = match fs::metadata(dir.join(name)) {
@@ -578,9 +609,175 @@ fn fingerprint_at(dir: &Path) -> Result<Vec<FileStamp>, String> {
             name: name.into(),
             modified_ms,
             size,
+            digest: None,
+            unreadable: false,
         });
     }
+    for name in DIRECTORIES {
+        let label = format!("{name}/");
+        match directory(&dir.join(name)) {
+            Ok(Some(stamp)) => stamps.push(FileStamp {
+                name: label,
+                ..stamp
+            }),
+            Ok(None) => (),
+            Err(_) => stamps.push(FileStamp {
+                name: label,
+                modified_ms: 0,
+                size: 0,
+                digest: None,
+                unreadable: true,
+            }),
+        }
+    }
     Ok(stamps)
+}
+
+const KIND_FILE: u8 = 0;
+const KIND_DIR: u8 = 1;
+const KIND_SYMLINK: u8 = 2;
+const KIND_UNREADABLE: u8 = 3;
+
+struct TreeEntry {
+    path: String,
+    kind: u8,
+    stamp: Stamp,
+}
+
+type ReadDirFn<'a> = &'a dyn Fn(&Path) -> std::io::Result<fs::ReadDir>;
+
+struct Walk<'a> {
+    limits: TreeLimits,
+    read: ReadDirFn<'a>,
+    entries: Vec<TreeEntry>,
+    truncated: bool,
+}
+
+impl Walk<'_> {
+    /// Unreadable parts below the root (permissions, cloud placeholders, I/O errors) become a
+    /// marker entry, so the walk goes on and a later recovery still changes the digest.
+    fn mark(&mut self, path: &str, error: &std::io::Error) {
+        self.entries.push(TreeEntry {
+            path: format!("{path}!{:?}", error.kind()),
+            kind: KIND_UNREADABLE,
+            stamp: Stamp {
+                modified_ms: 0,
+                size: 0,
+            },
+        });
+    }
+
+    /// Collects the entries below `dir` without following symlinks (they are recorded, not
+    /// entered). Entries that vanish during the walk are skipped. Only a failure to read the
+    /// root itself is an error.
+    fn walk(&mut self, dir: &Path, prefix: &str, depth: usize) -> std::io::Result<()> {
+        let reader = match (self.read)(dir) {
+            Ok(reader) => reader,
+            Err(e) if depth == 0 => return Err(e),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                self.mark(prefix, &e);
+                return Ok(());
+            }
+        };
+        for entry in reader {
+            if self.entries.len() >= self.limits.entries {
+                self.truncated = true;
+                return Ok(());
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    self.mark(prefix, &e);
+                    break;
+                }
+            };
+            let path = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            // DirEntry::metadata does not follow symlinks on any platform.
+            let metadata = match entry.metadata() {
+                Ok(m) => m,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    self.mark(&path, &e);
+                    continue;
+                }
+            };
+            let kind = if metadata.is_symlink() {
+                KIND_SYMLINK
+            } else if metadata.is_dir() {
+                KIND_DIR
+            } else {
+                KIND_FILE
+            };
+            self.entries.push(TreeEntry {
+                path: path.clone(),
+                kind,
+                stamp: stamp(&metadata),
+            });
+            if kind == KIND_DIR && depth + 1 < self.limits.depth {
+                self.walk(&entry.path(), &format!("{path}/"), depth + 1)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn directory_stamp(dir: &Path) -> std::io::Result<Option<FileStamp>> {
+    directory_stamp_with(dir, TREE_LIMITS, &|path| fs::read_dir(path))
+}
+
+/// Aggregate stamp of a data directory: newest modification time (including the directory
+/// itself), total file size and a digest over all entries. A missing directory has no stamp.
+fn directory_stamp_with(
+    dir: &Path,
+    limits: TreeLimits,
+    read: ReadDirFn<'_>,
+) -> std::io::Result<Option<FileStamp>> {
+    let root = match fs::metadata(dir) {
+        Ok(m) if m.is_dir() => m,
+        Ok(_) => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut walk = Walk {
+        limits,
+        read,
+        entries: Vec::new(),
+        truncated: false,
+    };
+    walk.walk(dir, "", 0)?;
+    let truncated = walk.truncated;
+    let mut entries = walk.entries;
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    // FNV-1a: stable across runs and platforms, unlike the std hasher.
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |bytes: &[u8]| {
+        for byte in bytes {
+            digest = (digest ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    let root = stamp(&root);
+    let mut newest = root.modified_ms;
+    let mut size = 0u64;
+    feed(&(entries.len() as u64).to_le_bytes());
+    feed(&[u8::from(truncated)]);
+    for entry in &entries {
+        feed(entry.path.as_bytes());
+        feed(&[0, entry.kind]);
+        feed(&entry.stamp.size.to_le_bytes());
+        feed(&entry.stamp.modified_ms.to_le_bytes());
+        newest = newest.max(entry.stamp.modified_ms);
+        if entry.kind == KIND_FILE {
+            size = size.saturating_add(entry.stamp.size);
+        }
+    }
+    Ok(Some(FileStamp {
+        name: String::new(),
+        modified_ms: newest,
+        size,
+        digest: Some(digest & DIGEST_MASK),
+        unreadable: false,
+    }))
 }
 
 async fn blocking<T: Send + 'static>(
@@ -1177,5 +1374,219 @@ mod tests {
         assert_eq!(stamps[0].name, "sessions.json");
         assert_eq!(stamps[0].size, 5);
         assert!(stamps[0].modified_ms > 0);
+        assert!(stamps[0].digest.is_none());
+    }
+
+    fn dir_stamp(dir: &Path, name: &str) -> Option<(u64, u64, u64)> {
+        fingerprint_at(dir)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == name)
+            .map(|s| (s.modified_ms, s.size, s.digest.unwrap()))
+    }
+
+    fn write_at(path: &Path, bytes: &[u8], seconds: u64) {
+        fs::write(path, bytes).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(seconds))
+            .unwrap();
+    }
+
+    #[test]
+    fn fingerprint_aggregates_directories() {
+        let temp = Temp::new();
+        assert!(dir_stamp(&temp.0, "designs/").is_none());
+        assert!(dir_stamp(&temp.0, "icon-sets/").is_none());
+        let designs = temp.dir("designs");
+        let empty = dir_stamp(&temp.0, "designs/").unwrap();
+        assert_eq!(empty.1, 0);
+
+        write_at(&designs.join("a.json"), b"12345", 2_000_000);
+        let added = dir_stamp(&temp.0, "designs/").unwrap();
+        assert_eq!(added.1, 5);
+        assert_ne!(added.2, empty.2);
+        // Stable while nothing changes.
+        assert_eq!(dir_stamp(&temp.0, "designs/"), Some(added));
+
+        // An older file with the same size still changes the digest.
+        write_at(&designs.join("b.json"), b"x", 1_000_000);
+        let second = dir_stamp(&temp.0, "designs/").unwrap();
+        write_at(&designs.join("b.json"), b"y", 1_000_001);
+        let changed = dir_stamp(&temp.0, "designs/").unwrap();
+        assert_eq!(changed.1, second.1);
+        assert_ne!(changed.2, second.2);
+
+        // Rename keeping size and time, then delete.
+        fs::rename(designs.join("b.json"), designs.join("c.json")).unwrap();
+        let renamed = dir_stamp(&temp.0, "designs/").unwrap();
+        assert_ne!(renamed.2, changed.2);
+        fs::remove_file(designs.join("c.json")).unwrap();
+        let removed = dir_stamp(&temp.0, "designs/").unwrap();
+        assert_eq!(removed.1, 5);
+        assert_ne!(removed.2, renamed.2);
+
+        fs::remove_dir_all(&designs).unwrap();
+        assert!(dir_stamp(&temp.0, "designs/").is_none());
+    }
+
+    #[test]
+    fn fingerprint_sees_files_inside_icon_sets() {
+        let temp = Temp::new();
+        let set = temp.dir("icon-sets").join("set-1");
+        fs::create_dir_all(&set).unwrap();
+        write_at(&set.join("folder.svg"), b"<svg/>", 1_000_000);
+        let before = dir_stamp(&temp.0, "icon-sets/").unwrap();
+        assert_eq!(before.1, 6);
+        write_at(&set.join("folder.svg"), b"<svg />", 1_000_000);
+        let after = dir_stamp(&temp.0, "icon-sets/").unwrap();
+        assert_eq!(after.1, 7);
+        assert_ne!(after.2, before.2);
+        assert!(after.2 <= DIGEST_MASK);
+        fs::remove_file(set.join("folder.svg")).unwrap();
+        assert_ne!(dir_stamp(&temp.0, "icon-sets/").unwrap().2, after.2);
+    }
+
+    #[test]
+    fn directory_stamp_json_shape() {
+        let temp = Temp::new();
+        temp.dir("designs");
+        let stamps = fingerprint_at(&temp.0).unwrap();
+        let value = serde_json::to_value(&stamps).unwrap();
+        let entry = value.as_array().unwrap().first().unwrap();
+        assert_eq!(entry["name"], "designs/");
+        assert!(entry["digest"].is_u64() && entry["modifiedMs"].is_u64());
+        assert!(entry.get("unreadable").is_none());
+    }
+
+    #[test]
+    fn unreadable_directory_keeps_file_stamps() {
+        let temp = Temp::new();
+        fs::write(temp.0.join("sessions.json"), b"12345").unwrap();
+        temp.dir("designs");
+        let stamps = fingerprint_with(&temp.0, |path| {
+            if path.ends_with("designs") {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            } else {
+                directory_stamp(path)
+            }
+        })
+        .unwrap();
+        assert_eq!(stamps.len(), 2);
+        assert_eq!(stamps[0].name, "sessions.json");
+        assert_eq!(stamps[1].name, "designs/");
+        assert!(stamps[1].unreadable && stamps[1].digest.is_none());
+        let value = serde_json::to_value(&stamps).unwrap();
+        assert_eq!(value[1]["unreadable"], true);
+    }
+
+    #[test]
+    fn unreadable_subfolder_becomes_a_marker() {
+        let temp = Temp::new();
+        let sets = temp.dir("icon-sets");
+        let set = sets.join("set-1");
+        fs::create_dir_all(&set).unwrap();
+        write_at(&set.join("folder.svg"), b"<svg/>", 1_000_000);
+        let read = |path: &Path| fs::read_dir(path);
+        let fail = |path: &Path| {
+            if path.ends_with("set-1") {
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            } else {
+                fs::read_dir(path)
+            }
+        };
+        let readable = directory_stamp_with(&sets, TREE_LIMITS, &read)
+            .unwrap()
+            .unwrap();
+        let blocked = directory_stamp_with(&sets, TREE_LIMITS, &fail)
+            .unwrap()
+            .unwrap();
+        assert_ne!(blocked.digest, readable.digest);
+        assert_eq!(blocked.size, 0);
+        // The root itself failing is an error (reported as unreadable by fingerprint_at).
+        let root_fails = |_: &Path| Err(std::io::Error::other("io"));
+        assert!(directory_stamp_with(&sets, TREE_LIMITS, &root_fails).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_denied_subfolder_does_not_fail_fingerprint() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = Temp::new();
+        fs::write(temp.0.join("macros.json"), b"[]").unwrap();
+        let set = temp.dir("icon-sets").join("locked");
+        fs::create_dir_all(&set).unwrap();
+        fs::write(set.join("a.svg"), b"<svg/>").unwrap();
+        fs::set_permissions(&set, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = fingerprint_at(&temp.0);
+        fs::set_permissions(&set, fs::Permissions::from_mode(0o700)).unwrap();
+        let stamps = result.unwrap();
+        assert!(stamps.iter().any(|s| s.name == "macros.json"));
+        let sets = stamps.iter().find(|s| s.name == "icon-sets/").unwrap();
+        assert!(!sets.unreadable && sets.digest.is_some());
+    }
+
+    #[test]
+    fn depth_and_entry_limits_bound_the_walk() {
+        let temp = Temp::new();
+        let root = temp.dir("designs");
+        let deep = root.join("a").join("b").join("c");
+        fs::create_dir_all(&deep).unwrap();
+        let inside = root.join("a").join("b").join("inside.txt");
+        write_at(&inside, b"1", 1_000_000);
+        write_at(&deep.join("beyond.txt"), b"1", 1_000_000);
+        let visited = std::cell::RefCell::new(Vec::new());
+        let tracking = |p: &Path| {
+            visited.borrow_mut().push(p.to_path_buf());
+            fs::read_dir(p)
+        };
+        let stamp = directory_stamp_with(&root, TREE_LIMITS, &tracking)
+            .unwrap()
+            .unwrap();
+        // Levels 0..=2 are read; a/b/c (level 3) is recorded as an entry but not entered.
+        let visited = visited.into_inner();
+        assert!(visited.contains(&root.join("a").join("b")));
+        assert!(!visited.contains(&deep));
+        assert_eq!(stamp.size, 1);
+        let read = |p: &Path| fs::read_dir(p);
+        let before = stamp;
+        write_at(&inside, b"22", 1_000_000);
+        let after = directory_stamp_with(&root, TREE_LIMITS, &read)
+            .unwrap()
+            .unwrap();
+        assert_ne!(after.digest, before.digest);
+
+        let flat = temp.dir("flat");
+        for index in 0..5 {
+            write_at(&flat.join(format!("{index}.json")), b"x", 1_000_000);
+        }
+        let small = TreeLimits {
+            depth: 3,
+            entries: 3,
+        };
+        let limited = directory_stamp_with(&flat, small, &read).unwrap().unwrap();
+        assert_eq!(limited.size, 3);
+        let full = directory_stamp_with(&flat, TREE_LIMITS, &read)
+            .unwrap()
+            .unwrap();
+        assert_eq!(full.size, 5);
+        assert_ne!(limited.digest, full.digest);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fingerprint_does_not_follow_symlinks_inside_directories() {
+        let temp = Temp::new();
+        let outside = temp.dir("outside");
+        let designs = temp.dir("designs");
+        std::os::unix::fs::symlink(&outside, designs.join("link")).unwrap();
+        let before = dir_stamp(&temp.0, "designs/").unwrap();
+        write_at(&outside.join("secret.json"), b"secret", 1_000_000);
+        let after = dir_stamp(&temp.0, "designs/").unwrap();
+        assert_eq!(before.1, 0);
+        assert_eq!(after.1, 0);
+        assert_eq!(after.2, before.2);
     }
 }

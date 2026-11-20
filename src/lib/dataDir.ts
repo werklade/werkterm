@@ -3,7 +3,8 @@ import { t } from "../i18n";
 
 export interface DataDirStatus { configured: boolean; custom: boolean; path: string; defaultPath: string; reachable: boolean }
 export interface DataDirInspect { exists: boolean; isDir: boolean; writable: boolean; hasData: boolean; sameAsCurrent: boolean }
-export interface FileFingerprint { name: string; modifiedMs: number; size: number }
+/** Files carry their name ("sessions.json"); directories end with "/" ("designs/") and carry a content digest. */
+export interface FileFingerprint { name: string; modifiedMs: number; size: number; digest?: number; unreadable?: boolean }
 
 export const dataDirStatus = () => invoke<DataDirStatus>("data_dir_status");
 export const dataDirInspect = (path: string) => invoke<DataDirInspect>("data_dir_inspect", { path });
@@ -46,7 +47,7 @@ export function shouldCheck(now: number, last: number, minGap = fingerprintMinGa
   return now - last >= minGap;
 }
 
-/** Names whose size or modification time differ. The first sample (prev === null) is only a baseline. */
+/** Names whose size, modification time or digest differ. The first sample (prev === null) is only a baseline. */
 export function changedFiles(prev: readonly FileFingerprint[] | null, next: readonly FileFingerprint[]): string[] {
   if (!prev) return [];
   const before = new Map(prev.map(entry => [entry.name, entry]));
@@ -56,7 +57,7 @@ export function changedFiles(prev: readonly FileFingerprint[] | null, next: read
     const a = before.get(name);
     const b = after.get(name);
     if (!a || !b) return true;
-    return a.modifiedMs !== b.modifiedMs || a.size !== b.size;
+    return a.modifiedMs !== b.modifiedMs || a.size !== b.size || a.digest !== b.digest;
   });
 }
 
@@ -70,13 +71,19 @@ export function mergeEntry(baseline: readonly FileFingerprint[] | null, fresh: r
 
 export interface ReloadPlan { reload: string[]; baseline: FileFingerprint[] }
 /**
- * Decides what to reload. While an own settings write is outstanding, an external settings.json change is
- * neither reloaded nor absorbed into the baseline: the own write wins, and the baseline is updated after it.
+ * Decides what to reload. Held names are neither reloaded nor absorbed into the baseline, so the next check still
+ * sees the change: settings.json while an own settings write is outstanding (the own write wins, the baseline is
+ * updated after it), every name in `hold` (e.g. "designs/" while an own design write is outstanding) and every
+ * directory the backend could not read.
  */
-export function planReload(prev: readonly FileFingerprint[] | null, next: readonly FileFingerprint[], settingsPending: boolean): ReloadPlan {
+export function planReload(prev: readonly FileFingerprint[] | null, next: readonly FileFingerprint[], settingsPending: boolean, hold: readonly string[] = []): ReloadPlan {
+  const held = new Set(hold);
+  if (settingsPending) held.add("settings.json");
+  for (const entry of next) if (entry.unreadable) held.add(entry.name);
   const changed = changedFiles(prev, next);
-  if (!settingsPending || !changed.includes("settings.json")) return { reload: changed, baseline: [...next] };
-  const old = prev?.find(entry => entry.name === "settings.json");
-  const rest = next.filter(entry => entry.name !== "settings.json");
-  return { reload: changed.filter(name => name !== "settings.json"), baseline: old ? [...rest, old] : rest };
+  const keep = changed.filter(name => held.has(name));
+  if (!keep.length) return { reload: changed, baseline: [...next] };
+  const baseline = next.filter(entry => !keep.includes(entry.name));
+  for (const name of keep) { const old = prev?.find(entry => entry.name === name); if (old) baseline.push(old); }
+  return { reload: changed.filter(name => !held.has(name)), baseline };
 }

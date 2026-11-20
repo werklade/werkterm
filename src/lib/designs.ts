@@ -111,6 +111,59 @@ function changed() {
 export function registerUserDesign(id: string, design: Design) { users.set(id, normalizeDesign(design)); changed(); }
 export function unregisterUserDesign(id: string) { users.delete(id); changed(); }
 export function getUserDesigns(): StoredDesign[] { return [...users].map(([id, design]) => ({ id, design })); }
+export interface DesignDiff { added: StoredDesign[]; updated: StoredDesign[]; removed: string[] }
+/** Compares registered user designs with a fresh list from disk (designs normalized like registerUserDesign). */
+export function diffUserDesigns(current: readonly StoredDesign[], fresh: readonly StoredDesign[]): DesignDiff {
+  const before = new Map(current.map(item => [item.id, item.design]));
+  const after = new Map(fresh.map(item => [item.id, normalizeDesign(item.design)]));
+  const diff: DesignDiff = { added: [], updated: [], removed: [] };
+  for (const [id, design] of after) {
+    const old = before.get(id);
+    if (!old) diff.added.push({ id, design });
+    else if (JSON.stringify(old) !== JSON.stringify(design)) diff.updated.push({ id, design });
+  }
+  diff.removed = [...before.keys()].filter(id => !after.has(id));
+  return diff;
+}
+let designWrites = 0;
+/**
+ * Marks an own write to designs/ as outstanding (debounce, create, rename, delete). While any is outstanding the
+ * focus check does not sync designs, so a half-saved own state is never replaced by the file on disk.
+ * Returns the release function; calling it more than once has no further effect.
+ */
+export function beginDesignWrite(): () => void {
+  designWrites++;
+  let released = false;
+  return () => { if (!released) { released = true; designWrites--; } };
+}
+export const designWritesPending = (): boolean => designWrites > 0;
+export interface DesignSync { changed: boolean; activeChanged: boolean; activeRemoved: boolean; missing: string | null }
+/**
+ * Applies a fresh list from disk to the registered user designs: new ones are registered, changed ones replaced,
+ * missing ones unregistered. `active` is the design name from the settings. If the active user design is missing
+ * from the list, it is kept the first time (`missing` names it, the caller checks again later), because the file
+ * may be half synced or renamed before settings.json arrives. Only when it is missing again (`missingBefore`
+ * equals `active`) it is removed and reported as `activeRemoved`; getDesign then falls back to the default design.
+ */
+export function syncUserDesigns(fresh: readonly StoredDesign[], active: string, missingBefore: string | null = null): DesignSync {
+  const before = getUserDesigns();
+  const builtIn = Object.prototype.hasOwnProperty.call(builtInDesigns, active);
+  const oldActive = builtIn ? undefined : before.find(item => item.design.name === active);
+  const diff = diffUserDesigns(before, fresh);
+  const gone = !!oldActive && !fresh.some(item => normalizeDesign(item.design).name === active);
+  const keep = gone && missingBefore !== active ? oldActive.id : null;
+  if (keep) {
+    diff.removed = diff.removed.filter(id => id !== keep);
+    diff.updated = diff.updated.filter(item => item.id !== keep);
+  }
+  const missing = keep ? active : null;
+  if (diff.added.length + diff.updated.length + diff.removed.length === 0) return { changed: false, activeChanged: false, activeRemoved: false, missing };
+  for (const id of diff.removed) users.delete(id);
+  for (const { id, design } of [...diff.added, ...diff.updated]) users.set(id, design);
+  const now = builtIn ? undefined : getUserDesigns().find(item => item.design.name === active)?.design;
+  changed();
+  return { changed: true, activeChanged: !!now && JSON.stringify(oldActive?.design) !== JSON.stringify(now), activeRemoved: !!oldActive && !now, missing };
+}
 export function getDesign(name: string): Design {
   return (Object.prototype.hasOwnProperty.call(builtInDesigns, name) ? builtInDesigns[name] : undefined)
     ?? [...users.values()].find(design => design.name === name) ?? builtInDesigns["Werklade Dunkel"];

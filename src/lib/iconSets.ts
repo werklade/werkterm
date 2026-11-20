@@ -21,6 +21,26 @@ export async function activateIconSet(name: string) {
   const overrides = await invoke<Record<string, string>>("icon_sets_load", { id: name });
   if (current === request) setIconSet(name, overrides);
 }
+/**
+ * Reloads the active imported set after an external change of icon-sets/. Unlike activateIconSet the current icons
+ * stay visible while loading. Returns true if the icons changed. A set that can no longer be loaded falls back to
+ * Standard and the error is passed on, as with activateIconSet.
+ */
+export async function reloadIconSet(name: string): Promise<boolean> {
+  if (name === "Standard" || name === "Werklade") return false;
+  const current = ++request;
+  let overrides: Record<string, string>;
+  try { overrides = await invoke<Record<string, string>>("icon_sets_load", { id: name }); }
+  catch (reason) {
+    if (current === request && snapshot.name !== "Standard") setIconSet("Standard");
+    throw reason;
+  }
+  if (current !== request) return false;
+  const same = snapshot.name === name && JSON.stringify(sorted(snapshot.overrides)) === JSON.stringify(sorted(overrides));
+  if (!same) setIconSet(name, overrides);
+  return !same;
+}
+const sorted = (map: Readonly<Record<string, string>>) => Object.keys(map).sort().map(key => [key, map[key]]);
 /** Display name of a built-in icon set id; "Standard" is the persisted id of the default set. */
 export const iconSetLabel = (id: string): string => id === "Standard" ? t("iconSet.standard") : id;
 export interface StoredIconSet { id: string; name: string; icons: string[] }

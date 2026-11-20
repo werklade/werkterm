@@ -162,6 +162,7 @@
   "app.status.promptAnswerFailed": "SSH-Rückfrage konnte nicht beantwortet werden.",
   "app.status.log": "Protokoll: {reason}",
   "app.status.dataReloaded": "Daten neu geladen",
+  "app.status.designRemoved": "Design „{name}“ nicht mehr vorhanden, Standarddesign aktiv",
   "app.status.dataDirUnreadable": "Datenordner nicht lesbar: {reason}",
   "app.status.choiceNotRemembered": "Auswahl nicht gemerkt",
   "app.status.sessionSaved": "Sitzung gespeichert",

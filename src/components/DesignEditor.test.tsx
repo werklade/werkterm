@@ -1,7 +1,7 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ColorRow, DesignEditor, parseDesignColor } from "./DesignEditor";
-import { getDesign } from "../lib/designs";
+import { designWritesPending, getDesign } from "../lib/designs";
 const host = vi.hoisted(() => ({ states: [] as unknown[], refs: [] as { current: unknown }[], refIndex: 0, stored: [] as { id: string; design: unknown }[], index: 0, invoke: vi.fn(), register: vi.fn() }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(), useEffect: vi.fn(), useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(), useRef: (current: unknown) => { const index = host.refIndex++; return host.refs[index] ?? (host.refs[index] = { current }); }, useState: (initial: unknown) => { const index = host.index++; if (!(index in host.states)) host.states[index] = typeof initial === "function" ? initial() : initial; return [host.states[index], (value: unknown) => { host.states[index] = value; }]; } }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: host.invoke }));
@@ -36,3 +36,23 @@ it("shows an inline error and does not apply invalid hex input", () => {
   vi.useRealTimers();
 });
 it("expands short hex while preserving alpha in full hex", () => { expect(parseDesignColor("#aBc")).toBe("#aabbcc"); expect(parseDesignColor("#ABCDEF80")).toBe("#abcdef80"); expect(parseDesignColor("red")).toBeUndefined(); });
+it("marks a user design edit as an outstanding write until the debounced save finished", async () => {
+  const stored = { ...getDesign("Werklade Dunkel"), name: "Eigen" };
+  const actual = await vi.importActual<typeof import("../lib/designs")>("../lib/designs");
+  actual.registerUserDesign("own", stored);
+  host.stored = [{ id: "own", design: stored }];
+  host.states[0] = host.stored;
+  let finish!: () => void;
+  host.invoke.mockImplementation(() => new Promise<void>(done => { finish = done; }));
+  const tree = DesignEditor({ name: "Eigen", onChange: vi.fn() });
+  const row = elements(tree).find(node => node.type === ColorRow && node.props.token === "bg-app")!;
+  (row.props.onChange as (color: string) => void)("#123456");
+  expect(designWritesPending()).toBe(true);
+  vi.advanceTimersByTime(400);
+  await vi.waitFor(() => expect(host.invoke).toHaveBeenCalledWith("designs_save", expect.objectContaining({ id: "own" })));
+  expect(designWritesPending()).toBe(true);
+  finish();
+  await vi.waitFor(() => expect(designWritesPending()).toBe(false));
+  actual.unregisterUserDesign("own");
+  vi.useRealTimers();
+});

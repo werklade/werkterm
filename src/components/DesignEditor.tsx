@@ -3,7 +3,7 @@ import { errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save, confirm } from "@tauri-apps/plugin-dialog";
 import { currentLocale, t, useT, type TextKey } from "../i18n";
-import { applyDesign, builtInDesigns, contrastRatio, designLabel, designsChangedEvent, editorTokens, getDesign, getUserDesigns, normalizeDesign, registerUserDesign, unregisterUserDesign, uiTokens, type Design, type StoredDesign } from "../lib/designs";
+import { applyDesign, beginDesignWrite, builtInDesigns, contrastRatio, designLabel, designsChangedEvent, editorTokens, getDesign, getUserDesigns, normalizeDesign, registerUserDesign, unregisterUserDesign, uiTokens, type Design, type StoredDesign } from "../lib/designs";
 import { ansiKeys } from "../lib/terminalThemes";
 import "./DesignEditor.css";
 
@@ -41,11 +41,16 @@ export function DesignEditor({ name, onChange }: { name: string; onChange(name: 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<{ id: string; design: Design } | null>(null);
   const saving = useRef(Promise.resolve());
+  /** Marks an own write as outstanding from the first edit through the debounce until the save finished. */
+  const hold = useRef<(() => void) | null>(null);
+  const holdWrite = () => { hold.current ??= beginDesignWrite(); };
   const flush = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     const next = pending.current; pending.current = null;
+    const release = hold.current; hold.current = null;
     if (next) saving.current = saving.current.then(async () => { await invoke("designs_save", { id: next.id, design: next.design }); }).catch(reason => setError(errorText(reason)));
+    if (release) saving.current = saving.current.finally(release);
   };
   useEffect(() => {
     const update = () => setUsers(getUserDesigns());
@@ -65,7 +70,9 @@ export function DesignEditor({ name, onChange }: { name: string; onChange(name: 
   };
   const create = async (next: Design, activate = true) => {
     const copy = { ...next, name: uniqueName(next.name) };
-    const id = await invoke<string>("designs_save", { id: null, design: copy });
+    const release = beginDesignWrite();
+    let id: string;
+    try { id = await invoke<string>("designs_save", { id: null, design: copy }); } finally { release(); }
     registerUserDesign(id, copy); originals.current.set(copy.name, structuredClone(copy)); if (activate) { current.current = copy; setDesign(copy); onChange(copy.name); } return { id, design: copy };
   };
   const copyInFlight = useRef<Promise<StoredDesign> | null>(null);
@@ -74,17 +81,17 @@ export function DesignEditor({ name, onChange }: { name: string; onChange(name: 
     const next = normalizeDesign({ ...current.current, [group]: { ...current.current[group], [token]: color } }, current.current);
     current.current = next; setDesign(next); applyDesign(next);
     const stored = getUserDesigns().find(item => item.design.name === next.name);
-    if (stored) { registerUserDesign(stored.id, next); pending.current = { id: stored.id, design: next }; if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(flush, 400); }
+    if (stored) { registerUserDesign(stored.id, next); holdWrite(); pending.current = { id: stored.id, design: next }; if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(flush, 400); }
     else {
       if (!copyInFlight.current) {
         const original = structuredClone(originals.current.get(next.name) ?? getDesign(next.name));
         setBusy(true);
         copyInFlight.current = create(editableDesign(next, true), false).then(item => { originals.current.set(item.design.name, { ...original, name: item.design.name }); return item; });
       }
-      void copyInFlight.current.then(item => { const latest = { ...current.current, name: item.design.name }; current.current = latest; setDesign(latest); registerUserDesign(item.id, latest); onChange(latest.name); pending.current = { id: item.id, design: latest }; timer.current = setTimeout(flush, 400); }).catch(reason => setError(errorText(reason))).finally(() => { copyInFlight.current = null; setBusy(false); });
+      void copyInFlight.current.then(item => { const latest = { ...current.current, name: item.design.name }; current.current = latest; setDesign(latest); registerUserDesign(item.id, latest); onChange(latest.name); holdWrite(); pending.current = { id: item.id, design: latest }; timer.current = setTimeout(flush, 400); }).catch(reason => setError(errorText(reason))).finally(() => { copyInFlight.current = null; setBusy(false); });
     }
   };
-  const run = async (action: () => Promise<void>) => { setBusy(true); setError(""); try { flush(); await saving.current; await action(); } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); } };
+  const run = async (action: () => Promise<void>) => { setBusy(true); setError(""); const release = beginDesignWrite(); try { flush(); await saving.current; await action(); } catch (reason) { setError(errorText(reason)); } finally { release(); setBusy(false); } };
   const user = users.find(item => item.design.name === design.name);
   const status = new Set(["accent", "accent-hover", "accent-hover-fill", "on-accent", "focus-ring", "danger", "warning", "success", "warning-bg", "error-bg"]);
   const groups: { id: string; title: TextKey; group: "ui" | "terminal" | "editor"; keys: readonly string[] }[] = [

@@ -62,6 +62,34 @@ describe("fingerprint comparison", () => {
     expect(held.baseline.find(e => e.name === "settings.json")?.modifiedMs).toBe(1);
     expect(held.baseline.find(e => e.name === "sessions.json")?.modifiedMs).toBe(2);
   });
+  it("detects directory changes by digest and treats them independently of settings", () => {
+    const dir = (name: string, digest: number, modifiedMs = 5, size = 10): FileFingerprint => ({ name, modifiedMs, size, digest });
+    const base = [...files(), dir("designs/", 1), dir("icon-sets/", 1)];
+    expect(changedFiles(base, [...files(), dir("designs/", 2), dir("icon-sets/", 1)])).toEqual(["designs/"]);
+    expect(changedFiles(base, [...files(), dir("designs/", 1)])).toEqual(["icon-sets/"]);
+    expect(changedFiles([...files()], [...files(), dir("designs/", 1)])).toEqual(["designs/"]);
+    const held = planReload(base, [...files(1, 1, 1, 9), dir("designs/", 3), dir("icon-sets/", 4)], true);
+    expect(held.reload).toEqual(["designs/", "icon-sets/"]);
+    expect(held.baseline.find(e => e.name === "settings.json")?.modifiedMs).toBe(1);
+    expect(held.baseline.find(e => e.name === "designs/")?.digest).toBe(3);
+    expect(planReload(base, [...files(1, 1, 1, 9), dir("designs/", 3), dir("icon-sets/", 1)], false).reload).toEqual(["settings.json", "designs/"]);
+  });
+  it("holds named entries and unreadable directories without absorbing them", () => {
+    const dir = (name: string, digest: number): FileFingerprint => ({ name, modifiedMs: 5, size: 10, digest });
+    const base = [...files(), dir("designs/", 1), dir("icon-sets/", 1)];
+    const held = planReload(base, [...files(2), dir("designs/", 2), dir("icon-sets/", 2)], false, ["designs/"]);
+    expect(held.reload).toEqual(["sessions.json", "icon-sets/"]);
+    expect(held.baseline.find(e => e.name === "designs/")?.digest).toBe(1);
+    expect(held.baseline.find(e => e.name === "icon-sets/")?.digest).toBe(2);
+    // The held change is seen again by the next check.
+    expect(changedFiles(held.baseline, [...files(2), dir("designs/", 2), dir("icon-sets/", 2)])).toEqual(["designs/"]);
+    const unreadable = planReload(base, [...files(), { name: "designs/", modifiedMs: 0, size: 0, unreadable: true }, dir("icon-sets/", 1)], false);
+    expect(unreadable.reload).toEqual([]);
+    expect(unreadable.baseline.find(e => e.name === "designs/")?.digest).toBe(1);
+    // An unreadable directory without an old entry stays out of the baseline and is picked up once readable.
+    const fresh = planReload(files(), [...files(), { name: "icon-sets/", modifiedMs: 0, size: 0, unreadable: true }], false);
+    expect(fresh).toEqual({ reload: [], baseline: files() });
+  });
   it("plans no reload for the baseline sample", () => {
     expect(planReload(null, files(), false)).toEqual({ reload: [], baseline: files() });
   });

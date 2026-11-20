@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyDesign, builtInDesigns, contrastRatio, designColorScheme, editorTokens, getDesign, normalizeDesign, registerUserDesign, uiTokens, unregisterUserDesign } from "./designs";
+import { applyDesign, beginDesignWrite, builtInDesigns, contrastRatio, designColorScheme, designWritesPending, diffUserDesigns, editorTokens, getDesign, getUserDesigns, normalizeDesign, registerUserDesign, syncUserDesigns, uiTokens, unregisterUserDesign } from "./designs";
 import { ansiKeys } from "./terminalThemes";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -62,5 +62,69 @@ describe("design rendering and contrast", () => {
     expect(contrastRatio("#ffffff00", "#000000")).toBeCloseTo(1);
     expect(contrastRatio("#ffffff80", "#000000")).toBeGreaterThan(4.5);
     expect(contrastRatio("#777777", "#ffffff")).toBeLessThan(4.5);
+  });
+});
+
+describe("user design sync", () => {
+  const make = (name: string, accent = "#123456") => normalizeDesign({ ...builtInDesigns["Werklade Dunkel"], name, ui: { ...builtInDesigns["Werklade Dunkel"].ui, accent } });
+  afterEach(() => { for (const { id } of getUserDesigns()) unregisterUserDesign(id); });
+  it("lists added, changed and removed designs", () => {
+    const current = [{ id: "a", design: make("A") }, { id: "b", design: make("B") }];
+    const diff = diffUserDesigns(current, [{ id: "a", design: make("A", "#654321") }, { id: "c", design: make("C") }]);
+    expect(diff.added.map(item => item.id)).toEqual(["c"]);
+    expect(diff.updated.map(item => item.id)).toEqual(["a"]);
+    expect(diff.removed).toEqual(["b"]);
+    expect(diffUserDesigns(current, current)).toEqual({ added: [], updated: [], removed: [] });
+  });
+  it("normalizes the fresh list before comparing", () => {
+    const stored = { id: "a", design: make("A") };
+    const raw = { ...stored.design, ui: { ...stored.design.ui, unknown: "#000000" } } as unknown as typeof stored.design;
+    expect(diffUserDesigns([stored], [{ id: "a", design: raw }]).updated).toEqual([]);
+  });
+  it("applies the list and reports the active design", () => {
+    registerUserDesign("a", make("A"));
+    registerUserDesign("b", make("B"));
+    const events = vi.fn();
+    const target = new EventTarget();
+    target.addEventListener("werkterm-designs-changed", events);
+    vi.stubGlobal("window", target);
+    expect(syncUserDesigns(getUserDesigns(), "A")).toEqual({ changed: false, activeChanged: false, activeRemoved: false, missing: null });
+    expect(events).not.toHaveBeenCalled();
+    expect(syncUserDesigns([{ id: "a", design: make("A", "#abcdef") }, { id: "b", design: make("B") }], "A")).toEqual({ changed: true, activeChanged: true, activeRemoved: false, missing: null });
+    expect(getDesign("A").ui.accent).toBe("#abcdef");
+    expect(events).toHaveBeenCalledTimes(1);
+    expect(syncUserDesigns([{ id: "a", design: make("A", "#abcdef") }, { id: "c", design: make("C") }], "A")).toEqual({ changed: true, activeChanged: false, activeRemoved: false, missing: null });
+    expect(getUserDesigns().map(item => item.id).sort()).toEqual(["a", "c"]);
+    // First miss: the active design is kept and named as missing; nothing else changed.
+    expect(syncUserDesigns([{ id: "c", design: make("C") }], "A")).toEqual({ changed: false, activeChanged: false, activeRemoved: false, missing: "A" });
+    expect(getDesign("A").ui.accent).toBe("#abcdef");
+    // Second miss in a row: removed and reported.
+    expect(syncUserDesigns([{ id: "c", design: make("C") }], "A", "A")).toEqual({ changed: true, activeChanged: false, activeRemoved: true, missing: null });
+    expect(getDesign("A")).toBe(builtInDesigns["Werklade Dunkel"]);
+    // A built-in active design is never reported as removed.
+    expect(syncUserDesigns([], "Werklade Hell")).toEqual({ changed: true, activeChanged: false, activeRemoved: false, missing: null });
+    // A design that appears under the active name counts as changed.
+    expect(syncUserDesigns([{ id: "d", design: make("A") }], "A").activeChanged).toBe(true);
+  });
+  it("keeps a renamed active design until the miss repeats, other changes still apply", () => {
+    registerUserDesign("a", make("A"));
+    registerUserDesign("b", make("B"));
+    const first = syncUserDesigns([{ id: "a", design: make("A2") }, { id: "b", design: make("B", "#abcdef") }], "A");
+    expect(first).toEqual({ changed: true, activeChanged: false, activeRemoved: false, missing: "A" });
+    expect(getDesign("A").name).toBe("A");
+    expect(getDesign("B").ui.accent).toBe("#abcdef");
+    // settings.json arrives with the new name: nothing is missing any more.
+    expect(syncUserDesigns([{ id: "a", design: make("A2") }, { id: "b", design: make("B", "#abcdef") }], "A2", "A")).toMatchObject({ changed: true, activeChanged: true, activeRemoved: false, missing: null });
+    // A miss of a different design than remembered starts over.
+    expect(syncUserDesigns([{ id: "b", design: make("B", "#abcdef") }], "A2", "A").missing).toBe("A2");
+  });
+  it("counts outstanding own writes", () => {
+    expect(designWritesPending()).toBe(false);
+    const first = beginDesignWrite();
+    const second = beginDesignWrite();
+    first(); first();
+    expect(designWritesPending()).toBe(true);
+    second();
+    expect(designWritesPending()).toBe(false);
   });
 });
