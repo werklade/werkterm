@@ -89,7 +89,8 @@ Hier nur, was nicht öffentlich geführt wird:
   Tux-Simulation (Vorschau `tmp/retro-behaviour-preview.html` abgenommen), committet, Tests grün, kommt mit 1.2.3.
   Offen: Sichtprüfung in der laufenden App (Windows und Linux); Kopien eines Retro-Designs bekommen keinen Retro-Tux;
   Tux-Anzahl aus den Einstellungen wirkt in Retro-Designs nicht.
-  v3 (Vorschau `tmp/retro-behaviour-preview-v3.html` abgenommen) auf main, noch in keinem Testbuild: Ebenen über
+  v3 (Vorschau `tmp/retro-behaviour-preview-v3.html` abgenommen) im Testbuild 1.2.4 (Branch test/1.2.4 = main bis
+  5b93c33 plus Versionscommit, Run 44827585454, 2026-11-20, Testkanal und APT `test`, von außen geprüft): Ebenen über
   2 Zeilen (Gerüst, Hüpfer-Bricks, Lemminge-Erdreich mit Stahl), drei Grabarten, Kletterer, eigener Abgang je
   Design bei Aktivität (< 1 s). Zeichnen und Abgangsphase ohne automatische Tests.
 - Im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet auf Bestätigung).
