@@ -35,9 +35,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- #23 (eigene SSH-Optionen `-o`): Parser `src-tauri/src/ssh/options.rs`, Sitzungsfeld, Quick connect, Export/Import,
-  Warnung bei schwachen Algorithmen; russh-Feature `des` für `3des-cbc` (nicht in den Standardlisten). Tests grün
-  (Windows), Review umgesetzt; offen: Test gegen einen alten Server, Linux-Lauf in WSL.
+- #23 (eigene SSH-Optionen `-o`): committet; offen: Test gegen einen alten Server, Linux-Lauf in WSL.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
@@ -66,12 +64,14 @@ Hier nur, was nicht öffentlich geführt wird:
   Icon-Änderung.
 
 ## Nächster Schritt
-- 1.2.0 (#14 Update-Kanal in den Einstellungen): getaggt, CI und Veröffentlichen (erst test, dann stable) laufen.
-  Danach Reihenfolge laut Nutzer: #20 (Enter im Einfüge-Dialog), #23 (eigene SSH-Optionen `-o`), #25 (drei
-  Retro-Designs mit Tux-Varianten; Entwürfe erst zur Abnahme), #24 (Hinweise nach Zeitüberschreitung).
-- Release 1.1.0 am 2026-11-16 veröffentlicht: CI-Lauf 43865852492, GitHub-Release (Latest), pkg.werklade.de stable und
-  test. Offene Issues liegen im Meilenstein 1.2.0; im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet
-  auf Bestätigung).
+- Release 1.2.0 (#14 Update-Kanal) am 2026-11-20 veröffentlicht: CI-Lauf 44736285252, pkg.werklade.de test und
+  stable, APT; ausgelieferte Dateien von außen gegen das CI-Artefakt geprüft. Vorher Server-Sicherung (Handbuch
+  Abschnitt 1) lokal verschlüsselt abgelegt, nicht auf dem VPS. Offen: GitHub-Release (Nutzer), echter Update-Test
+  1.1.0 -> 1.2.0 und Rückwechsel Test -> Stable (Downgrade) unter NSIS/MSI/AppImage; #14 steht auf `testing`.
+- Auf main für 1.3.0 (Label `testing`): #20 (Enter im Einfüge-Dialog), #23 (eigene SSH-Optionen `-o`).
+  Weiter laut Nutzer: #25 (drei Retro-Designs; Entwürfe `tmp/retro-designs-preview.html` warten auf Abnahme),
+  #24 (Hinweise nach Zeitüberschreitung).
+- Im Meilenstein 1.1.0 ist nur noch #22 offen (ausgeliefert, wartet auf Bestätigung).
 - #22 (Meldung ohne grafische Sitzung): in WSL geprüft, beim Tester mit 1.1.0 noch zu bestätigen, Label `testing`.
 - #8 OSC-7-Echo: Fix in 1.1.0 (Bash 5.2 geprüft), Test mit Bash 4.4/5.1 offen; zurückgestellt, `prio:P3`.
 - nouveau unter Wayland ungetestet.
