@@ -75,6 +75,9 @@ Hier nur, was nicht öffentlich geführt wird:
 - Testbuild 1.2.2 (Branch test/1.2.2 = main bis 56d0cbd plus Versionscommit, Run 44789860229) am 2026-11-20 im
   Testkanal und erstmals in APT `test`, von außen geprüft (latest.json, AppImage, NSIS, MSI, .deb-Prüfsumme).
   Enthält zusätzlich #25 und #26. Ersetzt 1.2.1 als Testbuild; Branch test/1.2.1 und Download 1.2.1 können weg.
+- Testbuild 1.2.3 (Branch test/1.2.3 = main bis 366f35e plus Versionscommit, Run 44805811326, Versuch 2 nach
+  hängendem Ubuntu-Spiegel) am 2026-11-20 im Testkanal und in APT `test`, von außen geprüft. Enthält das
+  eigenständige Retro-Verhalten (#25). Ersetzt 1.2.2; ältere Test-Branches und -Downloads können weg.
   Testbuilds 1.0.1–1.0.3 liegen noch unter Downloads auf dem Server (Entfernen nur per Forced Command laut
   Betriebshandbuch).
 - #26 APT-Test-Kanal: Server am 2026-11-20 ausgerollt (APT-Distribution `test`, Forced Command `deb-test`,
