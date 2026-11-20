@@ -36,13 +36,18 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 
 ## In Arbeit
 - #23 (eigene SSH-Optionen `-o`): committet; offen: Test gegen einen alten Server, Linux-Lauf in WSL.
+- 2026-11-21, auf main, noch in keinem Testbuild (alle `testing`, Rust-Tests auch in WSL grün):
+  #15 Setup-Skript `--test` (geschlossen, Test über #26); #3 Designs und Icon-Sets nach externen Änderungen neu
+  laden; #4 Teilkopie beim gescheiterten Datenordner-Wechsel zurückbauen. Offen: Sichtprüfung in der App.
+- #7 (Unterstriche): Anleitung `werkterm-1.2.4-unterstriche-1.md` (Werklade-Ordner, nicht im Repo) an den Tester;
+  wartet auf Ergebnisse. Weiter laut Reihenfolge: #5, #6, #11, #1.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.2.0: nur #14; Meilenstein 1.3.0: #1, #3–#6, #11, #15, #20, #23–#25; Sammelliste: #7–#10, #12, #13, #19).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.2.0: nur #14; Meilenstein 1.3.0: #1, #3–#6, #11, #20, #23–#26; Sammelliste: #7–#10, #12, #13, #19).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
