@@ -72,6 +72,9 @@ Hier nur, was nicht öffentlich geführt wird:
 - Testbuild 1.2.1 (Branch test/1.2.1 = main bis 67d4eb9 plus Versionscommit, Run 44747338745) am 2026-11-20 im
   Testkanal, von außen geprüft. Enthält #20 (Enter im Einfüge-Dialog), #23 (eigene SSH-Optionen `-o`), #24
   (Hinweise nach Zeitüberschreitung), alle `testing`. Test-Branch nicht mergen, nach den Tests löschen.
+- Testbuild 1.2.2 (Branch test/1.2.2 = main bis 56d0cbd plus Versionscommit, Run 44789860229) am 2026-11-20 im
+  Testkanal und erstmals in APT `test`, von außen geprüft (latest.json, AppImage, NSIS, MSI, .deb-Prüfsumme).
+  Enthält zusätzlich #25 und #26. Ersetzt 1.2.1 als Testbuild; Branch test/1.2.1 und Download 1.2.1 können weg.
   Testbuilds 1.0.1–1.0.3 liegen noch unter Downloads auf dem Server (Entfernen nur per Forced Command laut
   Betriebshandbuch).
 - #26 APT-Test-Kanal: Server am 2026-11-20 ausgerollt (APT-Distribution `test`, Forced Command `deb-test`,
