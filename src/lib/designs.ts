@@ -2,6 +2,7 @@ import { ansiKeys, terminalThemes, type TerminalTheme } from "./terminalThemes";
 import { t, type TextKey } from "../i18n";
 import { luminance, mixColor, parseColor } from "./colorCodes";
 import werkladeTokens from "../brand/werklade.tokens.json";
+import { retroDesignDefs, type RetroDesignDef } from "./retroDesigns";
 export const uiTokens = ["bg-content", "bg-app", "bg-panel", "bg-panel-alt", "bg-toolbar", "bg-menubar", "bg-input", "bg-hover", "bg-active", "bg-tab", "bg-tab-active", "fg-primary", "fg-secondary", "fg-muted", "fg-inverse", "accent", "accent-hover", "accent-hover-fill", "border", "border-strong", "focus-ring", "danger", "warning", "success", "on-accent", "monitor-ok", "monitor-warn", "monitor-critical", "selection", "backdrop", "shadow", "warning-bg", "error-bg", "indent-guide", "diff-added", "diff-deleted", "diff-added-text", "diff-deleted-text"] as const;
 export const editorTokens = ["keyword", "string", "comment", "number", "function", "type", "variable", "property", "operator", "tag", "attribute", "meta", "invalid", "gutter-fg", "active-line", "selection", "cursor"] as const;
 export type UiToken = typeof uiTokens[number];
@@ -63,10 +64,22 @@ function fromTokens(id: keyof typeof werkladeTokens.themes): Design {
     const theme = werkladeTokens.themes[id];
     return { name: theme.name, ui: { ...baseUi, ...theme.ui }, terminal: { ...theme.terminal } as TerminalTheme, editor: { ...theme.editor } as Record<EditorToken, string> };
 }
+// Retro designs live in the app (retroDesigns.ts); derived UI and editor tokens follow from their palette.
+function fromRetro(def: RetroDesignDef): Design {
+    const u = def.ui, t = def.terminal;
+    const ui = {
+        ...baseUi, ...u,
+        "accent-hover-fill": u["accent-hover"], "monitor-ok": u.success, "monitor-warn": u.warning, "monitor-critical": u.danger,
+        "warning-bg": `${u.warning}20`, "error-bg": `${u.danger}20`, "indent-guide": `${u["fg-muted"]}40`,
+    } as Record<UiToken, string>;
+    const editor = makeEditor([t.magenta, t.green, u["fg-muted"], t.yellow, t.blue, t.brightYellow, t.foreground, t.red, t.cyan, t.red, t.yellow, t.brightMagenta, u.danger, u["fg-muted"], "#ffffff0b", t.selectionBackground as string, t.cursor as string]);
+    return { name: def.name, ui, terminal: { ...t }, editor };
+}
 export const builtInDesigns: Record<string, Design> = {
     "Werkterm Dunkel": { name: "Werkterm Dunkel", ui: baseUi, terminal: { ...terminalThemes["Werkterm Dunkel"] }, editor: oldEditor },
     "Werklade Dunkel": fromTokens("dark"),
     "Werklade Hell": fromTokens("light"),
+    ...Object.fromEntries(retroDesignDefs.map(def => [def.name, fromRetro(def)])),
 };
 const colorPattern = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
 export function normalizeDesign(input: unknown, fallback: Design = builtInDesigns["Werklade Dunkel"]): Design {
@@ -102,7 +115,7 @@ export function getDesign(name: string): Design {
   return (Object.prototype.hasOwnProperty.call(builtInDesigns, name) ? builtInDesigns[name] : undefined)
     ?? [...users.values()].find(design => design.name === name) ?? builtInDesigns["Werklade Dunkel"];
 }
-const designLabels: Record<string, TextKey> = { "Werkterm Dunkel": "design.name.werktermDark", "Werklade Dunkel": "design.name.werkladeDark", "Werklade Hell": "design.name.werkladeLight" };
+const designLabels: Record<string, TextKey> = { "Werkterm Dunkel": "design.name.werktermDark", "Werklade Dunkel": "design.name.werkladeDark", "Werklade Hell": "design.name.werkladeLight", "Retro Lemminge": "design.name.retroLemminge", "Retro Gerüst": "design.name.retroGeruest", "Retro Hüpfer": "design.name.retroHuepfer" };
 /** Display name of a design id: built-in names are translated, user-created names are shown as they are. */
 export function designLabel(id: string): string {
   return Object.prototype.hasOwnProperty.call(designLabels, id) ? t(designLabels[id]) : id;

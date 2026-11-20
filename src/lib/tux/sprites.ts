@@ -1,12 +1,33 @@
 // Original 16 × 16 pixel artwork. All frames share the same transparent canvas.
-const body = [
+/**
+ * Props (robot, blocks, barrels, door ...) may have any width and height and bring their own palette.
+ * Tux frames stay 16 x 16 and use the Tux palette. Rows are strings, "." is transparent.
+ */
+export interface Prop { rows: string[]; palette: Record<string, string> }
+/** True when every row has the same length (props) and, if given, the expected size. */
+export function isRaster(rows: string[], width?: number, height?: number): boolean {
+  return rows.length > 0 && rows.every(row => row.length === rows[0].length) && (width === undefined || rows[0].length === width) && (height === undefined || rows.length === height);
+}
+/** Copies base and overwrites cells; a space in an edit leaves the cell unchanged. Edits are [row, column, text]. */
+export function editRows(base: string[], edits: [number, number, string][]): string[] {
+  const result = base.map(row => [...row]);
+  for (const [y, x, text] of edits) {
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === " ") continue;
+      if (!result[y] || x + i < 0 || x + i >= result[y].length) throw new RangeError(`sprite edit outside the raster: row ${y}, column ${x + i}`);
+      result[y][x + i] = text[i];
+    }
+  }
+  return result.map(row => row.join(""));
+}
+export const body = [
   "................", "......kkkk......", ".....kkkkkk.....", "....kkwkkwkk....",
   "....kkwkkwkk....", "....kkoyyokk....", "....kkkyykkk....", "...kkwwwwwwkk...",
   "..kkwwwwwwwwkk..", "..kkwwwwwwwwkk..", ".kkkwwwwwwwwkkk.", "..kkwwwwwwwwkk..",
   "...kkwwwwwwkk...", "....kkkkkkkk....", "...yyy....yyy...", "..yyyy....yyyy..",
 ];
 function frame(changes: Record<number, string>): string[] { return body.map((row, i) => changes[i] ?? row); }
-const profile = [
+export const profile = [
   "................", "......kkkk......", ".....kkkkkk.....", "....kkkkkwok....", "....kkkkkkkyyy..", "....kkkkkkkyy...", "....kkkkkkk.....",
   "...kkkkkwwww....", "...kkkkwwwwww...", "..kkkkkwwwwww...", "..kkkkkwwwwww...", "..kkkkkwwwwww...", "...kkkkwwwwww...", "....kkkkwwww....",
 ];
