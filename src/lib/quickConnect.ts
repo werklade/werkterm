@@ -1,12 +1,53 @@
+import { checkSshOptions, isQuickConnectOption } from "./sshOptions";
+
 export interface QuickConnectTarget {
   kind?: "ssh" | "telnet" | "serial";
   baud?: number;
   user: string | null;
   host: string;
   port: number;
+  /** `Key=Value` options given as `-o Key=Value` before the target (SSH only). */
+  sshOptions?: string[];
+}
+
+/** Splits leading `-o Key=Value` / `-oKey=Value` arguments from the target. */
+export function splitQuickConnectOptions(input: string): { options: string[]; target: string } | null {
+  const tokens = input.trim().split(/\s+/).filter(Boolean);
+  const options: string[] = [];
+  while (tokens.length > 1 && tokens[0].startsWith("-o")) {
+    const token = tokens.shift()!;
+    const option = token === "-o" ? tokens.shift() : token.slice(2);
+    if (option === undefined || !isQuickConnectOption(option)) return null;
+    options.push(option);
+  }
+  if (tokens.length !== 1) return null;
+  if (options.length && checkSshOptions(options.join("\n")) !== null) return null;
+  return { options, target: tokens[0] };
+}
+
+/** Target and option text for the ssh_connect IPC call. */
+export function quickConnectSshArgs(input: string): { target: string; sshOptions: string | null } {
+  const split = splitQuickConnectOptions(input);
+  if (!split) return { target: input.trim(), sshOptions: null };
+  return { target: split.target, sshOptions: split.options.length ? split.options.join("\n") : null };
+}
+
+/** Inserts a user name in front of the host while keeping the options. */
+export function withQuickConnectUser(input: string, user: string): string {
+  const split = splitQuickConnectOptions(input);
+  if (!split) return `${user}@${input.trim()}`;
+  return [...split.options.map(option => `-o ${option}`), `${user}@${split.target}`].join(" ");
 }
 
 export function parseQuickConnect(input: string): QuickConnectTarget | null {
+  const split = splitQuickConnectOptions(input);
+  if (!split) return null;
+  const parsed = parseTarget(split.target);
+  if (!parsed || !split.options.length) return parsed;
+  return parsed.kind ? null : { ...parsed, sshOptions: split.options };
+}
+
+function parseTarget(input: string): QuickConnectTarget | null {
   if (input.trim().startsWith("serial://")) {
     const match = /^serial:\/\/([^\s@]+)(?:@(\d+))?$/.exec(input.trim());
     const baud = Number(match?.[2] ?? 115200);

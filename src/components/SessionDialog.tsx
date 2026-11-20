@@ -1,7 +1,8 @@
 import { keyringErrorText } from "../lib/keyringErrors";
 import { errorText } from "../lib/backendError";
 import { invoke } from "@tauri-apps/api/core";
-import { defaultSerial, validateSession, type SerialConfig } from "../lib/sessions";
+import { defaultSerial, sshOptionsError, validateSession, type SerialConfig } from "../lib/sessions";
+import { legacySshAlgorithms, sshOptionsOverrideKeepalive } from "../lib/sshOptions";
 import { useEffect, useId, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { initialSessionAuthType, jumpHostOptions, sessionLabel, keyringAvailable, saveSession, type SavedSession, type SessionAuth } from "../lib/sessions";
@@ -38,6 +39,9 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const [jumpSessionId, setJumpSessionId] = useState(session?.jumpSessionId ?? "");
   const jumpOptions = jumpHostOptions(sessions, session?.id);
   const [keepaliveMax, setKeepaliveMax] = useState(session?.keepaliveMax ?? 3);
+  const [sshOptions, setSshOptions] = useState(session?.sshOptions ?? "");
+  const sshOptionsProblem = kind === "ssh" ? sshOptionsError(sshOptions) : null;
+  const legacyAlgorithms = kind === "ssh" && !sshOptionsProblem ? legacySshAlgorithms(sshOptions) : [];
   const [port, setPort] = useState(String(session?.port ?? 22));
   const [user, setUser] = useState(session?.user ?? "");
   const [authType, setAuthType] = useState<SessionAuth["type"]>(() => initialSessionAuthType(session, preferPassword, false));
@@ -68,7 +72,7 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const draft: SavedSession = { kind, id: session?.id ?? "", name: name.trim(), folder: folder.trim(), host: kind === "serial" ? "" : host,
     port: kind === "serial" ? 23 : Number(port), user: user.trim() || null, serial: kind === "serial" ? serial : null,
     keepaliveInterval: kind === "ssh" ? keepaliveInterval : 30, keepaliveMax: kind === "ssh" ? keepaliveMax : 3,
-    jumpSessionId: kind === "ssh" ? jumpSessionId || null : null, log_always: logAlways,
+    jumpSessionId: kind === "ssh" ? jumpSessionId || null : null, log_always: logAlways, sshOptions: kind === "ssh" && sshOptions.trim() ? sshOptions : "",
     auth: kind !== "ssh" ? { type: "default" } : authType === "keyFile" ? { type: "keyFile", path: keyPath } : { type: authType }, source: session?.source ?? null };
   const valid = validateSession(draft) === null && (kind !== "ssh" || !jumpSessionId || jumpOptions.some(hop => hop.id === jumpSessionId));
   const clearPassword = () => {
@@ -127,12 +131,17 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {authType === "keyFile" && <label>{t("session.keyFile")}<div className="session-path-field"><input required value={keyPath} onChange={event => setKeyPath(event.target.value)} /><button type="button" title={t("session.keyFile.browseTitle")} onClick={() => void browse()}>{t("session.browse")}</button></div></label>}
         {authType === "password" && <label>{t("session.password")}<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">{t("session.password.keep")}</span>}</label>}
-        </>}<details><summary>{t("session.advanced")}</summary><label><input type="checkbox" checked={logAlways} onChange={e => setLogAlways(e.target.checked)} />{t("session.logAlways")}</label>
+        </>}<details open={session?.sshOptions ? true : undefined}><summary>{t("session.advanced")}</summary><label><input type="checkbox" checked={logAlways} onChange={e => setLogAlways(e.target.checked)} />{t("session.logAlways")}</label>
           {kind === "ssh" && <><label>{t("session.jump")}<select value={jumpSessionId} onChange={event => setJumpSessionId(event.target.value)}>
             <option value="">{t("session.jump.none")}</option>
             {jumpOptions.map(hop => <option key={hop.id} value={hop.id}>{hop.name} ({sessionLabel(hop)})</option>)}
           </select></label>
-          <small className="session-hint">{t("session.jump.hint")}</small><p>{t("session.keepalive.info")}</p><label>{t("session.keepalive.interval")}<input type="number" required min={0} max={3600} value={keepaliveInterval} onChange={e => setKeepaliveInterval(Number(e.target.value))} /></label><label>{t("session.keepalive.max")}<input type="number" required min={1} max={100} value={keepaliveMax} onChange={e => setKeepaliveMax(Number(e.target.value))} /></label></>}</details>
+          <small className="session-hint">{t("session.jump.hint")}</small><p>{t("session.keepalive.info")}</p><label>{t("session.keepalive.interval")}<input type="number" required min={0} max={3600} value={keepaliveInterval} onChange={e => setKeepaliveInterval(Number(e.target.value))} /></label><label>{t("session.keepalive.max")}<input type="number" required min={1} max={100} value={keepaliveMax} onChange={e => setKeepaliveMax(Number(e.target.value))} /></label>
+          {sshOptionsOverrideKeepalive(sshOptions) && <small className="session-hint">{t("session.keepalive.overridden")}</small>}
+          <label>{t("session.sshOptions")}<textarea className="session-ssh-options" rows={3} spellCheck={false} autoCapitalize="off" autoCorrect="off" value={sshOptions} placeholder="KexAlgorithms=+diffie-hellman-group14-sha1" aria-invalid={sshOptionsProblem !== null} onChange={e => setSshOptions(e.target.value)} /></label>
+          <small className="session-hint">{t("session.sshOptions.hint")}</small>
+          {sshOptionsProblem && <p role="alert" className="session-error">{sshOptionsProblem}</p>}
+          {legacyAlgorithms.length > 0 && <p role="note" className="session-warning">{t("session.sshOptions.legacy", { names: legacyAlgorithms.join(", ") })}</p>}</>}</details>
       </fieldset>
       {error && <p role="alert" className="session-error">{error}</p>}
       <div className="dialog-actions"><button type="submit" disabled={!valid || busy}>{busy ? t("session.saving") : t("common.save")}</button><button type="button" disabled={busy} onClick={cancel}>{t("common.cancel")}</button></div>

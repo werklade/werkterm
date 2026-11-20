@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getLanguage, t } from "../i18n";
+import { checkSshOptions, MAX_SSH_OPTION_LINES, MAX_SSH_OPTIONS_LENGTH } from "./sshOptions";
 
 export interface SerialConfig { device: string; baud: number; data_bits: number; parity: "none" | "odd" | "even"; stop_bits: number; flow: "none" | "software" | "hardware"; enter: "cr" | "lf" | "crlf"; local_echo: boolean }
 export const defaultSerial: SerialConfig = { device: "", baud: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow: "none", enter: "cr", local_echo: false };
@@ -25,6 +26,8 @@ export interface SavedSession {
   keepaliveMax?: number;
   jumpSessionId?: string | null;
   log_always?: boolean;
+  /** OpenSSH-style options, one `Key=Value` per line (SSH only). */
+  sshOptions?: string;
 }
 
 export interface ImportCandidate {
@@ -180,7 +183,7 @@ export function validateSession(session: SavedSession): string | null {
   if (!Number.isInteger(session.keepaliveInterval ?? 30) || (session.keepaliveInterval ?? 30) < 0 || (session.keepaliveInterval ?? 30) > 3600 || !Number.isInteger(session.keepaliveMax ?? 3) || (session.keepaliveMax ?? 3) < 1 || (session.keepaliveMax ?? 3) > 100) return t("session.validate.keepalive");
   if (!session.name.trim()) return t("session.validate.nameEmpty");
   if (!["ssh", "telnet", "serial"].includes(session.kind)) return t("session.validate.unknownKind");
-  if (session.kind !== "ssh" && (session.jumpSessionId || session.auth.type !== "default")) return t("session.validate.sshOnly");
+  if (session.kind !== "ssh" && (session.jumpSessionId || session.auth.type !== "default" || session.sshOptions)) return t("session.validate.sshOnly");
   if (session.kind === "serial") {
     const c = session.serial;
     return !c || !c.device.trim() || /\p{Cc}/u.test(c.device) || !Number.isInteger(c.baud) || c.baud < 1 || c.baud > 4294967295 || ![5,6,7,8].includes(c.data_bits) || ![1,2].includes(c.stop_bits) || !["none","odd","even"].includes(c.parity) || !["none","software","hardware"].includes(c.flow) || !["cr","lf","crlf"].includes(c.enter) ? t("session.validate.serial") : null;
@@ -188,7 +191,16 @@ export function validateSession(session: SavedSession): string | null {
   if (!session.host || /[\s\p{Cc}]/u.test(session.host)) return t("session.validate.host");
   if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535) return t("session.validate.port");
   if (session.auth.type === "keyFile" && !session.auth.path.trim()) return t("session.validate.keyPath");
-  return null;
+  return sshOptionsError(session.sshOptions ?? "");
+}
+
+/** Translated syntax error of the SSH option text, or null. Algorithm names are checked by the backend. */
+export function sshOptionsError(text: string): string | null {
+  const problem = checkSshOptions(text);
+  if (!problem) return null;
+  if (problem.kind === "tooLong") return t("session.validate.sshOptions.tooLong", { lines: String(MAX_SSH_OPTION_LINES), chars: String(MAX_SSH_OPTIONS_LENGTH) });
+  if (problem.kind === "malformed") return t("session.validate.sshOptions.malformed", { line: String(problem.line) });
+  return t(problem.kind === "unknown" ? "session.validate.sshOptions.unknown" : "session.validate.sshOptions.duplicate", { line: String(problem.line), key: problem.key });
 }
 
 /** Reject self references, existing cycles, missing hops and chains beyond five gateways. */

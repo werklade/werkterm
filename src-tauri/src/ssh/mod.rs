@@ -1,6 +1,7 @@
 mod actions;
 pub mod lsparse;
 pub mod monitor;
+pub mod options;
 pub mod permissions;
 mod sudo;
 pub use actions::TransferProgress;
@@ -300,9 +301,12 @@ struct Connections {
     completed: HashSet<u32>,
 }
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SshConnection {
     pub id: u32,
     pub mode: String,
+    /// Weak algorithms explicitly enabled by the SSH options of the target or a jump host.
+    pub weak_algorithms: Vec<String>,
 }
 pub struct SshManager {
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
@@ -321,7 +325,11 @@ impl Default for SshManager {
     }
 }
 
-async fn agent_auth<H: client::Handler>(handle: &mut client::Handle<H>, user: &str) -> bool {
+async fn agent_auth<H: client::Handler>(
+    handle: &mut client::Handle<H>,
+    user: &str,
+    options: &options::SshOptions,
+) -> bool {
     use keys::agent::client::AgentClient;
     #[cfg(unix)]
     let agent = tokio::time::timeout(Duration::from_secs(2), AgentClient::connect_env())
@@ -343,15 +351,26 @@ async fn agent_auth<H: client::Handler>(handle: &mut client::Handle<H>, user: &s
         else {
             return false;
         };
-        let hash = handle
+        let server_hash = handle
             .best_supported_rsa_hash()
             .await
             .ok()
             .flatten()
             .flatten();
         for key in identities {
+            let public = key.public_key().into_owned();
+            let hash = if public.algorithm().is_rsa() {
+                match options.rsa_hash(server_hash) {
+                    Some(hash) => hash,
+                    None => continue,
+                }
+            } else if options.accepts_key(&public.algorithm()) {
+                server_hash
+            } else {
+                continue;
+            };
             if handle
-                .authenticate_publickey_with(user, key.public_key().into_owned(), hash, &mut agent)
+                .authenticate_publickey_with(user, public, hash, &mut agent)
                 .await
                 .is_ok_and(|r| r.success())
             {
@@ -362,14 +381,37 @@ async fn agent_auth<H: client::Handler>(handle: &mut client::Handle<H>, user: &s
     }
 }
 
+/// Key type of an encrypted key file without decrypting it: from `<file>.pub`, or from the
+/// unencrypted public part of an OpenSSH private key. `None` when unknown.
+async fn key_file_algorithm(path: PathBuf) -> Option<keys::Algorithm> {
+    tokio::task::spawn_blocking(move || {
+        let mut public = path.clone().into_os_string();
+        public.push(".pub");
+        if let Some(key) = std::fs::read_to_string(&public)
+            .ok()
+            .and_then(|text| keys::PublicKey::from_openssh(text.trim()).ok())
+        {
+            return Some(key.algorithm());
+        }
+        let text = std::fs::read_to_string(&path).ok()?;
+        keys::PrivateKey::from_openssh(text.trim())
+            .ok()
+            .map(|key| key.algorithm())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 async fn authenticate<H: client::Handler>(
     handle: &mut client::Handle<H>,
     target: &SshTarget,
     prompter: &dyn Prompter,
     session: Option<&crate::sessions::SavedSession>,
     stored_password: Option<String>,
+    options: &options::SshOptions,
 ) -> Result<(), String> {
-    if agent_auth(handle, &target.user).await {
+    if agent_auth(handle, &target.user, options).await {
         return Ok(());
     }
     let auth = session
@@ -396,6 +438,15 @@ async fn authenticate<H: client::Handler>(
         .map_err(|_| ui_code("SSH_KEY_LOAD"))?;
         let key = match initial {
             Ok(key) => Some(key),
+            Err(keys::Error::KeyIsEncrypted)
+                if options.restricts_user_keys()
+                    && key_file_algorithm(path.clone())
+                        .await
+                        .is_some_and(|algorithm| !options.accepts_key(&algorithm)) =>
+            {
+                // PubkeyAcceptedAlgorithms excludes this key type: no passphrase prompt.
+                None
+            }
             Err(keys::Error::KeyIsEncrypted) => {
                 let mut key = None;
                 for _ in 0..3 {
@@ -432,11 +483,21 @@ async fn authenticate<H: client::Handler>(
             Err(_) => None,
         };
         if let Some(key) = key {
-            let hash = handle
+            let server_hash = handle
                 .best_supported_rsa_hash()
                 .await
                 .map_err(|error| UiError::new("SSH_AUTH_FAILED").detail(error))?
                 .flatten();
+            let hash = if key.algorithm().is_rsa() {
+                match options.rsa_hash(server_hash) {
+                    Some(hash) => hash,
+                    None => continue,
+                }
+            } else if options.accepts_key(&key.algorithm()) {
+                server_hash
+            } else {
+                continue;
+            };
             if handle
                 .authenticate_publickey(
                     &target.user,
@@ -586,6 +647,25 @@ fn quote(path: &str) -> String {
 }
 
 const PHASE_TIMEOUT: Duration = Duration::from_secs(15);
+const TCP_ADDRESS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// TCP connect limits: per address and in total across all resolved addresses.
+/// Like OpenSSH, ConnectTimeout limits each attempt; the total never cuts off addresses a
+/// larger timeout would otherwise reach and is never shorter than the default.
+fn tcp_budget(connect_timeout: Option<Duration>, addresses: usize) -> (Duration, Duration) {
+    match connect_timeout {
+        None => (TCP_ADDRESS_TIMEOUT, PHASE_TIMEOUT),
+        Some(timeout) => {
+            let count = u32::try_from(addresses.max(1)).unwrap_or(u32::MAX);
+            (timeout, PHASE_TIMEOUT.max(timeout.saturating_mul(count)))
+        }
+    }
+}
+
+/// SSH handshake budget: ConnectTimeout may extend it, never shorten today's limit.
+fn handshake_budget(connect_timeout: Option<Duration>) -> Duration {
+    connect_timeout.map_or(PHASE_TIMEOUT, |timeout| timeout.max(PHASE_TIMEOUT))
+}
 const CANCELED: &str = ui_code("SSH_CONNECT_CANCELED");
 
 trait SshTransport: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
@@ -757,6 +837,7 @@ async fn pump_terminal(
 async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
     target: SshTarget,
     session: Option<crate::sessions::SavedSession>,
+    target_options: options::SshOptions,
     jump_sessions: Vec<crate::sessions::SavedSession>,
     known_hosts_path: PathBuf,
     prompter: Arc<dyn Prompter>,
@@ -764,6 +845,15 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
     prompts: &mut watch::Receiver<bool>,
     handler_factory: impl Fn(SshTarget, PathBuf, Arc<dyn Prompter>, watch::Sender<bool>, bool) -> H,
 ) -> Result<(client::Handle<H>, Vec<client::Handle<H>>, SetupSocket), String> {
+    // Every hop uses the SSH options of its own saved session; the target uses its own.
+    let mut per_hop_options = Vec::new();
+    for hop in &jump_sessions {
+        per_hop_options
+            .push(options::parse(&hop.ssh_options).map_err(|error| jump_error(&hop.name, error))?);
+    }
+    let options_at = |index: usize| per_hop_options.get(index).unwrap_or(&target_options);
+    // ConnectTimeout of the first hop covers the TCP connect; each hop's covers its handshake.
+    let first_timeout = options_at(0).connect_timeout;
     let mut hop_targets = Vec::new();
     for hop in &jump_sessions {
         hop_targets.push(
@@ -777,7 +867,6 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
         Some(hop) => jump_error(&hop.name, error),
         None => error,
     };
-    let started = tokio::time::Instant::now();
     // Try every resolved address like OpenSSH does: "localhost" may resolve to an
     // unreachable ::1 first (e.g. WSL mirrored networking), which only times out.
     let addresses: Vec<_> = phase(
@@ -799,24 +888,27 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
     let mut last_error =
         String::from(ui_err("SSH_RESOLVE_FAILED").arg("host", first_target.host.clone()));
     let mut connected = None;
+    // The clock starts after name resolution, as in OpenSSH.
+    let (per_address, total) = tcp_budget(first_timeout, addresses.len());
+    let started = tokio::time::Instant::now();
     for address in addresses {
-        if started.elapsed() >= Duration::from_secs(15) {
+        if started.elapsed() >= total {
             break;
         }
-        match phase(
+        match phase_with_budget(
             async {
-                tokio::time::timeout(
-                    Duration::from_secs(5),
-                    tokio::net::TcpStream::connect(address),
-                )
-                .await
-                .map_err(|_| {
-                    String::from(ui_err("SSH_ADDRESS_TIMEOUT").arg("address", address.to_string()))
-                })?
-                .map_err(ssh_error)
+                tokio::time::timeout(per_address, tokio::net::TcpStream::connect(address))
+                    .await
+                    .map_err(|_| {
+                        String::from(
+                            ui_err("SSH_ADDRESS_TIMEOUT").arg("address", address.to_string()),
+                        )
+                    })?
+                    .map_err(ssh_error)
             },
             canceled,
             prompts,
+            first_timeout.map_or(PHASE_TIMEOUT, |_| per_address + Duration::from_secs(1)),
         )
         .await
         {
@@ -849,17 +941,25 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
             Some(hop) => jump_error(&hop.name, error),
             None => error,
         };
+        let hop_options = options_at(index);
         let config = Arc::new(client::Config {
             keepalive_interval: {
-                let seconds = hop_session.map_or(30, |s| s.keepalive_interval);
+                let seconds = hop_options
+                    .server_alive_interval
+                    .unwrap_or_else(|| hop_session.map_or(30, |s| s.keepalive_interval));
                 (seconds != 0).then(|| Duration::from_secs(u64::from(seconds)))
             },
-            keepalive_max: hop_session.map_or(3, |s| s.keepalive_max as usize),
+            keepalive_max: hop_options
+                .server_alive_count_max
+                .unwrap_or_else(|| hop_session.map_or(3, |s| s.keepalive_max))
+                as usize,
             inactivity_timeout: None,
+            preferred: hop_options.preferred(),
+            gex: hop_options.gex_params(),
             ..Default::default()
         });
         let (prompt_active, _prompt_state) = watch::channel(false);
-        handle = phase(
+        handle = phase_with_budget(
             async {
                 client::connect_stream(
                     config,
@@ -877,6 +977,7 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
             },
             canceled,
             prompts,
+            handshake_budget(hop_options.connect_timeout),
         )
         .await
         .map_err(label_error)?;
@@ -909,6 +1010,7 @@ async fn connect_transport<H: client::Handler<Error = SshError> + 'static>(
                 prompter.as_ref(),
                 hop_session,
                 password,
+                hop_options,
             ),
             canceled,
             prompts,
@@ -960,9 +1062,11 @@ pub(crate) async fn tunnel_transport(
         &mut prompts,
     )
     .await?;
+    let target_options = options::parse(&session.ssh_options)?;
     connect_transport(
         target,
         Some(session),
+        target_options,
         jumps,
         ssh_dir()?.join("known_hosts"),
         prompter,
@@ -997,6 +1101,7 @@ impl SshManager {
             connect_token,
             target,
             None,
+            options::SshOptions::default(),
             Vec::new(),
             cols,
             rows,
@@ -1014,6 +1119,7 @@ impl SshManager {
         connect_token: u32,
         target: SshTarget,
         session: Option<crate::sessions::SavedSession>,
+        options: options::SshOptions,
         jump_sessions: Vec<crate::sessions::SavedSession>,
         cols: u16,
         rows: u16,
@@ -1046,6 +1152,7 @@ impl SshManager {
             .connect_inner(
                 target,
                 session,
+                options,
                 jump_sessions,
                 cols,
                 rows,
@@ -1090,6 +1197,7 @@ impl SshManager {
         self: &Arc<Self>,
         target: SshTarget,
         session: Option<crate::sessions::SavedSession>,
+        options: options::SshOptions,
         jump_sessions: Vec<crate::sessions::SavedSession>,
         cols: u16,
         rows: u16,
@@ -1103,9 +1211,18 @@ impl SshManager {
         if cols == 0 || rows == 0 {
             return Err(ui_err("TERMINAL_SIZE_ZERO").into());
         }
+        let mut weak_algorithms = options.legacy.clone();
+        for hop in &jump_sessions {
+            if let Ok(hop_options) = options::parse(&hop.ssh_options) {
+                weak_algorithms.extend(hop_options.legacy);
+            }
+        }
+        let mut seen = HashSet::new();
+        weak_algorithms.retain(|name| seen.insert(name.clone()));
         let (handle, jumps, mut setup_socket) = connect_transport(
             target,
             session,
+            options,
             jump_sessions,
             known_hosts_path,
             prompter,
@@ -1349,7 +1466,11 @@ impl SshManager {
         .to_owned();
         self.sessions.lock().await.insert(id, session);
         let _ = registered.send(true);
-        Ok(SshConnection { id, mode })
+        Ok(SshConnection {
+            id,
+            mode,
+            weak_algorithms,
+        })
     }
     /// A bounded readdir cursor on the existing authenticated SSH connection.
     /// The high-level read_dir helper collects entire directories before returning.
@@ -1896,6 +2017,60 @@ mod tests {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ))
     }
+    #[test]
+    fn connect_timeout_never_reduces_addresses_or_handshake_time() {
+        // Worst case: every address times out; how many are tried before the total runs out.
+        fn attempts(timeout: Option<Duration>, addresses: usize) -> usize {
+            let (per_address, total) = tcp_budget(timeout, addresses);
+            let mut elapsed = Duration::ZERO;
+            let mut tried = 0;
+            while tried < addresses && elapsed < total {
+                elapsed += per_address;
+                tried += 1;
+            }
+            tried
+        }
+        assert_eq!(tcp_budget(None, 4), (TCP_ADDRESS_TIMEOUT, PHASE_TIMEOUT));
+        for addresses in 1..=8 {
+            let default = attempts(None, addresses);
+            for seconds in [1, 2, 5, 6, 10, 30, 60, 3600] {
+                let timeout = Some(Duration::from_secs(seconds));
+                let tried = attempts(timeout, addresses);
+                assert!(tried >= default, "{seconds}s, {addresses} addresses");
+                assert_eq!(tried, addresses, "{seconds}s, {addresses} addresses");
+                assert!(tcp_budget(timeout, addresses).1 >= PHASE_TIMEOUT);
+            }
+        }
+        assert_eq!(handshake_budget(None), PHASE_TIMEOUT);
+        assert_eq!(
+            handshake_budget(Some(Duration::from_secs(1))),
+            PHASE_TIMEOUT
+        );
+        assert_eq!(
+            handshake_budget(Some(Duration::from_secs(60))),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[tokio::test]
+    async fn encrypted_key_type_is_read_without_passphrase() {
+        let dir = std::env::temp_dir().join(format!("werkterm-keytype-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("id_test");
+        std::fs::write(&path, "not a key").unwrap();
+        assert_eq!(key_file_algorithm(path.clone()).await, None);
+        std::fs::write(
+            dir.join("id_test.pub"),
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f test\n",
+        )
+        .unwrap();
+        assert_eq!(
+            key_file_algorithm(path).await,
+            Some(keys::Algorithm::Ed25519)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn final_connect_errors_are_found_through_jump_hosts() {
         let canceled = jump_error("outer", jump_error("inner", CANCELED.into()));

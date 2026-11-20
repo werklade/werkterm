@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- SSH sessions: "Advanced SSH options" field (one option per line as `-o Key=Value`, `Key=Value` or `Key Value`), stored with the session and included in session export/import. Quick connect accepts the same `-o Key=Value` arguments before `user@host[:port]`. Supported: `KexAlgorithms`, `HostKeyAlgorithms`, `PubkeyAcceptedAlgorithms` (alias `PubkeyAcceptedKeyTypes`), `Ciphers`, `MACs` with OpenSSH list syntax (`+` appends, `-` removes, `^` puts first, a plain list replaces), plus `ConnectTimeout`, `ServerAliveInterval` and `ServerAliveCountMax`. This reaches older servers that only offer legacy algorithms such as `diffie-hellman-group14-sha1`, `diffie-hellman-group1-sha1`, CBC ciphers (including `3des-cbc`) or `hmac-sha1`; the defaults are unchanged. Weak algorithms enabled this way are flagged in the session dialog, in the Werkterm import preview and as a line in the terminal after connecting. Naming a group exchange algorithm explicitly accepts groups from 2048 bits (default minimum 3072; 1024-bit groups are not supported). `ConnectTimeout` limits each TCP connect attempt, like OpenSSH, and never shortens the default handshake time. Encrypted key files whose type `PubkeyAcceptedAlgorithms` excludes are skipped without asking for the passphrase. Unknown options, unknown algorithm names and malformed lines are rejected with the line number before connecting. A jump host uses the options of its own session.
+
 ### Fixed
 
 - Paste dialog: Enter now confirms the paste as soon as the dialog opens, and Escape cancels. Focus used to land in the text field, so Enter only inserted a line break. In the text field Enter still inserts a line break; checkbox, selection and the other buttons keep their own Enter behaviour. The confirming Enter is no longer passed on to the terminal.

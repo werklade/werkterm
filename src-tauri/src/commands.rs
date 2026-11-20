@@ -326,6 +326,7 @@ pub async fn ssh_connect(
     tab_id: u32,
     target: String,
     session_id: Option<String>,
+    ssh_options: Option<String>,
     connect_token: u32,
     cols: u16,
     rows: u16,
@@ -345,6 +346,11 @@ pub async fn ssh_connect(
     if let Some(session) = &session {
         crate::sessions::validate_target(session, &target)?;
     }
+    // Saved sessions carry their own options; the argument is for quick connect only.
+    let options = crate::ssh::options::parse(match &session {
+        Some(session) => &session.ssh_options,
+        None => ssh_options.as_deref().unwrap_or_default(),
+    })?;
     let prompter = Arc::new(TauriPrompter {
         closed: None,
         connect_token,
@@ -358,6 +364,7 @@ pub async fn ssh_connect(
             connect_token,
             target,
             session,
+            options,
             jump_sessions,
             cols,
             rows,

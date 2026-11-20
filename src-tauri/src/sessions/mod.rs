@@ -63,6 +63,9 @@ pub struct SavedSession {
     pub jump_session_id: Option<String>,
     #[serde(default, rename = "log_always", alias = "logAlways")]
     pub log_always: bool,
+    /// OpenSSH-style options (`Key=Value` per line), see `crate::ssh::options`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ssh_options: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -150,7 +153,10 @@ pub fn validate(session: &SavedSession) -> Result<(), String> {
         return Err(ui_err("SESSION_NAME_EMPTY").into());
     }
     if session.kind != "ssh" {
-        if session.auth != SessionAuth::Default || session.jump_session_id.is_some() {
+        if session.auth != SessionAuth::Default
+            || session.jump_session_id.is_some()
+            || !session.ssh_options.is_empty()
+        {
             return Err(ui_err("SESSION_SSH_ONLY_OPTIONS").into());
         }
         if session.kind == "serial" {
@@ -182,6 +188,7 @@ pub fn validate(session: &SavedSession) -> Result<(), String> {
     if matches!(&session.auth, SessionAuth::KeyFile { path } if path.trim().is_empty()) {
         return Err(ui_err("SESSION_KEY_PATH_EMPTY").into());
     }
+    crate::ssh::options::parse(&session.ssh_options)?;
     Ok(())
 }
 
@@ -788,6 +795,7 @@ fn prepare_import(selections: Vec<ImportSelection>) -> Result<Vec<SavedSession>,
                 jump_session_id: None,
                 serial: None,
                 log_always: false,
+                ssh_options: String::new(),
             };
             validate(&session)?;
             Ok(session)
@@ -926,6 +934,17 @@ fn werkterm_preview(bytes: &[u8], local: &[SavedSession]) -> Result<WerktermImpo
             });
         match session {
             Ok(session) => {
+                // Validated above, so the options parse; weak opt-ins must not arrive unnoticed.
+                if let Ok(options) = crate::ssh::options::parse(&session.ssh_options)
+                    && !options.legacy.is_empty()
+                {
+                    preview.warnings.push(
+                        ui_err("IMPORT_WEAK_SSH_OPTIONS")
+                            .arg("name", &session.name)
+                            .arg("algorithms", options.legacy.join(", "))
+                            .into(),
+                    );
+                }
                 preview.duplicate_of.push(
                     local
                         .iter()
@@ -1785,6 +1804,7 @@ mod tests {
             jump_session_id: None,
             serial: None,
             log_always: false,
+            ssh_options: String::new(),
         }
     }
 
@@ -2040,5 +2060,64 @@ mod keepalive_tests {
         }
         value["keepaliveInterval"] = serde_json::json!(-1);
         assert!(serde_json::from_value::<SavedSession>(value).is_err());
+    }
+}
+
+#[cfg(test)]
+mod ssh_options_tests {
+    use super::*;
+
+    fn session(options: &str) -> SavedSession {
+        let mut session: SavedSession = serde_json::from_value(serde_json::json!({"id":"a","name":"Old","folder":"","host":"host","port":22,"user":null,"auth":{"type":"default"},"source":null})).unwrap();
+        session.ssh_options = options.into();
+        session
+    }
+
+    #[test]
+    fn options_are_optional_validated_and_ssh_only() {
+        assert!(session("").ssh_options.is_empty());
+        assert!(validate(&session("KexAlgorithms=+diffie-hellman-group14-sha1")).is_ok());
+        let error = validate(&session("Ciphers aes128-ctr\nProxyJump x")).unwrap_err();
+        assert!(error.starts_with("SSH_OPTION_UNKNOWN:") && error.contains("\"line\":\"2\""));
+        let mut telnet = session("ConnectTimeout 5");
+        telnet.kind = "telnet".into();
+        assert!(validate(&telnet).is_err());
+        let value = serde_json::to_value(session("")).unwrap();
+        assert!(value.get("sshOptions").is_none());
+    }
+
+    #[test]
+    fn export_and_import_keep_options_and_skip_invalid_ones() {
+        let good = session("Ciphers -aes128-ctr");
+        let mut bad = session("Ciphers +rot13");
+        bad.id = "b".into();
+        bad.name = "Bad".into();
+        bad.ssh_options = "Ciphers +rot13".into();
+        let (bytes, count) = export_bytes(std::slice::from_ref(&good), &[]).unwrap();
+        assert_eq!(count, 1);
+        let preview = werkterm_preview(&bytes, &[]).unwrap();
+        assert_eq!(preview.sessions[0].ssh_options, "Ciphers -aes128-ctr");
+        let file =
+            serde_json::json!({"format":"werkterm-sessions","version":1,"sessions":[good, bad]});
+        let preview = werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap();
+        assert_eq!(preview.sessions.len(), 1);
+        assert_eq!(preview.warnings.len(), 1);
+        assert!(preview.warnings[0].contains("SSH_OPTION_UNKNOWN_ALGORITHM"));
+    }
+
+    #[test]
+    fn import_preview_warns_about_weak_options() {
+        let mut weak = session("KexAlgorithms +diffie-hellman-group1-sha1\nCiphers -aes128-ctr");
+        weak.name = "Legacy".into();
+        let mut strong = session("Ciphers -aes128-ctr");
+        strong.id = "b".into();
+        let file =
+            serde_json::json!({"format":"werkterm-sessions","version":1,"sessions":[weak, strong]});
+        let preview = werkterm_preview(&serde_json::to_vec(&file).unwrap(), &[]).unwrap();
+        assert_eq!(preview.sessions.len(), 2);
+        assert_eq!(preview.warnings.len(), 1);
+        let warning = &preview.warnings[0];
+        assert!(warning.starts_with("IMPORT_WEAK_SSH_OPTIONS:"), "{warning}");
+        assert!(warning.contains("Legacy") && warning.contains("diffie-hellman-group1-sha1"));
     }
 }

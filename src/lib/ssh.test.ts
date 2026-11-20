@@ -8,13 +8,19 @@ it("passes the frontend-selected token and returns the connected mode", async ()
   const options = { target: "user@host", connectToken: 37, cols: 80, rows: 24 } as ConnectOptions;
   invoke.mockResolvedValue({ id: 12, mode: "exec" });
   await expect(connectSsh(options)).resolves.toEqual({ id: 12, mode: "exec" });
-  expect(invoke).toHaveBeenCalledWith("ssh_connect", { ...options, sessionId: null });
+  expect(invoke).toHaveBeenCalledWith("ssh_connect", { ...options, sessionId: null, sshOptions: null });
 });
 it("passes the saved session id to use its configured authentication", async () => {
   const options = { target: "user@host", sessionId: "saved-session", connectToken: 38, cols: 80, rows: 24 } as ConnectOptions;
   invoke.mockResolvedValue({ id: 13, mode: "SFTP" });
   await expect(connectSsh(options)).resolves.toEqual({ id: 13, mode: "SFTP" });
-  expect(invoke).toHaveBeenCalledWith("ssh_connect", options);
+  expect(invoke).toHaveBeenCalledWith("ssh_connect", { ...options, sshOptions: null });
+});
+it("passes quick connect SSH options", async () => {
+  const options = { target: "user@host", sshOptions: "Ciphers=aes128-cbc", connectToken: 39, cols: 80, rows: 24 } as ConnectOptions;
+  invoke.mockResolvedValue({ id: 14, mode: "SFTP" });
+  await connectSsh(options);
+  expect(invoke).toHaveBeenCalledWith("ssh_connect", { ...options, sessionId: null });
 });
 it("cancels by token before a session id exists", async () => {
   invoke.mockResolvedValue(undefined);

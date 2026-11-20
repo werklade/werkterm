@@ -16,7 +16,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Channel, killPty, resizePty, spawnPty, writePty } from "../lib/pty";
 import { answerHostKey, answerSecret, cancelSshConnect, closeSsh, connectSsh, resizeSsh, writeSsh, type SshPrompt } from "../lib/ssh";
 import { parseOsc7, type TerminalCwd } from "../lib/osc7";
-import { parseQuickConnect } from "../lib/quickConnect";
+import { parseQuickConnect, quickConnectSshArgs } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
 import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
 
@@ -307,7 +307,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
           return invoke<number>("telnet_connect", { ...dimensions, host: parsed.host, port: parsed.port, connectToken });
         }
         return kind === "ssh"
-        ? connectSsh({ ...dimensions, target: target ?? "", sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
+        ? connectSsh({ ...dimensions, ...quickConnectSshArgs(target ?? ""), sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
         : spawnPty({ ...dimensions, kind, startCommand, serialPermissionShell: permissionShell, shellIntegration: settings.current.shellIntegration });
       })();
       void spawned.then(result => {
@@ -319,6 +319,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         callbacks.current.onClearPrompts(id);
         const destination = parseQuickConnect(target ?? "");
         if (typeof result !== "number" && !exited) callbacks.current.onStatus(t("terminal.connected", { target: destination ? `${destination.user}@${destination.host}` : target ?? "", mode: result.mode }));
+        if (typeof result !== "number" && !exited && result.weakAlgorithms?.length) terminal.write(`\x1b[33m${t("terminal.weakAlgorithms", { names: result.weakAlgorithms.join(", ") }).replace(/[\x00-\x1f\x7f]/g, " ")}\x1b[0m\r\n`);
         if (!exited) {
           if (!permissionShell) terminalWriters.set(id, (data, pasted) => {
             // MultiExec input bypasses xterm's own scroll-on-input, so jump to the end here.

@@ -7,6 +7,8 @@ export type SshPrompt =
 export interface ConnectOptions {
   target: string;
   sessionId?: string | null;
+  /** Quick connect `-o` options, one `Key=Value` per line; saved sessions use their own. */
+  sshOptions?: string | null;
   connectToken: number;
   tabId: number;
   cols: number;
@@ -16,7 +18,7 @@ export interface ConnectOptions {
   onPrompt: Channel<SshPrompt>;
 }
 
-export const connectSsh = (options: ConnectOptions) => invoke<{ id: number; mode: "SFTP" | "exec" }>("ssh_connect", { ...options, sessionId: options.sessionId ?? null });
+export const connectSsh = (options: ConnectOptions) => invoke<{ id: number; mode: "SFTP" | "exec"; weakAlgorithms?: string[] }>("ssh_connect", { ...options, sessionId: options.sessionId ?? null, sshOptions: options.sshOptions ?? null });
 export const writeSsh = (id: number, data: string) => invoke<void>("ssh_write", { id, data });
 export const resizeSsh = (id: number, cols: number, rows: number) => invoke<void>("ssh_resize", { id, cols, rows });
 export const closeSsh = (id: number) => invoke<void>("ssh_close", { id });

@@ -35,6 +35,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
+- #23 (eigene SSH-Optionen `-o`): Parser `src-tauri/src/ssh/options.rs`, Sitzungsfeld, Quick connect, Export/Import,
+  Warnung bei schwachen Algorithmen; russh-Feature `des` für `3des-cbc` (nicht in den Standardlisten). Tests grün
+  (Windows), Review umgesetzt; offen: Test gegen einen alten Server, Linux-Lauf in WSL.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
