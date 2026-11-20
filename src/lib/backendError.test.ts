@@ -71,4 +71,17 @@ describe("plural forms and nested error lists", () => {
       expect(errorText(wire)).toBe("2 tunnels not started: Tunnel Database: Port 8080 is already in use; Tunnel Web: SSH connection lost");
     } finally { setLanguage("de"); }
   });
+  it("adds the cleanup outcome of a failed data folder switch to the original error", () => {
+    const inner = 'DATA_FILE_COPY_FAILED: {"args":{"name":"designs"},"detail":"os error 112"}';
+    const cleaned = `DATA_DIR_COPY_ROLLED_BACK: ${JSON.stringify({ args: { error: inner } })}`;
+    expect(errorText(cleaned)).toBe("designs konnte nicht kopiert werden: os error 112; Teilkopie entfernt");
+    const left = (count: string) => `DATA_DIR_COPY_ROLLBACK_INCOMPLETE: ${JSON.stringify({ args: { error: inner, count, path: "D:\\Daten" } })}`;
+    expect(errorText(left("1"))).toBe("designs konnte nicht kopiert werden: os error 112; Teilkopie nicht vollständig entfernt, 1 Eintrag bleibt in D:\\Daten");
+    expect(errorText(left("3"))).toBe("designs konnte nicht kopiert werden: os error 112; Teilkopie nicht vollständig entfernt, 3 Einträge bleiben in D:\\Daten");
+    setLanguage("en");
+    try {
+      expect(errorText(cleaned)).toBe("designs could not be copied: os error 112; partial copy removed");
+      expect(errorText(left("3"))).toBe("designs could not be copied: os error 112; partial copy not fully removed, 3 entries remain in D:\\Daten");
+    } finally { setLanguage("de"); }
+  });
 });

@@ -205,8 +205,7 @@ mod tests {
                 if code_of(code) != Some(code) {
                     continue;
                 }
-                let chain_end = rest.find([';', '\n']).unwrap_or(rest.len());
-                let mut chain = &rest[..chain_end];
+                let mut chain_end = rest.find([';', '\n']).unwrap_or(rest.len());
                 // Multi-line builder chains: continue over lines that start with `.`.
                 let mut tail = &rest[chain_end..];
                 while let Some(line) = tail.strip_prefix('\n') {
@@ -218,9 +217,10 @@ mod tests {
                         break;
                     }
                     let line_end = line.find('\n').unwrap_or(line.len());
-                    chain = &rest[..chain_end + 1 + line_end];
+                    chain_end += 1 + line_end;
                     tail = &line[line_end..];
                 }
+                let chain = &rest[..chain_end];
                 let mut args = BTreeSet::new();
                 if chain.contains(".json_position(") {
                     args.extend(["line".to_owned(), "column".to_owned()]);

@@ -10,7 +10,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, State};
 
@@ -280,9 +280,18 @@ fn transient(error: &std::io::Error) -> bool {
 
 /// `fs::rename` with up to three retries (150 ms apart) on transient Windows sharing errors.
 pub(crate) fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    retrying(|| fs::rename(from, to))
+}
+
+/// `remove` (`fs::remove_file` or `fs::remove_dir`) with the retries of [`rename_retrying`].
+fn remove_retrying(path: &Path, remove: fn(&Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    retrying(|| remove(path))
+}
+
+fn retrying(mut operation: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
     let mut attempt = 0;
     loop {
-        match fs::rename(from, to) {
+        match operation() {
             Err(e) if attempt < 3 && transient(&e) => {
                 attempt += 1;
                 std::thread::sleep(Duration::from_millis(150));
@@ -378,9 +387,247 @@ fn inspect_at(config: &Path, path: &Path) -> Result<DataDirInspect, String> {
     })
 }
 
+/// Identity of a directory (device and inode). Windows offers no stable file index without
+/// an extra dependency, so there only the symlink check of the parent chain applies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Identity(u64, u64);
+
+#[cfg(unix)]
+fn identity(metadata: &fs::Metadata) -> Option<Identity> {
+    use std::os::unix::fs::MetadataExt;
+    Some(Identity(metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+fn identity(_: &fs::Metadata) -> Option<Identity> {
+    None
+}
+
+/// True if `metadata` still belongs to the recorded entry; without identities (Windows) the
+/// caller relies on the other checks.
+fn same_identity(recorded: Option<Identity>, metadata: &fs::Metadata) -> bool {
+    identity(metadata).is_none_or(|now| recorded == Some(now))
+}
+
+/// What the journal knows about a created entry, to recognize it again before removing it.
+#[derive(Debug)]
+enum Created {
+    Directory(Option<Identity>),
+    /// Size and modification time after the copy; a sync client may replace the file.
+    File {
+        len: u64,
+        modified: SystemTime,
+    },
+}
+
+/// Entries newly created at the target by `set_at`, in creation order, so a failed switch
+/// can remove exactly what it added. Pre-existing entries are never recorded.
+#[derive(Default)]
+struct Journal {
+    created: Vec<(PathBuf, Created)>,
+    /// Deepest pre-existing folder of the target path and its identity; everything recorded
+    /// lies below it.
+    root: Option<(PathBuf, Option<Identity>)>,
+    /// Topmost folder created for the target path itself.
+    top: Option<PathBuf>,
+    #[cfg(test)]
+    faults: Faults,
+}
+
+/// Test-only failure injection.
+#[cfg(test)]
+#[derive(Default)]
+struct Faults {
+    /// Creating a new entry fails once this many entries are recorded.
+    create_after: Option<usize>,
+    /// Removing these entries during rollback fails.
+    keep: Vec<PathBuf>,
+    /// Writing the pointer fails.
+    pointer: bool,
+}
+
+fn replaced() -> std::io::Error {
+    std::io::Error::other("entry was replaced")
+}
+
+impl Journal {
+    fn before_create(&self) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self
+            .faults
+            .create_after
+            .is_some_and(|limit| self.created.len() >= limit)
+        {
+            return Err(std::io::Error::other("injected copy failure"));
+        }
+        Ok(())
+    }
+
+    fn before_pointer(&self) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.faults.pointer {
+            return Err(std::io::Error::other("injected pointer failure"));
+        }
+        Ok(())
+    }
+
+    /// Without a readable identity a directory is kept on Unix (counted as remaining).
+    fn record_directory(&mut self, path: &Path) {
+        let id = fs::symlink_metadata(path)
+            .ok()
+            .and_then(|metadata| identity(&metadata));
+        self.created.push((path.to_owned(), Created::Directory(id)));
+    }
+
+    fn record_file(&mut self, path: &Path) -> std::io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        let modified = metadata.modified()?;
+        self.created.push((
+            path.to_owned(),
+            Created::File {
+                len: metadata.len(),
+                modified,
+            },
+        ));
+        Ok(())
+    }
+
+    /// Checks that the root is unchanged and every folder between it and `path` is a real
+    /// folder, so removing never follows a symlink or junction. `false`: the chain is gone,
+    /// and with it the entry.
+    fn chain_intact(&self, path: &Path) -> std::io::Result<bool> {
+        let (root, root_id) = self
+            .root
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("no root"))?;
+        let relative = path.strip_prefix(root).map_err(|_| replaced())?;
+        let not_found = |e: &std::io::Error| e.kind() == std::io::ErrorKind::NotFound;
+        match fs::metadata(root) {
+            Ok(m) if m.is_dir() && same_identity(*root_id, &m) => (),
+            Ok(_) => return Err(replaced()),
+            Err(e) if not_found(&e) => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        let mut current = root.clone();
+        let mut components = relative.components().peekable();
+        while let Some(component) = components.next() {
+            if components.peek().is_none() {
+                break;
+            }
+            current.push(component);
+            match fs::symlink_metadata(&current) {
+                Ok(m) if m.is_dir() && !m.is_symlink() => (),
+                Ok(_) => return Err(replaced()),
+                Err(e) if not_found(&e) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(true)
+    }
+
+    fn remove(&self, path: &Path, created: &Created) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.faults.keep.iter().any(|keep| keep == path) {
+            return Err(std::io::Error::other("injected cleanup failure"));
+        }
+        if !self.chain_intact(path)? {
+            return Ok(());
+        }
+        // Never follow or remove a symlink or other entry that replaced a recorded one.
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        if metadata.is_symlink() {
+            return Err(replaced());
+        }
+        match created {
+            Created::Directory(id) => {
+                if !metadata.is_dir() || !same_identity(*id, &metadata) {
+                    return Err(replaced());
+                }
+                // Only empty directories go; foreign content stays.
+                remove_retrying(path, |p| fs::remove_dir(p))
+            }
+            Created::File { len, modified } => {
+                if !metadata.is_file()
+                    || metadata.len() != *len
+                    || metadata.modified().ok() != Some(*modified)
+                {
+                    return Err(replaced());
+                }
+                remove_retrying(path, |p| fs::remove_file(p))
+            }
+        }
+    }
+
+    /// Removes the recorded entries in reverse order and returns how many remain.
+    fn rollback(&self) -> usize {
+        let mut remaining = 0;
+        for (path, created) in self.created.iter().rev() {
+            if self.remove(path, created).is_err() {
+                remaining += 1;
+            }
+        }
+        remaining
+    }
+}
+
+/// `fs::create_dir_all` that records every directory it creates.
+fn create_dirs(target: &Path, journal: &mut Journal) -> std::io::Result<()> {
+    let missing: Vec<&Path> = target
+        .ancestors()
+        .take_while(|path| {
+            matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+        })
+        .collect();
+    journal.root = target
+        .ancestors()
+        .nth(missing.len())
+        .and_then(|root| Some((root.to_owned(), identity(&fs::metadata(root).ok()?))));
+    for path in missing.into_iter().rev() {
+        match fs::create_dir(path) {
+            Ok(()) => {
+                journal.top.get_or_insert_with(|| path.to_owned());
+                journal.record_directory(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+/// Rolls back the journal and adds the outcome to the original error. The path named is the
+/// topmost folder the switch created, so the remaining entries all lie below it.
+fn rolled_back(error: String, journal: &Journal, target: &Path) -> String {
+    if journal.created.is_empty() {
+        return error;
+    }
+    match journal.rollback() {
+        0 => ui_err("DATA_DIR_COPY_ROLLED_BACK")
+            .arg("error", error)
+            .into(),
+        remaining => ui_err("DATA_DIR_COPY_ROLLBACK_INCOMPLETE")
+            .arg("error", error)
+            .arg("count", remaining.to_string())
+            .arg(
+                "path",
+                journal
+                    .top
+                    .as_deref()
+                    .unwrap_or(target)
+                    .display()
+                    .to_string(),
+            )
+            .into(),
+    }
+}
+
 /// Copies regular files and directories; symlinks and special files are skipped,
-/// existing targets are never overwritten.
-fn copy_entry(source: &Path, target: &Path) -> std::io::Result<()> {
+/// existing targets are never overwritten. Every created entry goes into the journal.
+fn copy_entry(source: &Path, target: &Path, journal: &mut Journal) -> std::io::Result<()> {
     let metadata = match fs::symlink_metadata(source) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -399,6 +646,7 @@ fn copy_entry(source: &Path, target: &Path) -> std::io::Result<()> {
             return Ok(());
         }
         let mut input = fs::File::open(source)?;
+        journal.before_create()?;
         let mut output = match options().open(target) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
@@ -406,25 +654,30 @@ fn copy_entry(source: &Path, target: &Path) -> std::io::Result<()> {
         };
         let copied = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
         drop(output);
-        if let Err(e) = copied {
-            let _ = fs::remove_file(target);
+        // Size and time are taken from the closed file, as the rollback will see it.
+        if let Err(e) = copied.and_then(|()| journal.record_file(target)) {
+            let _ = remove_retrying(target, |p| fs::remove_file(p));
             return Err(e);
         }
     } else if metadata.is_dir() {
         match existing {
             Some(m) if m.is_symlink() || !m.is_dir() => return Ok(()),
             Some(_) => (),
-            None => fs::create_dir(target)?,
+            None => {
+                journal.before_create()?;
+                fs::create_dir(target)?;
+                journal.record_directory(target);
+            }
         }
         for entry in fs::read_dir(source)? {
             let entry = entry?;
-            copy_entry(&entry.path(), &target.join(entry.file_name()))?;
+            copy_entry(&entry.path(), &target.join(entry.file_name()), journal)?;
         }
     }
     Ok(())
 }
 
-fn copy_data(source: &Path, target: &Path) -> Result<(), String> {
+fn copy_data(source: &Path, target: &Path, journal: &mut Journal) -> Result<(), String> {
     if same(source, target) {
         return Ok(());
     }
@@ -448,7 +701,7 @@ fn copy_data(source: &Path, target: &Path) -> Result<(), String> {
             metadata.is_file()
         };
         if !metadata.is_symlink() && expected {
-            copy_entry(&input, &target.join(name)).map_err(|e| {
+            copy_entry(&input, &target.join(name), journal).map_err(|e| {
                 String::from(ui_err("DATA_FILE_COPY_FAILED").arg("name", name).detail(e))
             })?;
         }
@@ -461,6 +714,18 @@ fn set_at(
     cache: &Path,
     path: Option<PathBuf>,
     copy_current: bool,
+) -> Result<DataDirStatus, String> {
+    set_with(config, cache, path, copy_current, &mut Journal::default())
+}
+
+/// A failure after the target was touched removes everything this call created there
+/// (see [`Journal`]); the pointer is written last, so it never points to a partial copy.
+fn set_with(
+    config: &Path,
+    cache: &Path,
+    path: Option<PathBuf>,
+    copy_current: bool,
+    journal: &mut Journal,
 ) -> Result<DataDirStatus, String> {
     if let Some(path) = &path {
         validate_path(path)?;
@@ -479,24 +744,30 @@ fn set_at(
     } else {
         None
     };
-    fs::create_dir_all(target)
-        .map_err(|e| String::from(ui_err("DATA_DIR_CREATE_FAILED").detail(e)))?;
-    if !target.is_dir() {
-        return Err(ui_err("DATA_DIR_NOT_DIR").into());
-    }
-    writable(target).map_err(|e| String::from(ui_err("DATA_DIR_NOT_WRITABLE").detail(e)))?;
-    if let Some(source) = source {
-        copy_data(&source, target)?;
-    }
     // Choosing the default folder by path is stored as the default.
-    let stored = path.filter(|path| !same(path, config));
-    let bytes = serde_json::to_vec(&Pointer {
-        version: 1,
-        data_dir: stored,
-    })
-    .map_err(|e| String::from(ui_err("POINTER_SAVE_FAILED").detail(e)))?;
-    atomic(&config.join(POINTER), &bytes)
+    let stored = path.as_deref().filter(|path| !same(path, config));
+    let switched = (|| {
+        create_dirs(target, journal)
+            .map_err(|e| String::from(ui_err("DATA_DIR_CREATE_FAILED").detail(e)))?;
+        if !target.is_dir() {
+            return Err(ui_err("DATA_DIR_NOT_DIR").into());
+        }
+        writable(target).map_err(|e| String::from(ui_err("DATA_DIR_NOT_WRITABLE").detail(e)))?;
+        if let Some(source) = &source {
+            copy_data(source, target, journal)?;
+        }
+        let bytes = serde_json::to_vec(&Pointer {
+            version: 1,
+            data_dir: stored.map(Path::to_path_buf),
+        })
         .map_err(|e| String::from(ui_err("POINTER_SAVE_FAILED").detail(e)))?;
+        journal
+            .before_pointer()
+            .and_then(|()| atomic(&config.join(POINTER), &bytes))
+            .map_err(|e| String::from(ui_err("POINTER_SAVE_FAILED").detail(e)))?;
+        Ok(())
+    })();
+    switched.map_err(|error| rolled_back(error, journal, target))?;
     status_at(config)
 }
 
@@ -1061,7 +1332,7 @@ mod tests {
         )
         .unwrap();
 
-        copy_data(&source, &target).unwrap();
+        copy_data(&source, &target, &mut Journal::default()).unwrap();
 
         assert_eq!(fs::read(target.join("sessions.json")).unwrap(), b"target");
         assert_eq!(fs::read(target.join("tunnels.json")).unwrap(), b"tunnels");
@@ -1114,7 +1385,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, source.join("designs").join("link")).unwrap();
         std::os::unix::fs::symlink(outside.join("secret"), source.join("macros.json")).unwrap();
         std::os::unix::fs::symlink(&outside, source.join("icon-sets")).unwrap();
-        copy_data(&source, &target).unwrap();
+        copy_data(&source, &target, &mut Journal::default()).unwrap();
         assert!(target.join("designs").is_dir());
         assert!(fs::symlink_metadata(target.join("designs").join("link")).is_err());
         assert!(fs::symlink_metadata(target.join("macros.json")).is_err());
@@ -1178,7 +1449,7 @@ mod tests {
         assert!(!config.join(POINTER).exists());
         // copy_data guards on its own as well.
         let nested = config.join("designs").join("inner");
-        assert!(copy_data(&config, &nested).is_err());
+        assert!(copy_data(&config, &nested, &mut Journal::default()).is_err());
         assert!(!nested.exists());
     }
 
@@ -1573,6 +1844,298 @@ mod tests {
             .unwrap();
         assert_eq!(full.size, 5);
         assert_ne!(limited.digest, full.digest);
+    }
+
+    /// Args of a wire-format error (`CODE: {"args":{…}}`).
+    fn args_of(error: &str) -> serde_json::Value {
+        let (_, payload) = error.split_once(": ").unwrap();
+        serde_json::from_str::<serde_json::Value>(payload).unwrap()["args"].clone()
+    }
+
+    /// Relative paths of all entries below `dir`, sorted.
+    fn tree(dir: &Path) -> Vec<String> {
+        fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let entry = entry.unwrap();
+                let name = format!("{prefix}{}", entry.file_name().to_string_lossy());
+                out.push(name.clone());
+                if entry.file_type().unwrap().is_dir() {
+                    walk(&entry.path(), &format!("{name}/"), out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, "", &mut out);
+        out.sort();
+        out
+    }
+
+    /// Current data folder with files, a nested design and an icon set.
+    fn source_data(temp: &Temp) -> PathBuf {
+        let config = temp.dir("config");
+        fs::create_dir_all(config.join("designs").join("nested")).unwrap();
+        fs::create_dir_all(config.join("icon-sets").join("set")).unwrap();
+        for name in ["sessions.json", "tunnels.json", "macros.json"] {
+            fs::write(config.join(name), name).unwrap();
+        }
+        fs::write(config.join("designs").join("a.json"), b"a").unwrap();
+        fs::write(config.join("designs").join("nested").join("b.json"), b"b").unwrap();
+        fs::write(config.join("icon-sets").join("set").join("i.svg"), b"svg").unwrap();
+        config
+    }
+
+    fn failing_copy(after: usize) -> Journal {
+        let mut journal = Journal::default();
+        journal.faults.create_after = Some(after);
+        journal
+    }
+
+    #[test]
+    fn failed_copy_into_new_folder_removes_everything_created() {
+        let temp = Temp::new();
+        let config = source_data(&temp);
+        let before = tree(&config);
+        let parent = temp.0.join("new");
+        let target = parent.join("data");
+        // Fails while copying designs/, after files and directories were already created.
+        let error = set_with(
+            &config,
+            &temp.0.join("cache"),
+            Some(target.clone()),
+            true,
+            &mut failing_copy(6),
+        )
+        .unwrap_err();
+        assert_eq!(code_of(&error), Some("DATA_DIR_COPY_ROLLED_BACK"));
+        let inner = args_of(&error)["error"].as_str().unwrap().to_owned();
+        assert_eq!(code_of(&inner), Some("DATA_FILE_COPY_FAILED"));
+        assert!(inner.contains("injected copy failure"));
+        assert!(!parent.exists(), "created parent folders are removed too");
+        assert!(!config.join(POINTER).exists());
+        assert_eq!(tree(&config), before);
+    }
+
+    #[test]
+    fn failed_copy_keeps_existing_target_entries() {
+        let temp = Temp::new();
+        let config = source_data(&temp);
+        let target = temp.dir("target");
+        fs::create_dir_all(target.join("designs")).unwrap();
+        fs::write(target.join("sessions.json"), b"shared").unwrap();
+        fs::write(target.join("designs").join("a.json"), b"shared-a").unwrap();
+        fs::write(target.join("notes.txt"), b"foreign").unwrap();
+        let before = tree(&target);
+        // Seven entries are new at the target; every earlier failure point is tried.
+        for after in 0..7 {
+            let error = set_with(
+                &config,
+                &temp.0.join("cache"),
+                Some(target.clone()),
+                true,
+                &mut failing_copy(after),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(
+                    code_of(&error),
+                    Some("DATA_DIR_COPY_ROLLED_BACK" | "DATA_FILE_COPY_FAILED")
+                ),
+                "{error}"
+            );
+            assert_eq!(tree(&target), before, "after {after}");
+        }
+        assert_eq!(fs::read(target.join("sessions.json")).unwrap(), b"shared");
+        assert_eq!(
+            fs::read(target.join("designs").join("a.json")).unwrap(),
+            b"shared-a"
+        );
+        assert!(!config.join(POINTER).exists());
+    }
+
+    #[test]
+    fn incomplete_cleanup_reports_remaining_entries() {
+        let temp = Temp::new();
+        let config = source_data(&temp);
+        let parent = temp.0.join("new");
+        let target = parent.join("data");
+        let mut journal = failing_copy(6);
+        journal.faults.keep = vec![target.join("tunnels.json")];
+        let error = set_with(
+            &config,
+            &temp.0.join("cache"),
+            Some(target.clone()),
+            true,
+            &mut journal,
+        )
+        .unwrap_err();
+        assert_eq!(code_of(&error), Some("DATA_DIR_COPY_ROLLBACK_INCOMPLETE"));
+        let args = args_of(&error);
+        // tunnels.json plus the two folders that are therefore not empty, all below the
+        // topmost created folder.
+        assert_eq!(args["count"], "3");
+        assert_eq!(args["path"], parent.display().to_string().as_str());
+        assert_eq!(
+            code_of(args["error"].as_str().unwrap()),
+            Some("DATA_FILE_COPY_FAILED")
+        );
+        assert_eq!(tree(&parent), ["data", "data/tunnels.json"]);
+        assert!(!config.join(POINTER).exists());
+
+        // An existing target is named itself.
+        let existing = temp.dir("existing");
+        let mut journal = failing_copy(2);
+        journal.faults.keep = vec![existing.join("tunnels.json")];
+        let error = set_with(
+            &config,
+            &temp.0.join("cache"),
+            Some(existing.clone()),
+            true,
+            &mut journal,
+        )
+        .unwrap_err();
+        let args = args_of(&error);
+        assert_eq!(args["count"], "1");
+        assert_eq!(args["path"], existing.display().to_string().as_str());
+        assert_eq!(tree(&existing), ["tunnels.json"]);
+    }
+
+    /// Journal of a copy of `designs/` from `source_data` into `target/designs`.
+    fn copied_designs(temp: &Temp) -> (PathBuf, Journal) {
+        let config = source_data(temp);
+        let target = temp.0.join("target");
+        let mut journal = Journal::default();
+        create_dirs(&target, &mut journal).unwrap();
+        copy_entry(
+            &config.join("designs"),
+            &target.join("designs"),
+            &mut journal,
+        )
+        .unwrap();
+        (target, journal)
+    }
+
+    #[test]
+    fn rollback_keeps_files_changed_after_the_copy() {
+        let temp = Temp::new();
+        let (target, journal) = copied_designs(&temp);
+        let designs = target.join("designs");
+        // Same size, other time (a sync client replaced it) and other size.
+        let a = designs.join("a.json");
+        let time = fs::metadata(&a).unwrap().modified().unwrap();
+        write_at(&a, b"x", 1_000_000);
+        assert_ne!(fs::metadata(&a).unwrap().modified().unwrap(), time);
+        fs::write(designs.join("nested").join("b.json"), b"longer").unwrap();
+        // a.json, nested/b.json and the three folders above them stay.
+        assert_eq!(journal.rollback(), 5);
+        assert_eq!(fs::read(&a).unwrap(), b"x");
+        assert_eq!(
+            fs::read(designs.join("nested").join("b.json")).unwrap(),
+            b"longer"
+        );
+
+        // Unchanged files go, together with the folders.
+        let temp = Temp::new();
+        let (target, journal) = copied_designs(&temp);
+        assert_eq!(journal.rollback(), 0);
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_does_not_follow_a_replaced_parent_folder() {
+        let temp = Temp::new();
+        let (target, journal) = copied_designs(&temp);
+        // Lookalike outside the target: same names, same size and time as the copies.
+        let outside = temp.dir("outside");
+        fs::create_dir_all(outside.join("designs").join("nested")).unwrap();
+        for name in [PathBuf::from("a.json"), Path::new("nested").join("b.json")] {
+            let copy = target.join("designs").join(&name);
+            let twin = outside.join("designs").join(&name);
+            fs::copy(&copy, &twin).unwrap();
+            let time = fs::metadata(&copy).unwrap().modified().unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&twin)
+                .unwrap()
+                .set_modified(time)
+                .unwrap();
+        }
+        let before = tree(&outside);
+        fs::rename(&target, temp.0.join("moved")).unwrap();
+        std::os::unix::fs::symlink(&outside, &target).unwrap();
+        // target, designs, a.json, nested, nested/b.json all stay.
+        assert_eq!(journal.rollback(), 5);
+        assert_eq!(tree(&outside), before);
+        assert!(fs::symlink_metadata(&target).unwrap().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_keeps_a_folder_recreated_under_the_same_name() {
+        let temp = Temp::new();
+        let target = temp.0.join("target");
+        let mut journal = Journal::default();
+        create_dirs(&target, &mut journal).unwrap();
+        // The old folder stays in use, so the new one surely has another inode.
+        fs::rename(&target, temp.0.join("old")).unwrap();
+        fs::create_dir(&target).unwrap();
+        assert_eq!(journal.rollback(), 1);
+        assert!(target.is_dir());
+    }
+
+    #[test]
+    fn failed_pointer_write_rolls_back_the_copy() {
+        let temp = Temp::new();
+        let config = source_data(&temp);
+        let target = temp.0.join("fresh");
+        let mut journal = Journal::default();
+        journal.faults.pointer = true;
+        let error = set_with(
+            &config,
+            &temp.0.join("cache"),
+            Some(target.clone()),
+            true,
+            &mut journal,
+        )
+        .unwrap_err();
+        assert_eq!(code_of(&error), Some("DATA_DIR_COPY_ROLLED_BACK"));
+        assert_eq!(
+            code_of(args_of(&error)["error"].as_str().unwrap()),
+            Some("POINTER_SAVE_FAILED")
+        );
+        assert!(!target.exists());
+        assert!(!config.join(POINTER).exists());
+        assert!(no_temp_files(&config));
+        // Without copying into an existing folder nothing was created: plain error.
+        let existing = temp.dir("existing");
+        let mut journal = Journal::default();
+        journal.faults.pointer = true;
+        let error = set_with(
+            &config,
+            &temp.0.join("cache"),
+            Some(existing.clone()),
+            false,
+            &mut journal,
+        )
+        .unwrap_err();
+        assert_eq!(code_of(&error), Some("POINTER_SAVE_FAILED"));
+        assert!(existing.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rollback_does_not_follow_a_replacing_symlink() {
+        let temp = Temp::new();
+        let outside = temp.dir("outside");
+        fs::write(outside.join("keep"), b"keep").unwrap();
+        let created = temp.0.join("created");
+        let mut journal = Journal::default();
+        create_dirs(&created, &mut journal).unwrap();
+        fs::remove_dir(&created).unwrap();
+        std::os::unix::fs::symlink(&outside, &created).unwrap();
+        assert_eq!(journal.rollback(), 1);
+        assert!(fs::symlink_metadata(&created).unwrap().is_symlink());
+        assert!(outside.join("keep").exists());
     }
 
     #[cfg(unix)]
