@@ -31,32 +31,19 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - 1.1.0 (2026-11-16, stable): schwarzes Fenster mit nouveau behoben (#2, #21, vom Tester mit 1.0.3 bestätigt, .deb und
   AppImage), Einstellungen mit vertikalen Tabs (#16), formatierte Release-Notizen (#17), klare Meldung ohne grafische
   Sitzung (#22), OSC-7-Echo (#8).
+- 1.3.0 (2026-11-21, stable, Run 44910780684): Sitzungsliste ordnen (#1), Designs/Icon-Sets neu laden (#3), Teilkopie
+  zurückbauen (#4), Einfüge-Auswahl je Sitzung (#5), Oberflächengröße (#6), Ordner übertragen (#11), Enter im
+  Einfüge-Dialog (#20), SSH-Optionen (#23), Hinweise nach Zeitüberschreitung (#24), Retro-Designs (#25), APT-Testkanal
+  (#15/#26), Pinch unter Linux (#27), Drop auf HiDPI (#28), Transferleiste (#29), Beschriftungen bei 150 % (#30),
+  „Sitzung“ im Einfüge-Dialog (#31), Umbenennen (#33), Mehrfachauswahl (#34). Testbuilds 1.2.1–1.2.8 vorab;
+  Server-Sicherung vor dem Release (`werklade-pkg-2026-11-21-1.3.0.tar.gpg`). Bestätigte Issues geschlossen.
 - Release-Notizen im Update-Dialog formatiert (eigener kleiner Markdown-Parser, ohne HTML, ohne Links); Issue-Vorlagen
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- #23 (eigene SSH-Optionen `-o`): committet; offen: Test gegen einen alten Server, Linux-Lauf in WSL.
-- Testbuild 1.2.5 (Branch test/1.2.5 = main bis 8d7ac43 plus Versionscommit, Run 44874675231, 2026-11-21) im
-  Testkanal und in APT `test`, von außen geprüft; test/1.2.4 gelöscht. Enthält alles Folgende plus #11 (Ordner
-  herunter-/hochladen). Test auf dem Mint-Notebook (X11 und Wayland) laut `werkterm-1.2.5-testliste.md`
-  (Werklade-Ordner). Server-Download 1.2.4 nach Regel noch zu entfernen (nur durch den Nutzer). Testergebnis:
-  #27, #6, #5, #25, #11 im Kern ok; daraus #28–#32.
-- Testbuild 1.2.8 (Branch test/1.2.8 = main bis 16bddd2 plus Versionscommit, Run 44908837969, 2026-11-21) im
-  Testkanal und in APT `test`, von außen geprüft; test/1.2.7 gelöscht. Server-Download 1.2.7 nach Regel noch zu
-  entfernen (nur durch den Nutzer). Neu gegenüber 1.2.7: #34 Mehrfachauswahl im Dateibrowser. 1.2.7 brachte #33
-  Umbenennen (Symbol `rename` aus werklade/design 425e18c), vom Nutzer bestätigt, ebenso #24; 1.2.6 brachte #1,
-  #28–#31 (bestätigt). Nach dem Test von 1.2.8: Stable 1.3.0. Enthält zusätzlich zu 1.2.5:
-- Seit 1.2.5 (alle `testing`): #1 Sitzungsliste ordnen (Ziehen, Verschieben,
-  Umbenennen, leere Ordner, Rückgängig); #29 Abbrechen-Knopf und Fortschrittsbalken fest links; #30 Beschriftungen
-  bei 150 %; #31 „Sitzung“ statt „Profil“; #28 Drop auf HiDPI unter Linux (Position war doppelt skaliert; unter
-  Ubuntu 26.04 bestätigt). Cinnamon-Wayland liefert keine Drop-Ereignisse (README). Diagnose `WERKTERM_DEBUG_DND=1`.
-  #32 (aus dem Browser herausziehen, im Browser verschieben) offen, ohne Meilenstein.
-- 2026-11-21 auf main (alle `testing`, Rust-Tests auch in WSL grün):
-  #15 Setup-Skript `--test` (geschlossen, Test über #26); #3 Designs und Icon-Sets nach externen Änderungen neu
-  laden; #4 Teilkopie beim gescheiterten Datenordner-Wechsel zurückbauen; #5 gemerkte Einfüge-Auswahl je Sitzung
-  zurücksetzen; #6 Oberflächengröße 90–150 % (je Gerät, Webview-Zoom); #27 Touchpad-Pinch unter Linux zoomt die
-  Terminal-Schrift statt der ganzen Oberfläche (WebKit-Geste per internem Schlüssel abgeschaltet, eigene Geste).
-  Offen: Sichtprüfung in der App; #27 nur auf echtem Linux-Touchpad prüfbar.
+- #3, #4, #23 (in 1.3.0 ausgeliefert, `testing`): nur per Tests/Review abgesichert; offen: Cloud-Ordner-Abgleich,
+  gescheiterter Datenordner-Wechsel, Test gegen einen alten SSH-Server.
+- #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Anleitung `werkterm-1.2.4-unterstriche-1.md` (Werklade-Ordner, nicht im Repo) an den Tester;
   wartet auf Ergebnisse.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
@@ -65,7 +52,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (Meilenstein 1.2.0: nur #14; Meilenstein 1.3.0: #1, #3–#6, #11, #20, #23–#27; Sammelliste: #7–#10, #12, #13, #19).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (offen: #3, #4, #23 aus 1.3.0 zur Bestätigung; #14 aus 1.2.0; #22 aus 1.1.0; ohne Meilenstein: #7–#10, #12, #13, #19, #32, #35).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
