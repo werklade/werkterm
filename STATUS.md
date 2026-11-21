@@ -41,9 +41,11 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   herunter-/hochladen). Test auf dem Mint-Notebook (X11 und Wayland) laut `werkterm-1.2.5-testliste.md`
   (Werklade-Ordner). Server-Download 1.2.4 nach Regel noch zu entfernen (nur durch den Nutzer). Testergebnis:
   #27, #6, #5, #25, #11 im Kern ok; daraus #28–#32.
-- Testbuild 1.2.6 (Branch test/1.2.6 = main bis 48a8aeb plus Versionscommit, Run 44900494251, 2026-11-21) im
-  Testkanal und in APT `test`, von außen geprüft; test/1.2.5 gelöscht. Server-Download 1.2.5 nach Regel noch zu
-  entfernen (nur durch den Nutzer). Enthält zusätzlich zu 1.2.5:
+- Testbuild 1.2.7 (Branch test/1.2.7 = main bis 449c963 plus Versionscommit, Run 44905596325, 2026-11-21) im
+  Testkanal und in APT `test`, von außen geprüft; test/1.2.6 gelöscht. Server-Download 1.2.6 nach Regel noch zu
+  entfernen (nur durch den Nutzer). Neu gegenüber 1.2.6: #33 Umbenennen im Dateibrowser (Knopf, Kontextmenü, F2;
+  Symbol `rename` aus werklade/design 425e18c). 1.2.6 enthielt #1, #28–#31 (vom Nutzer bestätigt).
+  Danach geplant: Stable 1.3.0. Enthält zusätzlich zu 1.2.5:
 - Seit 1.2.5 (alle `testing`): #1 Sitzungsliste ordnen (Ziehen, Verschieben,
   Umbenennen, leere Ordner, Rückgängig); #29 Abbrechen-Knopf und Fortschrittsbalken fest links; #30 Beschriftungen
   bei 150 %; #31 „Sitzung“ statt „Profil“; #28 Drop auf HiDPI unter Linux (Position war doppelt skaliert; unter
