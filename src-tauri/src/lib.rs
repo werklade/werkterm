@@ -2,6 +2,7 @@ mod child_env;
 mod commands;
 mod data_dir;
 mod designs;
+mod dnd_debug;
 pub mod editor;
 mod folder_diff;
 mod icon_sets;
@@ -66,6 +67,11 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             pinch::install(app.handle());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if dnd_debug::enabled() {
+                dnd_debug::log(window, event);
+            }
         })
         .manage(Arc::new(pty::PtyManager::default()))
         .manage(Arc::new(ssh::SshManager::default()))
