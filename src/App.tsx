@@ -46,7 +46,8 @@ import { SecretDialog } from "./components/SecretDialog";
 import { SessionDialog } from "./components/SessionDialog";
 import { QuickConnect } from "./components/QuickConnect";
 import { SessionUserDialog } from "./components/SessionUserDialog";
-import { jumpHostHint, listSessions, sessionTarget, type SavedSession } from "./lib/sessions";
+import { jumpHostHint, listSessionFolders, listSessions, sessionTarget, type SavedSession } from "./lib/sessions";
+import { createUndoSlot, type UndoEntry } from "./lib/undoOffer";
 import { availableShells, type ShellKind } from "./lib/pty";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
@@ -223,7 +224,12 @@ export default function App() {
   const [userSession, setUserSession] = useState<SavedSession | null>(null);
   const [quickUserTarget, setQuickUserTarget] = useState<string | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
-  const reloadSessions = useCallback(() => { void listSessions().then(items => { setSavedSessions(items); setSessionsLoaded(true); }).catch(() => setStatus(t("app.status.sessionsLoadFailed"))); }, []);
+  const [sessionFolders, setSessionFolders] = useState<string[]>([]);
+  const reloadSessions = useCallback(() => { void Promise.all([listSessions(), listSessionFolders()]).then(([items, folders]) => { setSavedSessions(items); setSessionFolders(folders); setSessionsLoaded(true); }).catch(() => setStatus(t("app.status.sessionsLoadFailed"))); }, []);
+  // One undo offer at a time in the status line (moves and renames in the sessions panel); the timer ends with the window.
+  const [undoEntry, setUndoEntry] = useState<UndoEntry | null>(null);
+  const [undoSlot] = useState(() => createUndoSlot(setUndoEntry));
+  useEffect(() => () => undoSlot.dispose(), [undoSlot]);
   useEffect(() => { if (dataReady) reloadSessions(); }, [dataReady, reloadSessions]);
   // localStorage only seeds the first render; settings.json replaces it once loaded (see bootstrapData).
   const [settings, setSettings] = useState(loadSettings);
@@ -264,6 +270,11 @@ export default function App() {
     }).catch(reason => setStatus(t("app.status.logFolder", { reason: errorText(reason) })));
   }, [dataReady]);
   const applyLoadedSettings = (loaded: Settings) => { settingsRef.current = loaded; setSettings(loaded); };
+  /** Own write of sessions.json (sessions panel): reload and take the new file state as baseline, so the focus check does not report it as external. */
+  const sessionsWritten = () => {
+    reloadSessions();
+    void dataDirFingerprint().then(fresh => { fingerprint.current = mergeEntry(fingerprint.current, fresh, "sessions.json"); }).catch(() => undefined);
+  };
   const refreshFingerprint = async () => { try { fingerprint.current = await dataDirFingerprint(); } catch { fingerprint.current = null; } };
   /** Status -> dialog (setup / unreachable) -> settings_load -> ready. Re-entered after a dialog choice. */
   const startCheckAllowed = useRef(false);
@@ -992,7 +1003,7 @@ export default function App() {
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
       <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
       <div className="workspace-body">
-      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.id === "tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
+      {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.id === "tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} sessionFolders={sessionFolders} onSessionsWritten={sessionsWritten} onUndoable={(message, undo) => { reportStatus(message); undoSlot.offer(message, undo); }} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label={t("app.terminalArea")}>
 
         {activeId === 0 && <Home sessions={savedSessions} recents={recents} canRestore={lastTabs.length > 0 && sessionsLoaded && shellsLoaded && restoreQueue === null} onLocal={() => openTab("local")} onRestore={restoreTabs} onSaved={connectSaved} onQuick={connect} />}
@@ -1020,7 +1031,7 @@ export default function App() {
       </main>
       </div>
     </div>
-    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>{t("app.footer.cancelMacro")}</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>{t("app.footer.tunnels", { count: activeTunnels })}</button>}{updateVersion && <button type="button" className="update-available" onClick={() => setUpdateOpen(true)}>{t("app.footer.updateAvailable", { version: updateVersion })}</button>}{multiExec && <span>{tp("app.multiExec.status", terminals.length, { active: terminals.filter(tab => !tab.exited && !unchecked.has(tab.id)).length })} · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? (transfer.queued > 0 ? t("app.status.transferQueued", { text: transfer.text, queued: transfer.queued }) : transfer.text) : activeEditor ? (activeEditor.status || t("app.editor")) : (status || t("app.status.ready"))}</span>{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>{t("common.cancel")}</button>}</footer>
+    <footer className="statusbar" role="status" aria-live="polite">{macros.playing && <button onClick={macros.cancel}>{t("app.footer.cancelMacro")}</button>}{activeTunnels > 0 && <button onClick={() => setTunnelsOpen(true)}>{t("app.footer.tunnels", { count: activeTunnels })}</button>}{updateVersion && <button type="button" className="update-available" onClick={() => setUpdateOpen(true)}>{t("app.footer.updateAvailable", { version: updateVersion })}</button>}{multiExec && <span>{tp("app.multiExec.status", terminals.length, { active: terminals.filter(tab => !tab.exited && !unchecked.has(tab.id)).length })} · </span>}{activeTab && connectionStatus(activeTab.kind, activeTab.serial) && <span>{connectionStatus(activeTab.kind, activeTab.serial)} · </span>}<span>{transfer ? (transfer.queued > 0 ? t("app.status.transferQueued", { text: transfer.text, queued: transfer.queued }) : transfer.text) : activeEditor ? (activeEditor.status || t("app.editor")) : (status || t("app.status.ready"))}</span>{undoEntry && !transfer && (activeEditor ? activeEditor.status : status) === undoEntry.message && <button type="button" onClick={undoSlot.take}>{t("app.footer.undo")}</button>}{transfer && <button type="button" onClick={() => transferQueue.cancelCurrent()}>{t("common.cancel")}</button>}</footer>
     {macros.dialogs}
     {pasteRequest && <PasteDialog text={pasteRequest.data} count={pasteRequest.targets.length} multiExec={pasteRequest.multiExec} hasProfile={!pasteRequest.multiExec && !!tabs.find(t => t.id === pasteRequest.source)?.savedSessionId} onAnswer={(text, remember) => {
       if (text !== null && remember && (remember.scope === "global" || !pasteRequest.multiExec)) {

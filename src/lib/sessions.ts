@@ -67,6 +67,22 @@ export interface SessionFolder {
 }
 
 export const listSessions = () => invoke<SavedSession[]>("sessions_list");
+/** Empty folders; folders holding sessions follow from the sessions. */
+export const listSessionFolders = () => invoke<string[]>("sessions_folders");
+/** Folder of a session before (`folder`) and after (`expected`) a change. */
+export interface FolderAssignment { id: string; folder: string; expected: string }
+/** What a change did: moved sessions and the empty folders it added or removed. Undo turns back only this. */
+export interface LayoutSnapshot { sessions: FolderAssignment[]; added: string[]; removed: string[] }
+/** `changed === false`: nothing was written. `moved`: sessions whose folder changed. `skipped` (undo only): sessions
+ * left alone because they were deleted or moved elsewhere in the meantime. */
+export interface LayoutChange { changed: boolean; moved: number; skipped: number; undo: LayoutSnapshot }
+export const moveSessions = (ids: string[], folder: string) => invoke<LayoutChange>("sessions_move", { ids, folder });
+export const renameSessionFolder = (from: string, to: string) => invoke<LayoutChange>("sessions_rename_folder", { from, to });
+export const restoreSessionLayout = (layout: LayoutSnapshot) => invoke<LayoutChange>("sessions_restore_layout", { layout });
+export const createSessionFolder = (path: string) => invoke<void>("sessions_create_folder", { path });
+export const removeSessionFolder = (path: string) => invoke<void>("sessions_remove_folder", { path });
+/** Deletes a folder with all its sessions and empty subfolders in one write. */
+export const deleteSessionFolder = (folder: string) => invoke<DeleteManyResult>("sessions_delete_folder", { folder });
 export const saveSession = (session: SavedSession, password: string | null) =>
   invoke<SavedSession>("sessions_save", { session, password });
 export const deleteSession = (id: string) => invoke<void>("sessions_delete", { id });
@@ -89,22 +105,47 @@ export const previewImport = (source: ImportSource, path: string) =>
 export const commitImport = (candidates: ImportSelection[]) =>
   invoke<ImportResult>("sessions_import_commit", { candidates });
 
-/** Folder paths are logical session categories, not operating-system paths. */
-export function buildSessionTree(sessions: readonly SavedSession[]): SessionFolder {
+/** Same rules as the backend: segments split at "/", trimmed, empty ones dropped. "" is the top level. */
+export function normalizeFolder(path: string): string {
+  return path.split("/").map(trimFolderSegment).filter(Boolean).join("/");
+}
+/**
+ * Whitespace trimmed from folder segments, identical to `is_trimmed` in the backend: ASCII space, \t, \n, \r, \f, \v,
+ * the Unicode space separators (Zs) and U+FEFF. Deliberately not String.prototype.trim (which also trims U+2028/9).
+ */
+const trimPattern = /^[ \t\n\r\f\v\p{Zs}\uFEFF]+|[ \t\n\r\f\v\p{Zs}\uFEFF]+$/gu;
+export const trimFolderSegment = (segment: string) => segment.replace(trimPattern, "");
+/** `path` is `root` or lies below it; everything lies within the top level "". */
+export function isWithinFolder(path: string, root: string): boolean {
+  return root === "" || path === root || path.startsWith(`${root}/`);
+}
+export const parentFolder = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+export const folderName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+export const joinFolder = (parent: string, name: string) => normalizeFolder(parent ? `${parent}/${name}` : name);
+
+/** A folder name for rename/create: not empty, no "/" and no control characters. */
+export function validFolderName(name: string): boolean {
+  return name.trim() !== "" && !name.includes("/") && !/\p{Cc}/u.test(name);
+}
+
+/** Folder paths are logical session categories, not operating-system paths. Empty folders come from `folders`. */
+export function buildSessionTree(sessions: readonly SavedSession[], folders: readonly string[] = []): SessionFolder {
   const root: SessionFolder = { name: "", path: "", folders: [], sessions: [] };
-  for (const session of sessions) {
+  const open = (path: string) => {
     let folder = root;
-    for (const name of session.folder.split("/").filter(Boolean)) {
-      const path = folder.path ? `${folder.path}/${name}` : name;
-      let child = folder.folders.find(item => item.path === path);
+    for (const name of normalizeFolder(path).split("/").filter(Boolean)) {
+      const childPath = folder.path ? `${folder.path}/${name}` : name;
+      let child = folder.folders.find(item => item.path === childPath);
       if (!child) {
-        child = { name, path, folders: [], sessions: [] };
+        child = { name, path: childPath, folders: [], sessions: [] };
         folder.folders.push(child);
       }
       folder = child;
     }
-    folder.sessions.push(session);
-  }
+    return folder;
+  };
+  for (const path of folders) open(path);
+  for (const session of sessions) open(session.folder).sessions.push(session);
   const sort = (folder: SessionFolder) => {
     folder.folders.sort((a, b) => a.name.localeCompare(b.name, getLanguage()));
     folder.sessions.sort((a, b) => a.name.localeCompare(b.name, getLanguage()));
@@ -240,6 +281,24 @@ export function selectSessions(previous: SessionSelection, visible: readonly str
 export function collectFolderSessions(folder: SessionFolder): SavedSession[] {
   return [...folder.sessions, ...folder.folders.flatMap(collectFolderSessions)];
 }
+/** Every folder path (with all parents), sorted, without the top level. */
+export function allFolderPaths(sessions: readonly SavedSession[], folders: readonly string[] = []): string[] {
+  const paths: string[] = [];
+  const walk = (folder: SessionFolder) => { for (const child of folder.folders) { paths.push(child.path); walk(child); } };
+  walk(buildSessionTree(sessions, folders));
+  return paths;
+}
+
+/** What is being dragged or moved: sessions (one or the selection) or one folder. */
+export type MoveItem = { kind: "sessions"; ids: string[] } | { kind: "folder"; path: string };
+/** Target folder of a drop/move: never into the own subtree and never where everything already is. */
+export function moveAllowed(item: MoveItem, target: string, sessions: readonly SavedSession[]): boolean {
+  if (item.kind === "folder") return item.path !== "" && !isWithinFolder(target, item.path) && parentFolder(item.path) !== target;
+  const moving = sessions.filter(session => item.ids.includes(session.id));
+  return moving.length > 0 && moving.some(session => normalizeFolder(session.folder) !== target);
+}
+/** New path of a folder moved into `target`. */
+export const movedFolderPath = (path: string, target: string) => joinFolder(target, folderName(path));
 
 export interface WerktermImportPreview {
   sessions: SavedSession[];

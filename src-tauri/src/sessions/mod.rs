@@ -1,3 +1,4 @@
+pub mod folders;
 pub mod import_mobaxterm;
 pub mod import_windterm;
 pub mod recent;
@@ -122,6 +123,10 @@ pub struct ImportSelection {
 struct SessionFile {
     version: u32,
     sessions: Vec<SavedSession>,
+    /// Empty folders (paths without a session). Optional, so the file stays version 1: older
+    /// versions ignore the field, and a file without it has no empty folders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    folders: Vec<String>,
 }
 
 pub(crate) fn new_id() -> String {
@@ -268,9 +273,21 @@ pub fn validate_target(
 }
 
 pub fn load(path: &Path) -> Result<Vec<SavedSession>, String> {
+    load_file(path).map(|file| file.sessions)
+}
+
+/// Reads and validates the whole file. The empty-folder list is normalised, invalid entries are
+/// dropped instead of failing the load.
+fn load_file(path: &Path) -> Result<SessionFile, String> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(SessionFile {
+                version: 1,
+                sessions: Vec::new(),
+                folders: Vec::new(),
+            });
+        }
         Err(error) => return Err(ui_err("SESSIONS_READ_FAILED").detail(error).into()),
     };
     let file: SessionFile = serde_json::from_slice(&bytes)
@@ -286,16 +303,28 @@ pub fn load(path: &Path) -> Result<Vec<SavedSession>, String> {
         }
     }
     validate_jump_hosts(&file.sessions)?;
-    Ok(file.sessions)
+    let folders = folders::normalize_list(&file.sessions, &file.folders);
+    Ok(SessionFile { folders, ..file })
 }
 
 fn write_atomic(path: &Path, sessions: Vec<SavedSession>) -> Result<(), String> {
+    write_file(path, sessions, None)
+}
+
+/// `folders == None` keeps the empty folders already stored (normalised against the new sessions).
+fn write_file(
+    path: &Path,
+    sessions: Vec<SavedSession>,
+    folders: Option<Vec<String>>,
+) -> Result<(), String> {
     // Validate existing contents before creating a temporary file: corruption must never be overwritten.
-    load(path)?;
+    let existing = load_file(path)?;
     validate_jump_hosts(&sessions)?;
+    let folders = folders::normalize_list(&sessions, &folders.unwrap_or(existing.folders));
     let bytes = serde_json::to_vec_pretty(&SessionFile {
         version: 1,
         sessions,
+        folders,
     })
     .map_err(|error| String::from(ui_err("SESSIONS_SERIALIZE_FAILED").detail(error)))?;
     let parent = path
@@ -365,6 +394,108 @@ pub async fn jump_chain(
 pub async fn sessions_list(app: tauri::AppHandle) -> Result<Vec<SavedSession>, String> {
     let _guard = STORAGE_LOCK.lock().await;
     read_file(config_path(&app)?).await
+}
+
+/// Empty folders (folders that hold sessions follow from the sessions themselves).
+#[tauri::command]
+pub async fn sessions_folders(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    let path = config_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || load_file(&path).map(|file| file.folders))
+        .await
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
+}
+
+/// Reads the file, applies `change` and writes the result once, atomically. Nothing is written
+/// when the change reports no difference or fails.
+fn change_layout_at<F>(path: &Path, change: F) -> Result<folders::LayoutChange, String>
+where
+    F: FnOnce(&mut Vec<SavedSession>, &mut Vec<String>) -> Result<folders::LayoutChange, String>,
+{
+    let mut file = load_file(path)?;
+    let result = change(&mut file.sessions, &mut file.folders)?;
+    if result.changed {
+        write_file(path, file.sessions, Some(file.folders))?;
+    }
+    Ok(result)
+}
+
+async fn change_layout<F>(
+    app: &tauri::AppHandle,
+    change: F,
+) -> Result<folders::LayoutChange, String>
+where
+    F: FnOnce(&mut Vec<SavedSession>, &mut Vec<String>) -> Result<folders::LayoutChange, String>
+        + Send
+        + 'static,
+{
+    let _guard = STORAGE_LOCK.lock().await;
+    let path = config_path(app)?;
+    tauri::async_runtime::spawn_blocking(move || change_layout_at(&path, change))
+        .await
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))?
+}
+
+/// Moves sessions into a folder (`""` = top level). Returns the snapshot for undo.
+#[tauri::command]
+pub async fn sessions_move(
+    app: tauri::AppHandle,
+    ids: Vec<String>,
+    folder: String,
+) -> Result<folders::LayoutChange, String> {
+    change_layout(&app, move |sessions, list| {
+        folders::move_sessions(sessions, list, &ids, &folder)
+    })
+    .await
+}
+
+/// Renames or moves a folder with everything below it.
+#[tauri::command]
+pub async fn sessions_rename_folder(
+    app: tauri::AppHandle,
+    from: String,
+    to: String,
+) -> Result<folders::LayoutChange, String> {
+    change_layout(&app, move |sessions, list| {
+        folders::rename_folder(sessions, list, &from, &to)
+    })
+    .await
+}
+
+/// Undo of a move or rename: restores the folders of a snapshot in one write.
+#[tauri::command]
+pub async fn sessions_restore_layout(
+    app: tauri::AppHandle,
+    layout: folders::LayoutSnapshot,
+) -> Result<folders::LayoutChange, String> {
+    change_layout(&app, move |sessions, list| {
+        folders::restore(sessions, list, &layout)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn sessions_create_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    change_layout(&app, move |sessions, list| {
+        folders::create_folder(sessions, list, &path).map(|()| folders::LayoutChange {
+            changed: true,
+            ..Default::default()
+        })
+    })
+    .await
+    .map(drop)
+}
+
+#[tauri::command]
+pub async fn sessions_remove_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    change_layout(&app, move |sessions, list| {
+        folders::remove_folder(sessions, list, &path).map(|()| folders::LayoutChange {
+            changed: true,
+            ..Default::default()
+        })
+    })
+    .await
+    .map(drop)
 }
 
 #[tauri::command]
@@ -496,9 +627,12 @@ fn plan_delete_many(
     result
 }
 
+/// Deletes `ids`, or with `folder` every session in that folder and below plus its empty
+/// subfolders (only if nothing was blocked). One atomic write, then the keyring entries.
 async fn delete_many_at<P, F>(
     path: PathBuf,
     ids: Vec<String>,
+    folder: Option<String>,
     protect: P,
     mut delete_secret: F,
 ) -> Result<DeleteManyResult, String>
@@ -506,11 +640,38 @@ where
     P: FnMut(&str) -> Result<(), String>,
     F: AsyncFnMut(String) -> Result<(), String>,
 {
-    let mut sessions = read_file(path.clone()).await?;
-    let mut result = plan_delete_many(&sessions, &ids, protect);
-    if !result.deleted.is_empty() {
-        sessions.retain(|s| !result.deleted.contains(&s.id));
-        persist(path, sessions).await?;
+    let folder = match folder {
+        Some(folder) => match folders::normalize(&folder)? {
+            folder if folder.is_empty() => return Err(ui_err("SESSION_FOLDER_INVALID").into()),
+            folder => Some(folder),
+        },
+        None => None,
+    };
+    let read = path.clone();
+    let mut file = tauri::async_runtime::spawn_blocking(move || load_file(&read))
+        .await
+        .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))??;
+    let ids = match &folder {
+        Some(folder) => file
+            .sessions
+            .iter()
+            .filter(|s| folders::is_within(&folders::lenient(&s.folder), folder))
+            .map(|s| s.id.clone())
+            .collect(),
+        None => ids,
+    };
+    let mut result = plan_delete_many(&file.sessions, &ids, protect);
+    let drop_folder = folder.filter(|_| result.blocked.is_empty());
+    if !result.deleted.is_empty() || drop_folder.is_some() {
+        file.sessions.retain(|s| !result.deleted.contains(&s.id));
+        let mut list = file.folders;
+        if let Some(folder) = &drop_folder {
+            folders::drop_folder(&file.sessions, &mut list, folder);
+        }
+        let sessions = file.sessions;
+        tauri::async_runtime::spawn_blocking(move || write_file(&path, sessions, Some(list)))
+            .await
+            .map_err(|error| String::from(ui_err("BACKGROUND_TASK_FAILED").detail(error)))??;
         for id in &result.deleted {
             if let Err(error) = delete_secret(format!("session:{id}")).await {
                 result
@@ -531,6 +692,24 @@ pub async fn sessions_delete_many(
     delete_many_at(
         config_path(&app)?,
         ids,
+        None,
+        |id| crate::tunnels::protect_session(&app, id),
+        crate::secrets::delete_password,
+    )
+    .await
+}
+
+/// Deletes a folder with all sessions below it and its empty subfolders in one write.
+#[tauri::command]
+pub async fn sessions_delete_folder(
+    app: tauri::AppHandle,
+    folder: String,
+) -> Result<DeleteManyResult, String> {
+    let _guard = STORAGE_LOCK.lock().await;
+    delete_many_at(
+        config_path(&app)?,
+        Vec::new(),
+        Some(folder),
         |id| crate::tunnels::protect_session(&app, id),
         crate::secrets::delete_password,
     )
@@ -1377,6 +1556,7 @@ mod tests {
         let file = SessionFile {
             version: 1,
             sessions: vec![new.clone()],
+            folders: Vec::new(),
         };
         let encoded = serde_json::to_string(&file).unwrap();
         let decoded: SessionFile = serde_json::from_str(&encoded).unwrap();
@@ -1522,6 +1702,7 @@ mod tests {
                 "target".into(),
                 "unknown".into(),
             ],
+            None,
             |_| Ok(()),
             async |account| {
                 assert_eq!(
@@ -1547,6 +1728,7 @@ mod tests {
             delete_many_at(
                 path.clone(),
                 vec!["keep".into()],
+                None,
                 |_| {
                     fs::write(&path, b"broken").unwrap();
                     Ok(())
@@ -1561,6 +1743,7 @@ mod tests {
             delete_many_at(
                 path.clone(),
                 vec!["keep".into()],
+                None,
                 |_| Ok(()),
                 async |_| panic!("must not remove credentials on persistence failure")
             )
@@ -1568,6 +1751,62 @@ mod tests {
             .is_err()
         );
         assert_eq!(fs::read(&path).unwrap(), b"broken");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn folder_delete_removes_sessions_and_empty_subfolders_in_one_write() {
+        let directory = std::env::temp_dir().join(format!("werkterm-delfolder-{}", new_id()));
+        let path = directory.join("sessions.json");
+        let in_folder = |id: &str, folder: &str, jump: Option<&str>| SavedSession {
+            folder: folder.into(),
+            ..jump_sample(id, jump)
+        };
+        write_file(
+            &path,
+            vec![
+                in_folder("a", "Lab", None),
+                in_folder("b", "Lab/Sub", None),
+                in_folder("keep", "Prod", None),
+            ],
+            Some(vec!["Lab/Empty".into(), "Other".into()]),
+        )
+        .unwrap();
+        let result = delete_many_at(
+            path.clone(),
+            Vec::new(),
+            Some(" Lab ".into()),
+            |_| Ok(()),
+            async |_| Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.deleted, ["a", "b"]);
+        let file = load_file(&path).unwrap();
+        assert_eq!(file.sessions.len(), 1);
+        assert_eq!(file.folders, ["Other"]);
+        // A blocked session keeps the folder and its empty subfolders.
+        write_file(
+            &path,
+            vec![
+                in_folder("gw", "Hops", None),
+                in_folder("web", "Prod", Some("gw")),
+            ],
+            Some(vec!["Hops/Empty".into()]),
+        )
+        .unwrap();
+        let result = delete_many_at(
+            path.clone(),
+            Vec::new(),
+            Some("Hops".into()),
+            |_| Ok(()),
+            async |_| Ok(()),
+        )
+        .await
+        .unwrap();
+        assert!(result.deleted.is_empty());
+        assert_eq!(result.blocked.len(), 1);
+        assert_eq!(load_file(&path).unwrap().folders, ["Hops/Empty"]);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1853,6 +2092,7 @@ mod tests {
         let file = SessionFile {
             version: 1,
             sessions: vec![serial.clone()],
+            folders: Vec::new(),
         };
         let restored: SessionFile =
             serde_json::from_slice(&serde_json::to_vec(&file).unwrap()).unwrap();
@@ -1887,6 +2127,92 @@ mod tests {
         fs::write(&path, b"broken").unwrap();
         assert!(write_atomic(&path, vec![sample()]).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"broken");
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn empty_folders_persist_across_other_writes_and_stay_version_one() {
+        let directory = std::env::temp_dir().join(format!("werkterm-folders-{}", new_id()));
+        let path = directory.join("sessions.json");
+        write_atomic(&path, vec![sample()]).unwrap();
+        // Without empty folders the field is not written (identical to older files).
+        let plain: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(plain.get("folders").is_none());
+        assert_eq!(plain["version"], 1);
+        change_layout_at(&path, |sessions, list| {
+            folders::create_folder(sessions, list, "Empty").map(|()| folders::LayoutChange {
+                changed: true,
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        assert_eq!(load_file(&path).unwrap().folders, ["Empty"]);
+        // A regular session save keeps the empty folders.
+        write_atomic(&path, vec![sample()]).unwrap();
+        assert_eq!(load_file(&path).unwrap().folders, ["Empty"]);
+        // Moving a session in makes the folder a regular one; ids stay.
+        let change = change_layout_at(&path, |sessions, list| {
+            folders::move_sessions(sessions, list, &["sample".into()], "Empty")
+        })
+        .unwrap();
+        let file = load_file(&path).unwrap();
+        // "Empty" now holds a session; the emptied source stays as an empty folder.
+        assert_eq!(file.folders, ["Lab/SSH"]);
+        assert_eq!(file.sessions[0].id, "sample");
+        assert_eq!(file.sessions[0].folder, "Empty");
+        change_layout_at(&path, |sessions, list| {
+            folders::restore(sessions, list, &change.undo)
+        })
+        .unwrap();
+        let file = load_file(&path).unwrap();
+        assert_eq!(file.sessions, vec![sample()]);
+        assert_eq!(file.folders, ["Empty"]);
+        // Unknown and invalid entries in a foreign file are dropped on load, not fatal.
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1, "sessions": [sample()], "folders": ["Lab", "x\u{1}", "New "]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_file(&path).unwrap().folders, ["New"]);
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn layout_changes_never_overwrite_a_corrupt_file_or_write_without_a_change() {
+        let directory = std::env::temp_dir().join(format!("werkterm-layout-{}", new_id()));
+        let path = directory.join("sessions.json");
+        write_atomic(
+            &path,
+            vec![
+                jump_sample("gateway", None),
+                jump_sample("target", Some("gateway")),
+            ],
+        )
+        .unwrap();
+        let before = fs::read(&path).unwrap();
+        let unchanged = change_layout_at(&path, |sessions, list| {
+            folders::move_sessions(sessions, list, &["gateway".into()], "Lab/SSH")
+        })
+        .unwrap();
+        assert!(!unchanged.changed);
+        assert_eq!(fs::read(&path).unwrap(), before);
+        change_layout_at(&path, |sessions, list| {
+            folders::move_sessions(sessions, list, &["gateway".into(), "target".into()], "Hops")
+        })
+        .unwrap();
+        let moved = load(&path).unwrap();
+        assert_eq!(moved[1].jump_session_id.as_deref(), Some("gateway"));
+        assert!(moved.iter().all(|s| s.folder == "Hops"));
+        fs::write(&path, b"broken").unwrap();
+        assert!(
+            change_layout_at(&path, |sessions, list| {
+                folders::move_sessions(sessions, list, &["gateway".into()], "Other")
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"broken");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
         fs::remove_dir_all(directory).unwrap();
     }
     #[test]
