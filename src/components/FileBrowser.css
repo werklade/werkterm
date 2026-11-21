@@ -21,6 +21,7 @@
 .browser-date-column { width: 94px; }
 .browser-list td { overflow: hidden; text-overflow: ellipsis; }
 .browser-list tbody tr.browser-selected { background: var(--selection); }
+.browser-selection-count { margin: 4px 0 0; color: var(--fg-secondary); font-size: 11px; }
 .browser-drop-active { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--bg-active); }
 .file-action-dialog { min-width: min(360px, calc(100vw - 32px)); }
 

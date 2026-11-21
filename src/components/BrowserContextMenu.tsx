@@ -3,19 +3,23 @@ import type { DirEntry } from "../lib/fs";
 import { useT } from "../i18n";
 export type ContextAction = "edit" | "download" | "chmod" | "rename" | "delete" | "remember" | "compare";
 interface MenuItem<A extends string> { action: A; label: string; disabled?: boolean; title?: string; shortcut?: string }
-export function BrowserContextMenu({ entry, x, y, onAnswer, markedName, permissionsDisabled, permissionsTitle, renameDisabled }: { renameDisabled?: boolean; permissionsDisabled?: boolean; permissionsTitle?: string; markedName?: string; entry: DirEntry; x: number; y: number; onAnswer: (action: ContextAction | null) => void }) {
+/** `count` > 1: the menu acts on the whole multi-selection; single-entry actions are disabled. */
+export function BrowserContextMenu({ entry, x, y, onAnswer, markedName, permissionsDisabled, permissionsTitle, renameDisabled, count = 1 }: { renameDisabled?: boolean; permissionsDisabled?: boolean; permissionsTitle?: string; markedName?: string; entry: DirEntry; x: number; y: number; count?: number; onAnswer: (action: ContextAction | null) => void }) {
   const t = useT();
   const file = entry.kind === "file" || (entry.kind === "symlink" && !entry.targetIsDir);
+  const many = count > 1;
+  const singleOnly = many ? { disabled: true, title: t("browser.singleOnly") } : {};
   const items: MenuItem<ContextAction>[] = [
-    ...(file ? [{ action: "edit" as const, label: t("browser.action.edit") }] : []),
-    ...(entry.kind === "file" || entry.kind === "dir" ? [{ action: "remember" as const, label: t("browser.ctx.remember") }, ...(markedName ? [{ action: "compare" as const, label: t("browser.ctx.compare", { name: markedName }) }] : [])] : []),
+    ...(file ? [{ action: "edit" as const, label: t("browser.action.edit"), ...singleOnly }] : []),
+    ...(entry.kind === "file" || entry.kind === "dir" ? [{ action: "remember" as const, label: t("browser.ctx.remember"), ...singleOnly }, ...(markedName ? [{ action: "compare" as const, label: t("browser.ctx.compare", { name: markedName }), ...singleOnly }] : [])] : []),
     // Folders download recursively; links to folders are followed for the selected folder only.
-    { action: "download", label: t("browser.action.download"), disabled: entry.kind !== "file" && entry.kind !== "dir" && entry.kind !== "symlink" },
-    { action: "chmod", label: t("permissions.menu"), disabled: permissionsDisabled || entry.kind === "symlink", title: permissionsDisabled ? permissionsTitle : undefined },
-    { action: "rename", label: t("browser.action.rename"), disabled: renameDisabled, shortcut: "F2" },
+    { action: "download", label: t("browser.action.download"), disabled: !many && entry.kind !== "file" && entry.kind !== "dir" && entry.kind !== "symlink" },
+    // Several entries: symlinks among them are skipped, so only the entry itself does not decide.
+    { action: "chmod", label: t("permissions.menu"), disabled: permissionsDisabled || (!many && entry.kind === "symlink"), title: permissionsDisabled ? permissionsTitle : undefined },
+    { action: "rename", label: t("browser.action.rename"), disabled: renameDisabled, shortcut: "F2", ...singleOnly },
     { action: "delete", label: t("common.delete") },
   ];
-  return <MenuDialog x={x} y={y} label={t("browser.ctx.actionsFor", { name: entry.name })} items={items} onAnswer={onAnswer} />;
+  return <MenuDialog x={x} y={y} label={many ? t("browser.ctx.actionsForMany", { count }) : t("browser.ctx.actionsFor", { name: entry.name })} items={items} onAnswer={onAnswer} />;
 }
 
 /** Choice between uploading files and uploading folders (one toolbar button, no extra icon). */

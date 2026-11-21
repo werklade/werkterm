@@ -12,6 +12,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { dropToCss } from "../lib/dropPosition";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { sep } from "@tauri-apps/api/path";
 import { Icon, type IconName } from "./Icon";
 import { FileActionDialog, type FileDialog } from "./FileActionDialog";
 import { InlineRename } from "./InlineRename";
@@ -25,6 +26,7 @@ import { countEntries, createFile, deleteEntry, makeDirectory, remoteChild, rena
 import type { TransferQueueHandle } from "../lib/transferQueue";
 import { backendErrorText } from "../lib/transferFormat";
 import { currentLocale, tp, useT, type TextKey } from "../i18n";
+import { collapseToFocus, EMPTY_SELECTION, focusOnly, isSelected, moveFocus, prune, selectAll, selectRange, selectSingle, toggle, type Selection } from "../lib/browserSelection";
 import "./FileBrowser.css";
 
 export interface BrowserTab {
@@ -61,7 +63,7 @@ interface Props {
 }
 type BrowserPrompt = FileDialog
   | { type: "sudo"; label: string; answer: (secret: string | null) => void }
-  | { type: "permissions"; entry: DirEntry; answer: (options: ChmodOptions | null) => void };
+  | { type: "permissions"; entry: DirEntry; count?: number; anyDir?: boolean; answer: (options: ChmodOptions | null) => void };
 type Action = "sudo" | "chmod" | "up" | "refresh" | "download" | "upload" | "uploadFolder" | "mkdir" | "create" | "delete" | "rename" | "edit";
 // Module-level lists hold keys only; they are translated while rendering.
 const actions: { icon: IconName; label: TextKey; action?: Action }[] = [
@@ -81,6 +83,10 @@ const settingLabels: { key: "followTerminalFolder" | "shellIntegration" | "sshPr
   { key: "sshPromptCommand", label: "browser.sshPromptCommand", title: "browser.sshPromptCommand.title" },
 ];
 const isDirectory = (entry: DirEntry) => entry.kind === "dir" || (entry.kind === "symlink" && entry.targetIsDir);
+/** How many names a multi-delete confirmation or error summary lists. */
+const LISTED_NAMES = 3;
+const listNames = (names: string[]) => names.slice(0, LISTED_NAMES).join(", ") + (names.length > LISTED_NAMES ? ", …" : "");
+const single = (name: string): Selection => ({ names: [name], anchor: name, focus: name });
 
 export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSettings, onPath, onAccess, onStatus, onOpenFile, transferQueue }: Props) {
   const t = useT();
@@ -126,18 +132,23 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
+  /** Multi-selection (names in display order, Shift anchor, keyboard focus); pruned against the listing while rendering. */
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
   /** Name of the entry whose name is being edited in place (F2, toolbar, context menu). */
   const [renaming, setRenaming] = useState<string | null>(null);
   // Mirrors `renaming` synchronously: a blur from an input removed by a reload must not rename.
   const renameTarget = useRef<string | null>(null);
   /** Entry to select after the next listing load (kept across the reload after a rename). */
   const pendingSelect = useRef<string | null>(null);
-  /** Move the keyboard focus back to the selected row once the list is shown again. */
+  /** Move the keyboard focus to the focused row (roving tabindex) once the list is shown again. */
   const focusSelected = useRef(false);
+  /** Folder (tab, session and path) of the last load: another folder clears the selection, a reload keeps it. */
+  const loadedFolder = useRef<string | null>(null);
+  /** A mouse press focuses the row before the click; the click decides about the selection then. */
+  const pointerFocus = useRef(false);
   /** Rename chosen in the context menu: starts once the menu has closed and given the focus back. */
   const renameAfterMenu = useRef<DirEntry | null>(null);
-  const [context, setContext] = useState<{ entry: DirEntry; x: number; y: number } | null>(null);
+  const [context, setContext] = useState<{ entry: DirEntry; x: number; y: number; count?: number } | null>(null);
   const [uploadMenu, setUploadMenu] = useState<{ x: number; y: number } | null>(null);
   const [sort, setSort] = useState(loadFileSort);
   const [busy, setBusy] = useState(false);
@@ -173,7 +184,10 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     };
   }, []);
   useEffect(() => {
-    setSelected(pendingSelect.current);
+    const folder = JSON.stringify([id, kind, sessionId, distro, path]);
+    if (pendingSelect.current !== null) setSelection(single(pendingSelect.current));
+    else if (loadedFolder.current !== folder) setSelection(EMPTY_SELECTION);
+    loadedFolder.current = folder;
     pendingSelect.current = null;
     renameTarget.current = null;
     setRenaming(null);
@@ -206,8 +220,8 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   useEffect(() => {
     if (!focusSelected.current || renaming !== null || loading || !listing) return;
     focusSelected.current = false;
-    listRef.current?.querySelector<HTMLTableRowElement>("tbody tr[aria-selected='true']")?.focus();
-  }, [renaming, loading, listing, selected]);
+    listRef.current?.querySelector<HTMLTableRowElement>("tbody tr[tabindex='0']")?.focus();
+  }, [renaming, loading, listing, selection]);
 
   const navigate = (next: string) => {
     if (!tab || !ready) return;
@@ -220,8 +234,16 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   const writable = ready && kind === "ssh" && listing?.mode === "sftp" && !loading;
   const permissionsRoute = permissionRoute(listing?.mode, listing?.path ?? path, /Windows/i.test(navigator.userAgent), kind === "wsl");
   const permissionsReady = ready && !loading && permissionsRoute !== null && (permissionsRoute !== "sftp" || sessionId !== undefined);
-  const selectedEntry = listing?.entries.find(entry => entry.name === selected);
   const sortedEntries = listing ? sortFileEntries(listing.entries, sort) : [];
+  const order = sortedEntries.map(entry => entry.name);
+  // Reloads and a new sort order drop vanished names and restore the display order.
+  const current = prune(selection, order);
+  const selectedEntries = sortedEntries.filter(entry => isSelected(current, entry.name));
+  const selectedEntry = selectedEntries.length === 1 ? selectedEntries[0] : undefined;
+  const multiple = selectedEntries.length > 1;
+  const focusName = current.focus !== null && order.includes(current.focus) ? current.focus : order[0];
+  /** Entries an action applies to: the selection, or only the context entry if it is not part of it. */
+  const targetsFor = (contextEntry?: DirEntry) => contextEntry && !isSelected(current, contextEntry.name) ? [contextEntry] : selectedEntries;
   const editorReady = ready && !loading && (kind !== "ssh" || listing?.mode === "sftp");
   const openEntry = (entry: DirEntry) => {
     if (tab && listing && editorReady && !isDirectory(entry)) onOpenFile(tab, childPath(listing.path, entry.name));
@@ -266,41 +288,52 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   const perform = (action: Action | undefined, contextEntry?: DirEntry) => {
     if (action === "up") { navigate(parentPath(listing?.path ?? path)); return; }
     if (action === "refresh") { refresh(); return; }
-    if (action === "edit") { const entry = contextEntry ?? selectedEntry; if (entry) openEntry(entry); return; }
+    const targets = targetsFor(contextEntry);
+    if (action === "edit") { if (targets.length === 1) openEntry(targets[0]); return; }
     if (action === "rename") {
-      const entry = contextEntry ?? selectedEntry;
+      // Renaming needs exactly one entry; with a multi-selection F2 and the button do nothing.
+      const entry = targets.length === 1 ? targets[0] : undefined;
       if (!writable || busy || operation.current || !entry) return;
       renameTarget.current = entry.name;
-      setSelected(entry.name);
+      setSelection(selectSingle(current, order, entry.name));
       setRenaming(entry.name);
       return;
     }
     if (action === "chmod") {
-      const entry = contextEntry ?? selectedEntry;
-      if (!permissionsReady || !permissionsRoute || !listing || !entry || entry.kind === "symlink" || operation.current) return;
-      const route = permissionsRoute, targetPath = childPath(listing.path, entry.name), targetId = sessionId;
+      const entries = targets.filter(entry => entry.kind !== "symlink");
+      if (!permissionsReady || !permissionsRoute || !listing || entries.length === 0 || operation.current) return;
+      const route = permissionsRoute, targetDir = listing.path, targetId = sessionId;
+      const anyDir = entries.some(entry => entry.kind === "dir");
       void run(async () => {
-        const options = await ask<ChmodOptions | null>(answer => ({ type: "permissions", entry, answer }));
+        const options = await ask<ChmodOptions | null>(answer => ({ type: "permissions", entry: entries[0], count: entries.length, anyDir, answer }));
         if (!options || !mounted.current) return;
-        if (options.recursive) {
-          const count = await countPermissionEntries(route, targetId, targetPath);
+        if (options.recursive && anyDir) {
+          let count = 0;
+          for (const entry of entries) count += entry.kind === "dir" ? await countPermissionEntries(route, targetId, childPath(targetDir, entry.name)) + 1 : 1;
           if (!mounted.current) return;
-          const accepted = await ask<boolean>(answer => ({ type: "delete", message: tp("browser.chmodConfirm", count + 1), confirmLabel: t("browser.chmodConfirmButton"), answer }));
+          const accepted = await ask<boolean>(answer => ({ type: "delete", message: tp("browser.chmodConfirm", count), confirmLabel: t("browser.chmodConfirmButton"), answer }));
           if (!accepted || !mounted.current) return;
         }
-        const result = await changePermissions(route, targetId, targetPath, options);
-        const message = result.errors.length
-          ? t("browser.chmodResultErrors", { changed: result.changed, failed: result.failed, paths: result.errors.join(", ") })
-          : t("browser.chmodResult", { changed: result.changed, failed: result.failed });
+        const total = { changed: 0, failed: 0, errors: [] as string[] };
+        for (const entry of entries) {
+          // Files never recurse; the recursive options only matter for folders.
+          const result = await changePermissions(route, targetId, childPath(targetDir, entry.name), entry.kind === "dir" ? options : { ...options, recursive: false, dirMode: null, fileMode: null });
+          total.changed += result.changed;
+          total.failed += result.failed;
+          total.errors.push(...result.errors);
+        }
+        const message = total.errors.length
+          ? t("browser.chmodResultErrors", { changed: total.changed, failed: total.failed, paths: total.errors.join(", ") })
+          : t("browser.chmodResult", { changed: total.changed, failed: total.failed });
         callbacks.current.onStatus(message);
-        if (result.failed && mounted.current) setError(message);
+        if (total.failed && mounted.current) setError(message);
       });
       return;
     }
     if ((action === "sudo" ? !sudoReady : !writable || !listing) || sessionId === undefined || operation.current) return;
     const targetId = sessionId;
     const targetDir = listing?.path ?? path;
-    const entry = contextEntry ?? selectedEntry;
+    const entry = targets.length === 1 ? targets[0] : undefined;
     void run(async () => {
       if (action === "sudo") {
         if (sudoActive) {
@@ -328,6 +361,17 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
       } else if (action === "uploadFolder") {
         const paths = await open({ multiple: true, directory: true, title: t("browser.selectFolders") });
         if (paths) transferQueue.enqueue(paths.map(localPath => ({ kind: "uploadFolder", sessionId: targetId, localPath, remoteDir: targetDir })));
+      } else if (action === "download" && targets.length > 1) {
+        // One target folder for all; one batch, so "Overwrite all" and Cancel cover every entry.
+        const downloadable = targets.filter(item => item.kind !== "other");
+        if (downloadable.length === 0) return;
+        const localDir = await open({ multiple: false, directory: true, title: t("browser.selectTargetFolderMany", { count: downloadable.length }) });
+        if (!localDir) return;
+        const base = localDir.replace(/[\\/]+$/, ""), separator = sep();
+        transferQueue.enqueue(downloadable.map(item => isDirectory(item)
+          ? { kind: "downloadFolder" as const, sessionId: targetId, remotePath: remoteChild(targetDir, item.name), localParent: localDir }
+          // Unlike the save dialog, nothing confirmed an existing file yet: ask on conflicts.
+          : { kind: "download" as const, sessionId: targetId, remotePath: remoteChild(targetDir, item.name), localPath: `${base}${separator}${item.name}`, overwrite: false }));
       } else if (action === "download" && entry && isDirectory(entry)) {
         // The folder itself is created inside the chosen folder; existing folders are reused.
         const localParent = await open({ multiple: false, directory: true, title: t("browser.selectTargetFolder", { name: entry.name }) });
@@ -341,6 +385,28 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
         const name = await ask<string | null>(answer => ({ type: "name", directory: action === "mkdir", answer }));
         if (name === null || !mounted.current) return;
         await (action === "mkdir" ? makeDirectory : createFile)(targetId, targetDir, name);
+      } else if (action === "delete" && targets.length > 1) {
+        const names = targets.map(item => item.name);
+        const folders = targets.filter(item => item.kind === "dir");
+        let contained = 0;
+        for (const item of folders) contained += await countEntries(targetId, remoteChild(targetDir, item.name));
+        if (!mounted.current) return;
+        const limit = 100000;
+        const message = folders.length === 0 ? t("browser.deleteMany", { count: names.length, names: listNames(names) })
+          : t("browser.deleteManyFolders", { count: names.length, names: listNames(names), entries: contained > limit ? t("browser.moreThan", { limit: limit.toLocaleString(currentLocale()) }) : contained.toLocaleString(currentLocale()) });
+        const accepted = await ask<boolean>(answer => ({ type: "delete", message, answer }));
+        if (!accepted || !mounted.current) return;
+        // One after the other; a failed entry does not stop the rest.
+        const failures: string[] = [];
+        for (const item of targets) {
+          try { await deleteEntry(targetId, remoteChild(targetDir, item.name), item.kind === "dir"); }
+          catch (reason: unknown) { failures.push(`${item.name}: ${backendErrorText(reason)}`); }
+        }
+        if (failures.length) {
+          const summary = t("browser.deleteManyFailed", { deleted: targets.length - failures.length, count: targets.length, errors: listNames(failures) });
+          callbacks.current.onStatus(summary);
+          if (mounted.current) setError(summary);
+        }
       } else if (action === "delete" && entry) {
         const remotePath = remoteChild(targetDir, entry.name);
         const count = entry.kind === "dir" ? await countEntries(targetId, remotePath) : null;
@@ -351,6 +417,12 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
         if (accepted && mounted.current) await deleteEntry(targetId, remotePath, entry.kind === "dir");
       }
     });
+  };
+  /** Right click or menu key: a selected entry keeps the selection, an unselected one becomes the only selection. */
+  const openContext = (entry: DirEntry, x: number, y: number) => {
+    const keep = isSelected(current, entry.name);
+    setSelection(keep ? focusOnly(current, order, entry.name) : selectSingle(current, order, entry.name));
+    setContext({ entry, x, y, count: keep ? selectedEntries.length : 1 });
   };
   const commitRename = (entry: DirEntry, value: string | null) => {
     if (renameTarget.current !== entry.name) return;
@@ -414,13 +486,15 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     <h3 className="browser-heading">{heading}{kind === "ssh" && ready && sudoActive && <span className="sudo-badge">sudo</span>}</h3>
     <div className="browser-toolbar">{actions.map(action => {
       const viewAction = action.action === "up" || action.action === "refresh";
-      const missingSelection = (action.action === "download" || action.action === "delete" || action.action === "rename") && !selectedEntry;
+      const missingSelection = (action.action === "download" || action.action === "delete") ? selectedEntries.length === 0 : action.action === "rename" && !selectedEntry;
       const editAction = action.action === "edit";
       const sudoAction = action.action === "sudo";
+      // Rename and the editor work on exactly one entry; the tooltip says why they are off.
+      const singleOnly = multiple && (editAction || action.action === "rename");
       const disabled = sudoAction ? !sudoReady || busy : editAction ? !editorReady || busy || !selectedEntry || isDirectory(selectedEntry)
         : viewAction ? !ready : !writable || busy || !action.action || missingSelection;
       const label = t(action.label);
-      const title = editAction ? (kind === "ssh" && !editorReady ? t("browser.onlySftp") : label)
+      const title = singleOnly ? t("browser.singleOnly") : editAction ? (kind === "ssh" && !editorReady ? t("browser.onlySftp") : label)
         : !viewAction && !(sudoAction ? sudoReady : writable) ? disabledReason : action.action === "upload" ? t("browser.uploadTitle") : label;
       return <button key={action.icon} type="button" aria-label={action.action === "sudo" ? t("browser.action.sudo.label") : label} aria-pressed={action.action === "sudo" ? sudoActive : undefined} title={title} disabled={Boolean(disabled)} aria-haspopup={action.action === "upload" ? "menu" : undefined} onClick={event => {
         if (action.action !== "upload") { perform(action.action); return; }
@@ -432,26 +506,43 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     {notice && <p className="empty-state">{notice}</p>}
     {loading && <p className="empty-state" role="status">{t("browser.loading")}</p>}
     {error && <p className="browser-error" role="alert">{error}</p>}
-    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} aria-label={t("browser.listLabel")}><table style={{ minWidth: widths.name + widths.size + widths.modified }}><colgroup><col /><col style={{ width: widths.size }} /><col style={{ width: widths.modified }} /></colgroup><thead><tr>{([{ column: "name", label: t("browser.column.name") }, { column: "size", label: t("browser.column.size") }, { column: "modified", label: t("browser.column.modified") }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button><ResizeGrip label={t("browser.columnWidth", { column: header.label })} value={widths[header.column]} measure={() => listRef.current?.querySelectorAll("th")[{ name: 0, size: 1, modified: 2 }[header.column]]?.getBoundingClientRect().width ?? widths[header.column]} min={header.column === "name" ? 100 : header.column === "size" ? 55 : 90} onResize={value => resizeColumn(header.column, value)} onAuto={() => autoColumn(header.column)} /></th>)}</tr></thead><tbody>{sortedEntries.map((entry, index) => <tr key={entry.name} title={modeToRwx(entry.permissions)} onContextMenu={event => { if ((!writable && !editorReady) || busy) return; event.preventDefault(); setSelected(entry.name); setContext({ entry, x: event.clientX, y: event.clientY }); }} tabIndex={selected === entry.name || (!selected && index === 0) ? 0 : -1} aria-selected={selected === entry.name} className={selected === entry.name ? "browser-selected" : ""} aria-label={t(isDirectory(entry) ? "browser.entryFolder" : "browser.entryFile", { name: entry.name })} onClick={() => setSelected(entry.name)} onFocus={() => setSelected(entry.name)} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
+    {listing && !loading && <div ref={listRef} className={`browser-list${dragOver ? " browser-drop-active" : ""}`} ><table role="grid" aria-multiselectable="true" aria-label={t("browser.listLabel")} style={{ minWidth: widths.name + widths.size + widths.modified }}><colgroup><col /><col style={{ width: widths.size }} /><col style={{ width: widths.modified }} /></colgroup><thead><tr>{([{ column: "name", label: t("browser.column.name") }, { column: "size", label: t("browser.column.size") }, { column: "modified", label: t("browser.column.modified") }] as const).map(header => <th key={header.column} scope="col" aria-sort={sort.column === header.column ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => changeSort(header.column)}>{header.label}{sort.column === header.column && <span aria-hidden="true"> {sort.direction === "asc" ? "▲" : "▼"}</span>}</button><ResizeGrip label={t("browser.columnWidth", { column: header.label })} value={widths[header.column]} measure={() => listRef.current?.querySelectorAll("th")[{ name: 0, size: 1, modified: 2 }[header.column]]?.getBoundingClientRect().width ?? widths[header.column]} min={header.column === "name" ? 100 : header.column === "size" ? 55 : 90} onResize={value => resizeColumn(header.column, value)} onAuto={() => autoColumn(header.column)} /></th>)}</tr></thead><tbody>{sortedEntries.map(entry => <tr key={entry.name} title={modeToRwx(entry.permissions)} onContextMenu={event => { if ((!writable && !editorReady) || busy) return; event.preventDefault(); openContext(entry, event.clientX, event.clientY); }} tabIndex={entry.name === focusName ? 0 : -1} aria-selected={isSelected(current, entry.name)} className={isSelected(current, entry.name) ? "browser-selected" : ""} aria-label={t(isDirectory(entry) ? "browser.entryFolder" : "browser.entryFile", { name: entry.name })}
+      onMouseDown={event => {
+        pointerFocus.current = true;
+        // Shift+click must not select text; the row then gets the focus from the effect.
+        if (event.shiftKey) { event.preventDefault(); focusSelected.current = true; }
+      }}
+      onClick={event => { pointerFocus.current = false; setSelection(event.shiftKey ? selectRange(current, order, entry.name) : event.ctrlKey || event.metaKey ? toggle(current, order, entry.name) : selectSingle(current, order, entry.name)); }}
+      onFocus={() => {
+        // Mouse: the click decides. Keyboard (Tab): an empty selection selects the row, otherwise only the focus moves.
+        const pointer = pointerFocus.current;
+        pointerFocus.current = false;
+        if (pointer || current.focus === entry.name) return;
+        setSelection(current.names.length ? focusOnly(current, order, entry.name) : selectSingle(current, order, entry.name));
+      }} onDoubleClick={() => { if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }} onKeyDown={event => {
       if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-        if ((writable || editorReady) && !busy) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setSelected(entry.name); setContext({ entry, x: rect.left + 12, y: rect.bottom }); }
+        if ((writable || editorReady) && !busy) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openContext(entry, rect.left + 12, rect.bottom); }
       }
       if (event.key === "Enter") { event.preventDefault(); if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }
       if (event.key === "Delete") { event.preventDefault(); if (writable && !busy) perform("delete"); }
-      if (event.key === "F2") { event.preventDefault(); perform("rename", entry); }
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (event.key === "F2") { event.preventDefault(); if (!multiple) perform("rename", entry); }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") { event.preventDefault(); setSelection(selectAll(current, order)); }
+      if (event.key === "Escape") setSelection(collapseToFocus(focusOnly(current, order, entry.name), order));
+      const delta = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : event.key === "Home" ? "start" as const : event.key === "End" ? "end" as const : null;
+      if (delta !== null) {
         event.preventDefault();
-        const next = Math.max(0, Math.min(sortedEntries.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
-        setSelected(sortedEntries[next].name);
-        listRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[next]?.focus();
+        // The focused row is the starting point; the effect moves the DOM focus after the render.
+        setSelection(moveFocus(focusOnly(current, order, entry.name), order, delta, event.shiftKey));
+        focusSelected.current = true;
       }
     }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} />{renaming === entry.name
       ? <InlineRename name={entry.name} file={!isDirectory(entry)} label={t("browser.renameLabel", { name: entry.name })} onDone={value => commitRename(entry, value)} />
       : <span title={entry.name}>{entry.name}</span>}</span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString(currentLocale(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">{t("browser.empty")}</p>}</div>}
-    {context && <BrowserContextMenu {...context} renameDisabled={!writable} permissionsDisabled={!permissionsReady} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? t("browser.unixPermissionsUnavailable") : t("browser.onlySftp")} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action === "rename") renameAfterMenu.current = entry; else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
+    {listing && !loading && multiple && <p className="browser-selection-count" role="status">{t("browser.selectedCount", { count: selectedEntries.length })}</p>}
+    {context && <BrowserContextMenu {...context} renameDisabled={!writable} permissionsDisabled={!permissionsReady || ((context.count ?? 1) > 1 && targetsFor(context.entry).every(entry => entry.kind === "symlink"))} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? t("browser.unixPermissionsUnavailable") : t("browser.onlySftp")} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action === "rename") renameAfterMenu.current = entry; else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
     {uploadMenu && <UploadMenu {...uploadMenu} onAnswer={choice => { setUploadMenu(null); if (choice) perform(choice); }} />}
     {prompt?.type === "sudo" ? <SecretDialog key={promptSequence} title={t("browser.sudoPasswordTitle", { label: prompt.label })} prompt={{ type: "secret", requestId: 0, kind: "password", label: prompt.label }} onAnswer={prompt.answer} />
-      : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} onAnswer={prompt.answer} />
+      : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} count={prompt.count} anyDir={prompt.anyDir} onAnswer={prompt.answer} />
       : prompt && <FileActionDialog key={promptSequence} prompt={prompt} />}
   </>;
 }
