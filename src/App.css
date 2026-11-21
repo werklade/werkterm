@@ -19,9 +19,10 @@ input::placeholder { color: var(--fg-muted); }
 .menubar { height: var(--menubar-height); flex: none; display: flex; align-items: stretch; background: var(--bg-menubar); }
 .menu-label { display: flex; align-items: center; padding: 0 12px; cursor: default; }
 .menu-label:hover { background: var(--bg-hover); }
-.toolbar { height: var(--toolbar-height); flex: none; display: flex; align-items: stretch; gap: 4px; padding: 3px 8px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border); }
+.toolbar { min-height: var(--toolbar-height); flex: none; display: flex; align-items: stretch; gap: 4px; padding: 3px 8px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border); }
 .toolbar-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 66px; padding: 3px 10px; border-radius: var(--radius); }
 .toolbar-button .icon { width: 28px; height: 28px; }
+.toolbar-button > span:not(.icon) { flex: none; line-height: 1.2; max-width: 100%; overflow-wrap: anywhere; }
 .workspace { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .sidebar { position: relative; flex: none; width: calc(var(--sidebar-icon-width) + var(--sidebar-width)); display: flex; flex-direction: column; background: var(--bg-panel); border-right: 1px solid var(--border-strong); }
 .quick-connect { padding: 8px; }
@@ -93,7 +94,9 @@ input::placeholder { color: var(--fg-muted); }
 
 .statusbar { display: flex; align-items: center; gap: 10px; }
 .statusbar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.statusbar > .statusbar-text { flex: 1; }
 .statusbar > button { flex: none; border: 1px solid var(--border-strong); border-radius: var(--radius); }
+.statusbar > progress { flex: none; width: 120px; height: 8px; accent-color: var(--accent); border-radius: var(--radius); }
 
 .resize-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; user-select: none; z-index: 3; }
 .resize-grip:hover, .resize-grip:focus-visible { background: var(--accent); outline: none; }

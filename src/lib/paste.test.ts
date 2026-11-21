@@ -101,15 +101,15 @@ describe("remembered paste choice", () => {
   });
   it("counts tabs in the description", () => {
     expect(describeRemembered(emptyPasteRemember(), 1)).toBe("Gemerkt: 1 Tab");
-    expect(describeRemembered(remember, 2)).toBe("Gemerkt: dauerhaft, 1 Profil, 2 Tabs");
+    expect(describeRemembered(remember, 2)).toBe("Gemerkt: dauerhaft, 1 Sitzung, 2 Tabs");
     expect(hasRemembered(emptyPasteRemember(), 1)).toBe(true);
     expect(hasRemembered(emptyPasteRemember(), 0)).toBe(false);
   });
   it("describes the state", () => {
     expect(describeRemembered(emptyPasteRemember())).toBe("Nichts gemerkt");
     expect(hasRemembered(emptyPasteRemember())).toBe(false);
-    expect(describeRemembered(remember)).toBe("Gemerkt: dauerhaft, 1 Profil");
-    expect(describeRemembered({ global: null, sessions: { a: paste, b: paste, c: paste } })).toBe("Gemerkt: 3 Profile");
+    expect(describeRemembered(remember)).toBe("Gemerkt: dauerhaft, 1 Sitzung");
+    expect(describeRemembered({ global: null, sessions: { a: paste, b: paste, c: paste } })).toBe("Gemerkt: 3 Sitzungen");
     expect(hasRemembered(remember)).toBe(true);
   });
   it("normalizes broken data strictly", () => {

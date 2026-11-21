@@ -11,7 +11,8 @@ export type TransferJob =
   /** Uploads the local folder into a new or existing folder of the same name inside `remoteDir`. */
   | { kind: "uploadFolder"; sessionId: number; localPath: string; remoteDir: string };
 export type ConflictResolution = "overwrite" | "skip" | "overwriteAll" | "cancel";
-export type QueueState = { text: string; queued: number } | null;
+/** progress: share 0..1 of the current file, or of the folder by files; null while unknown. */
+export type QueueState = { text: string; queued: number; progress: number | null } | null;
 type Direction = "upload" | "download";
 export interface TransferFinished { sessionId: number; dir: string; kind: Direction; error?: string; cancelled?: boolean; summary?: string }
 export interface TreeListing { dirs: string[]; files: { path: string; size: number; executable: boolean }[]; skippedSymlinks: number; skippedOther: number; skippedInvalid: number }
@@ -36,7 +37,7 @@ interface Batch { overwriteAll: boolean }
 interface Folder { name: string; kind: Direction; sessionId: number; dir: string; total: number; processed: number; transferred: number; failedPaths: string[]; skippedLinks: number; skippedOther: number; skippedInvalid: number; closed: boolean }
 interface Entry { job: TransferJob; batch: Batch; folder?: Folder; /** Path of a folder file relative to the folder. */ relative?: string }
 type FolderEnd = { state: "done" } | { state: "cancelled" } | { state: "failed"; reason: string };
-interface Active extends Entry { controller: AbortController; transferId?: number; text: string; cancellation?: Promise<void> }
+interface Active extends Entry { controller: AbortController; transferId?: number; text: string; progress?: number | null; cancellation?: Promise<void> }
 type Outcome = "done" | "skipped" | "expanded";
 export type TransferQueueHandle = Pick<TransferQueue<unknown>, "enqueue" | "onFinished">;
 
@@ -110,7 +111,7 @@ export class TransferQueue<C> {
     return this.pending.length + Number(!!this.active && !this.active.controller.signal.aborted);
   }
   private state(): QueueState {
-    return this.active ? { text: this.active.text, queued: this.pending.length } : null;
+    return this.active ? { text: this.active.text, queued: this.pending.length, progress: this.active.progress ?? null } : null;
   }
   private emit(): void { for (const listener of this.listeners) listener(this.state()); }
   private notify(event: TransferFinished): void { for (const listener of this.finished) listener(event); }
@@ -129,6 +130,13 @@ export class TransferQueue<C> {
       });
     }
   }
+  /** Folder: files done plus the current file's share, over all files; single file: its own share. */
+  private share(active: Active, progress: TransferProgress): number | null {
+    const file = progress.total === null ? null : progress.total === 0 ? 1 : Math.min(1, progress.done / progress.total);
+    const { folder } = active;
+    if (folder) return folder.total > 0 ? Math.min(1, (folder.processed + (file ?? 0)) / folder.total) : null;
+    return file;
+  }
   private label(active: Active, progress: TransferProgress): string {
     const { job, folder } = active;
     const name = job.kind === "upload" ? localFileName(job.localPath) : job.kind === "download" ? job.remotePath.split("/").pop() ?? job.remotePath : "";
@@ -143,6 +151,7 @@ export class TransferQueue<C> {
     const update = (progress: TransferProgress) => {
       if (this.active !== active || (active.transferId !== transferId || progress.transferId !== transferId) || active.controller.signal.aborted) return;
       active.text = this.label(active, progress);
+      active.progress = this.share(active, progress);
       this.emit();
     };
     active.text = this.label(active, { transferId, done: 0, total: null });

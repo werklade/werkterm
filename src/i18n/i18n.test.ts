@@ -13,6 +13,19 @@ const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map(matc
 afterEach(() => { vi.unstubAllGlobals(); setLanguage("de"); });
 
 describe("message catalogs", () => {
+  it("uses session wording for remembered paste choices", () => {
+    for (const language of ["de", "en"] as const) {
+      setLanguage(language);
+      expect(t("paste.rememberProfile")).toBe(language === "de" ? "Für diese Sitzung merken" : "Remember for this session");
+      expect(t("paste.rememberNoProfile")).toBe(language === "de" ? "Für diese Sitzung merken (keine gespeicherte Sitzung)" : "Remember for this session (no saved session)");
+      expect(tp("paste.profiles", 1)).toBe(language === "de" ? "1 Sitzung" : "1 session");
+      expect(tp("paste.profiles", 2)).toBe(language === "de" ? "2 Sitzungen" : "2 sessions");
+      const catalog = language === "de" ? deText : enText;
+      for (const [key, value] of Object.entries(catalog)) {
+        if (key.startsWith("paste.")) expect(value, key).not.toMatch(/profil/i);
+      }
+    }
+  });
   it("have identical key sets", () => {
     expect(Object.keys(enText).sort()).toEqual(Object.keys(deText).sort());
   });
