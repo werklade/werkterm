@@ -11,4 +11,6 @@
 .session-fields textarea.session-ssh-options { box-sizing: border-box; min-width: 0; padding: 7px; resize: vertical; font-family: "Cascadia Mono", "DejaVu Sans Mono", monospace; font-size: 12px; color: var(--fg-primary); background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: var(--radius); }
 .session-warning { margin: 0; padding: 6px 10px; font-size: 12px; border-left: 3px solid var(--warning); background: var(--warning-bg); border-radius: var(--radius); overflow-wrap: anywhere; }
 .session-error { color: var(--danger); }
+.session-paste-remembered { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.session-paste-remembered button { padding: 6px 9px; border: 1px solid var(--border-strong); background: var(--bg-toolbar); border-radius: var(--radius); }
 .session-dialog :focus-visible, .import-dialog :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

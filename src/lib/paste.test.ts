@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPasteChoice, availableScopes, describeRemembered, effectiveScope, emptyPasteRemember, hasPasteControls, hasRemembered, maxRememberedSessions, normalizePasteRemember, pruneRemembered, rememberChoice, resetRemembered, resetRememberedSession, resolveRemembered, shouldConfirmPaste, singleLinePaste, stripLastNewline, type PasteChoice, type PasteRemember } from "./paste";
+import { applyPasteChoice, availableScopes, describeRemembered, effectiveScope, emptyPasteRemember, hasPasteControls, hasRemembered, maxRememberedSessions, normalizePasteRemember, pruneRemembered, rememberChoice, rememberedForSession, resetRemembered, resetRememberedSession, resolveRemembered, shouldConfirmPaste, singleLinePaste, stripLastNewline, type PasteChoice, type PasteRemember } from "./paste";
 describe("paste", () => {
   it("confirms according to policy and size", () => {
     expect(shouldConfirmPaste("abc", "multiline")).toBe(false);
@@ -72,6 +72,17 @@ describe("remembered paste choice", () => {
     expect(resetRemembered()).toEqual({ global: null, sessions: {} });
     expect(resetRememberedSession(remember, "s1")).toEqual({ global: paste, sessions: {} });
     expect(resetRememberedSession(remember, "x")).toBe(remember);
+  });
+  it("resets one profile and keeps the other profiles and the global choice", () => {
+    const two = rememberChoice(remember, "profile", "s2", single);
+    expect(resetRememberedSession(two, "s1")).toEqual({ global: paste, sessions: { s2: single } });
+    expect(two.sessions.s1).toBeDefined();
+  });
+  it("reads the choice of one profile from own keys only", () => {
+    expect(rememberedForSession(remember, "s1")).toEqual(remember.sessions.s1);
+    expect(rememberedForSession(remember, "x")).toBeNull();
+    expect(rememberedForSession(remember, "toString")).toBeNull();
+    expect(rememberedForSession(remember, undefined)).toBeNull();
   });
   it("prunes deleted sessions", () => {
     expect(pruneRemembered(remember, ["s1", "s9"])).toBe(remember);

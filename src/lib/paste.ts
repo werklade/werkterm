@@ -78,6 +78,17 @@ export function resetRememberedSession(remember: PasteRemember, sessionId: strin
   delete sessions[sessionId];
   return { global: remember.global, sessions };
 }
+/** Choice remembered for one saved session (own keys only), or null. */
+export function rememberedForSession(remember: PasteRemember, sessionId: string | null | undefined): PasteChoice | null {
+  return sessionId && isOwnKey(remember.sessions, sessionId) ? remember.sessions[sessionId] : null;
+}
+/** "Gemerkt: Einfügen" / "Gemerkt: Als eine Zeile, letzten Zeilenumbruch entfernen"; null gives "Nichts gemerkt". */
+export function describeChoice(choice: PasteChoice | null): string {
+  if (!choice) return t("paste.nothingRemembered");
+  const parts = [t(choice.action === "single-line" ? "paste.singleLine" : "paste.confirm")];
+  if (choice.trim) parts.push(t("paste.trimShort"));
+  return t("paste.remembered", { parts: parts.join(", ") });
+}
 /** Drops entries of sessions that no longer exist. Returns the same object when nothing changes. */
 export function pruneRemembered(remember: PasteRemember, existingIds: Iterable<string>): PasteRemember {
   const keep = new Set(existingIds);

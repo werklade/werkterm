@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { initialSessionAuthType, jumpHostOptions, sessionLabel, keyringAvailable, saveSession, type SavedSession, type SessionAuth } from "../lib/sessions";
 import { useT } from "../i18n";
+import { describeChoice, type PasteChoice } from "../lib/paste";
 import { useModal } from "./useModal";
 import { PasswordField } from "./PasswordField";
 import { usePasswordInput } from "../lib/passwordInput";
@@ -18,10 +19,14 @@ interface Props {
   sessions: SavedSession[];
   onClose: () => void;
   onSaved: (session: SavedSession) => void;
+  /** Paste choice remembered for this saved session; the reset line is only shown when one exists. */
+  rememberedPaste?: PasteChoice | null;
+  /** Forgets the remembered paste choice right away (not on save). */
+  onResetPaste?: () => void;
 }
 
 const standardBauds = [300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
-export function SessionDialog({ session, preferPassword = false, sessions, onClose, onSaved }: Props) {
+export function SessionDialog({ session, preferPassword = false, sessions, onClose, onSaved, rememberedPaste, onResetPaste }: Props) {
   const t = useT();
   const dialog = useModal();
   const id = useId();
@@ -51,6 +56,10 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
   const [keyring, setKeyring] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Only keeps the line visible after a reset; text and button state follow the prop (settings may reload meanwhile).
+  const [pasteReset, setPasteReset] = useState(false);
+  const pasteStatus = useRef<HTMLSpanElement>(null);
+  const showPaste = Boolean(session?.id && onResetPaste && (rememberedPaste || pasteReset));
   useEffect(() => {
     let active = true;
     const resolve = (value: boolean) => {
@@ -132,6 +141,8 @@ export function SessionDialog({ session, preferPassword = false, sessions, onClo
         {authType === "password" && <label>{t("session.password")}<PasswordField autoComplete="off" disabled={keyring !== true} value={password.value} visible={password.visible} onToggle={password.toggle} onChange={event => password.change(event.target.value)} />
           {session?.id && <span className="session-hint">{t("session.password.keep")}</span>}</label>}
         </>}<details open={session?.sshOptions ? true : undefined}><summary>{t("session.advanced")}</summary><label><input type="checkbox" checked={logAlways} onChange={e => setLogAlways(e.target.checked)} />{t("session.logAlways")}</label>
+          {showPaste && <div className="session-paste-remembered"><span role="status" tabIndex={-1} ref={pasteStatus}>{describeChoice(rememberedPaste ?? null)}</span>
+            <button type="button" title={t("session.pasteReset.tabHint")} disabled={!rememberedPaste} onClick={() => { setPasteReset(true); onResetPaste?.(); pasteStatus.current?.focus(); }}>{t("session.pasteReset")}</button></div>}
           {kind === "ssh" && <><label>{t("session.jump")}<select value={jumpSessionId} onChange={event => setJumpSessionId(event.target.value)}>
             <option value="">{t("session.jump.none")}</option>
             {jumpOptions.map(hop => <option key={hop.id} value={hop.id}>{hop.name} ({sessionLabel(hop)})</option>)}

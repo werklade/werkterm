@@ -70,7 +70,7 @@ import { useModal } from "./components/useModal";
 import "./styles/theme.css";
 import "./App.css";
 import { PasteDialog } from "./components/PasteDialog";
-import { applyPasteChoice, pruneDeleted, rememberChoice, resolveRemembered, shouldConfirmPaste, type PasteChoice } from "./lib/paste";
+import { applyPasteChoice, pruneDeleted, rememberChoice, rememberedForSession, resetRememberedSession, resolveRemembered, shouldConfirmPaste, type PasteChoice } from "./lib/paste";
 import { defaultLogFolder, openLogFolder, startLog, stopLog, terminalPasteRequests } from "./lib/sessionLog";
 import { gridColumns, inputTargets, terminalWriters } from "./lib/multiExec";
 
@@ -1048,7 +1048,7 @@ export default function App() {
     {importSource && importSource !== "werkterm" && <ImportDialog source={importSource} onClose={() => setImportSource(null)} onImported={result => { setImportSource(null); reloadSessions(); reportStatus(tp("app.import.done", result.imported)); }} />}
     {sshClose && <SshCloseDialog {...sshClose} onAnswer={sshClose.answer} />}
     {closeEditorId !== null && editors[closeEditorId] && <EditorCloseDialog key={closeEditorId} name={editors[closeEditorId].document.name} busy={closeEditorBusy} onAnswer={answer => void answerEditorClose(answer)} />}
-    {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} onClose={() => setSessionDialog(null)} onSaved={saved => { const isNew = !sessionDialog.session?.id && sessionDialog.tabId === undefined; if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus(t("app.status.sessionSaved")); if (isNew) connectSaved(saved); }} />}
+    {sessionDialog && <SessionDialog session={sessionDialog.session} preferPassword={sessionDialog.preferPassword} sessions={savedSessions} rememberedPaste={rememberedForSession(settings.pasteRemember, sessionDialog.session?.id)} onResetPaste={() => { const id = sessionDialog.session?.id; if (!id) return; const current = settingsRef.current; const next = resetRememberedSession(current.pasteRemember, id); if (next !== current.pasteRemember) changeSettings({ ...current, pasteRemember: next }); }} onClose={() => setSessionDialog(null)} onSaved={saved => { const isNew = !sessionDialog.session?.id && sessionDialog.tabId === undefined; if (sessionDialog.tabId !== undefined) dismissSave(sessionDialog.tabId); setSessionDialog(null); reloadSessions(); setStatus(t("app.status.sessionSaved")); if (isNew) connectSaved(saved); }} />}
     {userSession && <SessionUserDialog name={userSession.name} onAnswer={user => { const session = userSession; setUserSession(null); if (user !== null) connectSaved(session, user); }} />}
     {quickUserTarget && <SessionUserDialog name={quickUserTarget} onAnswer={user => { const target = quickUserTarget; setQuickUserTarget(null); if (user !== null) connect(withQuickConnectUser(target, user)); }} />}
     {conflict && <FileActionDialog key={conflictSequence} prompt={conflict} />}
