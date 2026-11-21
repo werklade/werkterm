@@ -229,6 +229,7 @@ Das Rust-Backend verwendet Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyr
 
 ## Bekannte Einschränkungen
 
+- In der experimentellen Wayland-Sitzung von Cinnamon (Linux Mint) kommen aus dem Dateimanager gezogene Dateien nicht bei Werkterm an; die Oberfläche liefert dort keine Ablege-Ereignisse. Dann den Upload-Knopf oder die normale (X11-)Cinnamon-Sitzung verwenden.
 - Ordnerübertragungen überspringen symbolische Links im Ordner und sind auf 10.000 Einträge und 32 Ebenen begrenzt. Jede Datei ist eine eigene Übertragung; viele kleine Dateien dauern daher deutlich länger als eine große. Wird ein Ordner auf dem Server während der Übertragung durch einen symbolischen Link ersetzt, wird das nicht erkannt. Downloads unter Windows überspringen Namen, die Windows nicht speichern kann (z. B. `a:b`, `nul.txt`, Punkt am Ende), und lehnen Ordner ab, deren Namen sich nur in der Groß-/Kleinschreibung unterscheiden.
 - Die automatische entfernte OSC-7-Einrichtung unterstützt nur Bash; andere Shells benötigen eigene Integration. Das Echo des eingespielten Befehls wird nach Ausführung gelöscht.
 - Der Remote-Konfliktschutz im Editor nutzt Dateigröße und sekundengenaue Änderungszeit: Gleich große Änderungen innerhalb einer Sekunde können unbemerkt bleiben. Lokale Dateien werden zusätzlich anhand ihrer Identität und genauerer Zeitstempel geprüft.

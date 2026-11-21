@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Transfers: the cancel button and a progress bar (share of the file, or of the folder by files) now stay at a fixed place on the left of the status bar instead of moving with the length of the transfer text (issue #29).
 - Toolbar: at a large interface size the labels wrap below the icons instead of overlapping them (issue #30).
 - Paste dialog: the remembered choice is offered "for this session", matching the session dialog, instead of "for the profile" (issue #31).
+- Linux: dropping files or folders onto the file browser works on HiDPI screens (for example Ubuntu 26.04 at 200 %). The drop position, already in logical pixels on Linux, was scaled down a second time and missed the file list. Under the experimental Cinnamon Wayland session (Linux Mint) the desktop delivers no drop events at all; there the upload button or the X11 session works (issue #28).
 
 ## [1.2.0] – 2026-11-20
 

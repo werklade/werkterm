@@ -9,6 +9,8 @@ import { parseQuickConnect } from "../lib/quickConnect";
 import { ResizeGrip } from "./ResizeGrip";
 import { DEFAULT_COLUMNS, loadWidth, storeWidth, type ColumnWidths } from "../lib/browserWidths";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { dropToCss } from "../lib/dropPosition";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Icon, type IconName } from "./Icon";
 import { FileActionDialog, type FileDialog } from "./FileActionDialog";
@@ -325,13 +327,17 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    const linux = /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
+    let scaleFactor = window.devicePixelRatio;
+    const refreshScale = () => { if (linux) void getCurrentWindow().scaleFactor().then(value => { scaleFactor = value; }).catch(() => undefined); };
+    refreshScale();
     void getCurrentWebview().onDragDropEvent(event => {
       if (disposed) return;
       const payload = event.payload;
       if (payload.type === "leave") { setDragOver(false); return; }
+      if (payload.type === "enter") refreshScale();
       const rect = listRef.current?.getBoundingClientRect();
-      const x = payload.position.x / window.devicePixelRatio;
-      const y = payload.position.y / window.devicePixelRatio;
+      const { x, y } = dropToCss(payload.position, { linux, scaleFactor, devicePixelRatio: window.devicePixelRatio });
       const inside = Boolean(rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
       const active = inside && dropHandler.current.writable && !dropHandler.current.busy;
       setDragOver(active && payload.type !== "drop");

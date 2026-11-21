@@ -229,6 +229,7 @@ The Rust backend uses Tauri 2, `russh`, `russh-sftp`, `portable-pty`, `keyring` 
 
 ## Known limitations
 
+- Under the experimental Cinnamon Wayland session (Linux Mint) files dragged from the file manager do not reach Werkterm; the desktop delivers no drop events. Use the upload button or the regular (X11) Cinnamon session.
 - Folder transfers skip symbolic links inside the folder and are limited to 10,000 entries and 32 levels. Every file is a separate transfer, so many small files take noticeably longer than one large file. A folder replaced by a symbolic link on the server while the transfer runs is not detected. Downloads to Windows skip names Windows cannot store (for example `a:b`, `nul.txt`, a trailing dot) and reject folders whose names differ only in case.
 - Automatic remote OSC 7 setup supports Bash only; other shells need their own integration. The injected command's echo is cleared after execution.
 - Remote editor conflict checks use file size and second-resolution modification time: same-size changes within one second can go undetected. Local files also have identity and finer timestamp checks.
