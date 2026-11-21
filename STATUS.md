@@ -36,13 +36,12 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   Einfüge-Dialog (#20), SSH-Optionen (#23), Hinweise nach Zeitüberschreitung (#24), Retro-Designs (#25), APT-Testkanal
   (#15/#26), Pinch unter Linux (#27), Drop auf HiDPI (#28), Transferleiste (#29), Beschriftungen bei 150 % (#30),
   „Sitzung“ im Einfüge-Dialog (#31), Umbenennen (#33), Mehrfachauswahl (#34). Testbuilds 1.2.1–1.2.8 vorab;
-  Server-Sicherung vor dem Release (`werklade-pkg-2026-11-21-1.3.0.tar.gpg`). Bestätigte Issues geschlossen.
+  Server-Sicherung vor dem Release (`werklade-pkg-2026-11-21-1.3.0.tar.gpg`). Bestätigte Issues geschlossen; GitHub-Release v1.3.0 (Latest) angelegt, Anhänge per sha256sum geprüft.
 - Release-Notizen im Update-Dialog formatiert (eigener kleiner Markdown-Parser, ohne HTML, ohne Links); Issue-Vorlagen
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- #3, #4, #23 (in 1.3.0 ausgeliefert, `testing`): nur per Tests/Review abgesichert; offen: Cloud-Ordner-Abgleich,
-  gescheiterter Datenordner-Wechsel, Test gegen einen alten SSH-Server.
+- #23 (in 1.3.0 ausgeliefert, `testing`): offen ist der Test gegen einen alten SSH-Server.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Anleitung `werkterm-1.2.4-unterstriche-1.md` (Werklade-Ordner, nicht im Repo) an den Tester;
   wartet auf Ergebnisse.
@@ -52,7 +51,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (offen: #3, #4, #23 aus 1.3.0 zur Bestätigung; #14 aus 1.2.0; #22 aus 1.1.0; ohne Meilenstein: #7–#10, #12, #13, #19, #32, #35).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (offen: #23 aus 1.3.0 zur Bestätigung; ohne Meilenstein: #7–#10, #12, #13, #19, #32, #35).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
