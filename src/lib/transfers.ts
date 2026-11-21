@@ -17,6 +17,7 @@ export const ensureRemoteDir = (id: number, path: string) => invoke<void>("ssh_e
 export const ensureLocalDir = (path: string) => invoke<void>("local_ensure_dir", { path });
 export const makeDirectory = (id: number, parent: string, name: string) => invoke<void>("ssh_mkdir", { id, parent, name });
 export const createFile = (id: number, parent: string, name: string) => invoke<void>("ssh_create_file", { id, parent, name });
+export const renameEntry = (id: number, parent: string, name: string, newName: string) => invoke<void>("ssh_rename", { id, parent, name, newName });
 export const countEntries = (id: number, path: string) => invoke<number>("ssh_count_entries", { id, path });
 export const deleteEntry = (id: number, path: string, recursive: boolean) => invoke<void>("ssh_delete", { id, path, recursive });
 export const validRemoteName = (name: string) => name.length > 0 && name !== "." && name !== ".." && !name.includes("/") && !name.includes("\0");

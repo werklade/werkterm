@@ -63,6 +63,13 @@ pub fn remote_join(parent: &str, name: &str) -> Result<String, String> {
         format!("{}/{name}", parent.trim_end_matches('/'))
     })
 }
+/// Source and target path for renaming `name` to `new_name` inside `parent`. Both names
+/// must be plain entry names, so a rename never moves an entry into another folder.
+fn rename_paths(parent: &str, name: &str, new_name: &str) -> Result<(String, String), String> {
+    let from = remote_join(parent, name)?;
+    let to = remote_join(parent, new_name)?;
+    Ok((from, to))
+}
 fn validate_path(path: &str) -> Result<(), String> {
     if path.contains('\0') {
         Err(ui_err("INVALID_PATH").into())
@@ -538,6 +545,25 @@ impl SshManager {
             .map_err(ssh_error)?;
         file.shutdown().await.map_err(ssh_error)
     }
+    /// Renames an entry within its folder. An existing target (any kind, also a dangling
+    /// link) is never replaced; the plain SFTP rename refuses that on the server as well.
+    pub async fn rename(
+        &self,
+        id: u32,
+        parent: String,
+        name: String,
+        new_name: String,
+    ) -> Result<(), String> {
+        let (from, to) = rename_paths(&parent, &name, &new_name)?;
+        if from == to {
+            return Ok(());
+        }
+        let sftp = self.action_sftp(id).await?;
+        if existing(&sftp, &to).await?.is_some() {
+            return Err(ui_err("EXISTS").arg("name", new_name).into());
+        }
+        sftp.rename(from, to).await.map_err(ssh_error)
+    }
     pub async fn count_entries(&self, id: u32, path: String) -> Result<u64, String> {
         let path = action_path(&path)?;
         let sftp = self.action_sftp(id).await?;
@@ -621,6 +647,29 @@ mod tests {
         for name in ["file.txt", "a b", "ä", "a\\b"] {
             assert!(validate_name(name).is_ok());
         }
+    }
+    #[test]
+    fn rename_stays_in_the_same_folder() {
+        assert_eq!(
+            rename_paths("/srv/www/", "old.txt", "new.txt").unwrap(),
+            ("/srv/www/old.txt".into(), "/srv/www/new.txt".into())
+        );
+        assert_eq!(
+            rename_paths("/", "a", "b").unwrap(),
+            ("/a".into(), "/b".into())
+        );
+        for new_name in ["", ".", "..", "../x", "sub/x", "/abs", "a\0b"] {
+            assert_eq!(
+                rename_paths("/srv", "old", new_name),
+                Err("INVALID_NAME".into()),
+                "{new_name:?}"
+            );
+        }
+        assert_eq!(rename_paths("/srv", "..", "x"), Err("INVALID_NAME".into()));
+        assert_eq!(rename_paths("/srv", "a/b", "x"), Err("INVALID_NAME".into()));
+        assert_eq!(rename_paths("/sr\0v", "a", "b"), Err("INVALID_PATH".into()));
+        // Backslashes, spaces and non-ASCII are valid on POSIX servers.
+        assert!(rename_paths("/srv", "a", "b\\c ä").is_ok());
     }
     #[test]
     fn remote_paths_use_posix_separator() {

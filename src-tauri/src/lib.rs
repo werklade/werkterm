@@ -178,6 +178,7 @@ pub fn run() {
             commands::local_ensure_dir,
             commands::ssh_mkdir,
             commands::ssh_create_file,
+            commands::ssh_rename,
             commands::ssh_count_entries,
             commands::ssh_delete,
             commands::local_list_dir,

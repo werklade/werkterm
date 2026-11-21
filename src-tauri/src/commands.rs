@@ -644,6 +644,16 @@ pub async fn ssh_create_file(
     state.create_file(id, parent, name).await
 }
 #[tauri::command]
+pub async fn ssh_rename(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    parent: String,
+    name: String,
+    new_name: String,
+) -> Result<(), String> {
+    state.rename(id, parent, name, new_name).await
+}
+#[tauri::command]
 pub async fn ssh_count_entries(
     state: State<'_, Arc<SshManager>>,
     id: u32,

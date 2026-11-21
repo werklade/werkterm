@@ -14,12 +14,14 @@ import { dropToCss } from "../lib/dropPosition";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Icon, type IconName } from "./Icon";
 import { FileActionDialog, type FileDialog } from "./FileActionDialog";
+import { InlineRename } from "./InlineRename";
+import { renameOutcome } from "../lib/inlineRename";
 import { listLocalDir, listSshDir, type DirEntry, type DirListing } from "../lib/fs";
 import { childPath, parentPath } from "../lib/paths";
 import { formatSize } from "../lib/formatSize";
 import { loadFileSort, saveFileSort, sortFileEntries, type FileSortColumn } from "../lib/fileSort";
 import type { Settings } from "../lib/settings";
-import { countEntries, createFile, deleteEntry, makeDirectory, remoteChild } from "../lib/transfers";
+import { countEntries, createFile, deleteEntry, makeDirectory, remoteChild, renameEntry } from "../lib/transfers";
 import type { TransferQueueHandle } from "../lib/transferQueue";
 import { backendErrorText } from "../lib/transferFormat";
 import { currentLocale, tp, useT, type TextKey } from "../i18n";
@@ -60,7 +62,7 @@ interface Props {
 type BrowserPrompt = FileDialog
   | { type: "sudo"; label: string; answer: (secret: string | null) => void }
   | { type: "permissions"; entry: DirEntry; answer: (options: ChmodOptions | null) => void };
-type Action = "sudo" | "chmod" | "up" | "refresh" | "download" | "upload" | "uploadFolder" | "mkdir" | "create" | "delete" | "edit";
+type Action = "sudo" | "chmod" | "up" | "refresh" | "download" | "upload" | "uploadFolder" | "mkdir" | "create" | "delete" | "rename" | "edit";
 // Module-level lists hold keys only; they are translated while rendering.
 const actions: { icon: IconName; label: TextKey; action?: Action }[] = [
   { icon: "folder-up", label: "browser.action.up", action: "up" },
@@ -70,6 +72,7 @@ const actions: { icon: IconName; label: TextKey; action?: Action }[] = [
   { icon: "folder-new", label: "browser.action.mkdir", action: "mkdir" },
   { icon: "file-new", label: "browser.action.create", action: "create" },
   { icon: "delete", label: "common.delete", action: "delete" },
+  { icon: "rename", label: "browser.action.rename", action: "rename" },
   { icon: "permissions", label: "browser.action.sudo", action: "sudo" }, { icon: "edit", label: "browser.action.edit", action: "edit" },
 ];
 const settingLabels: { key: "followTerminalFolder" | "shellIntegration" | "sshPromptCommand"; label: TextKey; title: TextKey }[] = [
@@ -124,6 +127,16 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
+  /** Name of the entry whose name is being edited in place (F2, toolbar, context menu). */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // Mirrors `renaming` synchronously: a blur from an input removed by a reload must not rename.
+  const renameTarget = useRef<string | null>(null);
+  /** Entry to select after the next listing load (kept across the reload after a rename). */
+  const pendingSelect = useRef<string | null>(null);
+  /** Move the keyboard focus back to the selected row once the list is shown again. */
+  const focusSelected = useRef(false);
+  /** Rename chosen in the context menu: starts once the menu has closed and given the focus back. */
+  const renameAfterMenu = useRef<DirEntry | null>(null);
   const [context, setContext] = useState<{ entry: DirEntry; x: number; y: number } | null>(null);
   const [uploadMenu, setUploadMenu] = useState<{ x: number; y: number } | null>(null);
   const [sort, setSort] = useState(loadFileSort);
@@ -160,7 +173,10 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     };
   }, []);
   useEffect(() => {
-    setSelected(null);
+    setSelected(pendingSelect.current);
+    pendingSelect.current = null;
+    renameTarget.current = null;
+    setRenaming(null);
     setInput(path);
     const current = ++request.current;
     setListing(null);
@@ -186,6 +202,12 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     });
     return () => { ++request.current; };
   }, [id, kind, path, sessionId, distro, ready, revision]);
+
+  useEffect(() => {
+    if (!focusSelected.current || renaming !== null || loading || !listing) return;
+    focusSelected.current = false;
+    listRef.current?.querySelector<HTMLTableRowElement>("tbody tr[aria-selected='true']")?.focus();
+  }, [renaming, loading, listing, selected]);
 
   const navigate = (next: string) => {
     if (!tab || !ready) return;
@@ -245,6 +267,14 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     if (action === "up") { navigate(parentPath(listing?.path ?? path)); return; }
     if (action === "refresh") { refresh(); return; }
     if (action === "edit") { const entry = contextEntry ?? selectedEntry; if (entry) openEntry(entry); return; }
+    if (action === "rename") {
+      const entry = contextEntry ?? selectedEntry;
+      if (!writable || busy || operation.current || !entry) return;
+      renameTarget.current = entry.name;
+      setSelected(entry.name);
+      setRenaming(entry.name);
+      return;
+    }
     if (action === "chmod") {
       const entry = contextEntry ?? selectedEntry;
       if (!permissionsReady || !permissionsRoute || !listing || !entry || entry.kind === "symlink" || operation.current) return;
@@ -322,6 +352,33 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
       }
     });
   };
+  const commitRename = (entry: DirEntry, value: string | null) => {
+    if (renameTarget.current !== entry.name) return;
+    renameTarget.current = null;
+    setRenaming(null);
+    focusSelected.current = true;
+    if (value === null) return;
+    const outcome = renameOutcome(entry.name, value);
+    if (outcome.type === "keep") return;
+    if (outcome.type === "invalid") { fail("INVALID_NAME"); return; }
+    if (sessionId === undefined || !listing) return;
+    const targetId = sessionId, targetDir = listing.path, newName = outcome.name;
+    // On failure the reload keeps the old entry selected, on success the renamed one.
+    pendingSelect.current = entry.name;
+    void run(async () => {
+      await renameEntry(targetId, targetDir, entry.name, newName);
+      pendingSelect.current = newName;
+      focusSelected.current = true;
+      callbacks.current.onStatus(t("browser.renamed", { name: entry.name, newName }));
+    });
+  };
+  // Parent effects run after the closed menu's cleanup restored the focus, so the name field keeps it.
+  useEffect(() => {
+    const entry = renameAfterMenu.current;
+    if (context || !entry) return;
+    renameAfterMenu.current = null;
+    perform("rename", entry);
+  }, [context]);
   const dropHandler = useRef({ writable, busy, uploadPaths, fail });
   dropHandler.current = { writable, busy, uploadPaths, fail };
   useEffect(() => {
@@ -357,7 +414,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     <h3 className="browser-heading">{heading}{kind === "ssh" && ready && sudoActive && <span className="sudo-badge">sudo</span>}</h3>
     <div className="browser-toolbar">{actions.map(action => {
       const viewAction = action.action === "up" || action.action === "refresh";
-      const missingSelection = (action.action === "download" || action.action === "delete") && !selectedEntry;
+      const missingSelection = (action.action === "download" || action.action === "delete" || action.action === "rename") && !selectedEntry;
       const editAction = action.action === "edit";
       const sudoAction = action.action === "sudo";
       const disabled = sudoAction ? !sudoReady || busy : editAction ? !editorReady || busy || !selectedEntry || isDirectory(selectedEntry)
@@ -381,14 +438,17 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
       }
       if (event.key === "Enter") { event.preventDefault(); if (isDirectory(entry)) navigate(childPath(listing.path, entry.name)); else openEntry(entry); }
       if (event.key === "Delete") { event.preventDefault(); if (writable && !busy) perform("delete"); }
+      if (event.key === "F2") { event.preventDefault(); perform("rename", entry); }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         const next = Math.max(0, Math.min(sortedEntries.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
         setSelected(sortedEntries[next].name);
         listRef.current?.querySelectorAll<HTMLTableRowElement>("tbody tr")[next]?.focus();
       }
-    }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString(currentLocale(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">{t("browser.empty")}</p>}</div>}
-    {context && <BrowserContextMenu {...context} permissionsDisabled={!permissionsReady} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? t("browser.unixPermissionsUnavailable") : t("browser.onlySftp")} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
+    }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} />{renaming === entry.name
+      ? <InlineRename name={entry.name} file={!isDirectory(entry)} label={t("browser.renameLabel", { name: entry.name })} onDone={value => commitRename(entry, value)} />
+      : <span title={entry.name}>{entry.name}</span>}</span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString(currentLocale(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">{t("browser.empty")}</p>}</div>}
+    {context && <BrowserContextMenu {...context} renameDisabled={!writable} permissionsDisabled={!permissionsReady} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? t("browser.unixPermissionsUnavailable") : t("browser.onlySftp")} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action === "rename") renameAfterMenu.current = entry; else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
     {uploadMenu && <UploadMenu {...uploadMenu} onAnswer={choice => { setUploadMenu(null); if (choice) perform(choice); }} />}
     {prompt?.type === "sudo" ? <SecretDialog key={promptSequence} title={t("browser.sudoPasswordTitle", { label: prompt.label })} prompt={{ type: "secret", requestId: 0, kind: "password", label: prompt.label }} onAnswer={prompt.answer} />
       : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} onAnswer={prompt.answer} />

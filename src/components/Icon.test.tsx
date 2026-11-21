@@ -40,7 +40,7 @@ it("gives every outline icon a tint body and draws stroke-free underlays first",
       home: 1, multiexec: 1, help: 1, split: 1, view: 1, power: 1,
       "session-new": 1, tools: 1, download: 1, upload: 1,
       "folder-new": 1, "folder-up": 1, delete: 1, refresh: 1,
-      undo: 1, redo: 1, wrap: 1, jump: 1,
+      undo: 1, redo: 1, wrap: 1, jump: 1, rename: 1,
     };
     const drawn = nodes.slice(1).filter(node => node.attributes.get("d")?.replace(/\s/g, "") !== "M00h24v24H0z");
     for (let index = 0; index < (underlayCounts[name as IconName] ?? 0); index++) {
