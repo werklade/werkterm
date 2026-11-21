@@ -36,14 +36,18 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 
 ## In Arbeit
 - #23 (eigene SSH-Optionen `-o`): committet; offen: Test gegen einen alten Server, Linux-Lauf in WSL.
-- 2026-11-21, auf main, noch in keinem Testbuild (alle `testing`, Rust-Tests auch in WSL grün):
+- Testbuild 1.2.5 (Branch test/1.2.5 = main bis 8d7ac43 plus Versionscommit, Run 44874675231, 2026-11-21) im
+  Testkanal und in APT `test`, von außen geprüft; test/1.2.4 gelöscht. Enthält alles Folgende plus #11 (Ordner
+  herunter-/hochladen). Test auf dem Mint-Notebook (X11 und Wayland) laut `werkterm-1.2.5-testliste.md`
+  (Werklade-Ordner). Server-Download 1.2.4 nach Regel noch zu entfernen (nur durch den Nutzer).
+- 2026-11-21 auf main (alle `testing`, Rust-Tests auch in WSL grün):
   #15 Setup-Skript `--test` (geschlossen, Test über #26); #3 Designs und Icon-Sets nach externen Änderungen neu
   laden; #4 Teilkopie beim gescheiterten Datenordner-Wechsel zurückbauen; #5 gemerkte Einfüge-Auswahl je Sitzung
   zurücksetzen; #6 Oberflächengröße 90–150 % (je Gerät, Webview-Zoom); #27 Touchpad-Pinch unter Linux zoomt die
   Terminal-Schrift statt der ganzen Oberfläche (WebKit-Geste per internem Schlüssel abgeschaltet, eigene Geste).
   Offen: Sichtprüfung in der App; #27 nur auf echtem Linux-Touchpad prüfbar.
 - #7 (Unterstriche): Anleitung `werkterm-1.2.4-unterstriche-1.md` (Werklade-Ordner, nicht im Repo) an den Tester;
-  wartet auf Ergebnisse. Weiter laut Reihenfolge: #11, #1.
+  wartet auf Ergebnisse. Weiter laut Reihenfolge: #1.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
