@@ -11,6 +11,8 @@ pub mod linux_graphics;
 pub mod local_fs;
 mod local_ports;
 mod macros;
+#[cfg(any(target_os = "linux", test))]
+mod pinch;
 pub mod pty;
 pub mod secrets;
 pub mod serial;
@@ -60,6 +62,8 @@ pub fn run() {
         .manage(Arc::new(editor::EditorDocs::default()))
         .setup(|app| {
             editor::init_cache(app.handle()).map_err(std::io::Error::other)?;
+            #[cfg(target_os = "linux")]
+            pinch::install(app.handle());
             Ok(())
         })
         .manage(Arc::new(pty::PtyManager::default()))

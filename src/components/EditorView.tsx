@@ -22,6 +22,7 @@ import type { EditorDocument, EditorEol } from "../lib/editorTypes";
 import "./EditorView.css";
 
 import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
+import { registerPinchTarget } from "../lib/pinchZoom";
 import { selectedTheme, type Settings } from "../lib/settings";
 import { emojiFallback } from "../lib/terminalThemes";
 
@@ -320,7 +321,9 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
       if (result.steps !== 0) zoomBy.current(result.steps);
     };
     hostElement.addEventListener("wheel", zoom, { capture: true, passive: false });
-    return () => { hostElement.removeEventListener("wheel", zoom, { capture: true }); languageRequest.current++; mounted.current = false; chooseRef.current?.resolve("cancel"); chooseRef.current = null; editor.destroy(); view.current = null; };
+    // Touchpad pinch on Linux (backend event, see lib/pinchZoom): only while this editor has the focus.
+    const unregisterPinch = registerPinchTarget({ element: hostElement, zoomBy: steps => zoomBy.current(steps) });
+    return () => { hostElement.removeEventListener("wheel", zoom, { capture: true }); unregisterPinch(); languageRequest.current++; mounted.current = false; chooseRef.current?.resolve("cancel"); chooseRef.current = null; editor.destroy(); view.current = null; };
   }, []);
 
   function toggleWrap() {

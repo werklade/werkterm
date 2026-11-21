@@ -20,6 +20,7 @@ import { parseQuickConnect, quickConnectSshArgs } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
 import { createSessionEnd, endedText } from "../lib/sessionEnd";
 import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
+import { registerPinchTarget } from "../lib/pinchZoom";
 
 import { selectedTheme, type Settings } from "../lib/settings";
 import { uiScaleEvent } from "../lib/uiScale";
@@ -245,6 +246,8 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         if (result.steps !== 0) applyZoomRef.current(nextZoomOffset(preferencesRef.current.fontSize, zoomRef.current, result.steps));
       };
       element.addEventListener("wheel", zoom, { capture: true, passive: false });
+      // Touchpad pinch on Linux (backend event, see lib/pinchZoom): same steps, only while this terminal has the focus.
+      const unregisterPinch = registerPinchTarget({ element, zoomBy: steps => applyZoomRef.current(nextZoomOffset(preferencesRef.current.fontSize, zoomRef.current, steps)) });
       const markTextInput = () => { keyboardInput = true; };
       const markOtherInput = () => { keyboardInput = false; };
       const textEvents = ["compositionstart", "compositionupdate", "compositionend", "beforeinput", "input"];
@@ -381,6 +384,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         logRef.current.onLog(id, null);
         element.removeEventListener("paste", paste, true);
         element.removeEventListener("wheel", zoom, { capture: true });
+        unregisterPinch();
         textEvents.forEach(type => element.removeEventListener(type, markTextInput, true));
         otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
         terminalWriters.delete(id);

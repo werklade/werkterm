@@ -58,3 +58,8 @@ strip = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.191"
+
+# Linux only: the GTK bindings Tauri/wry already use (same version), to redirect the touchpad
+# pinch from WebKitGTK's page zoom to the terminal font (issue #27).
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
