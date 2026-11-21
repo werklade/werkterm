@@ -3,6 +3,9 @@ import { ansiKeys, importedThemeId, terminalThemes, type TerminalTheme } from ".
 import { emptyPasteRemember, normalizePasteRemember, type PasteRemember } from "./paste";
 import { t, type LanguageSetting } from "../i18n";
 export type UpdateChannelSetting = "stable" | "test";
+/** Allowed overall interface sizes in percent (webview zoom). */
+export const uiScales = [90, 100, 110, 125, 150] as const;
+export type UiScale = typeof uiScales[number];
 export interface Settings {
   design: string;
   iconSet: string;
@@ -24,6 +27,8 @@ export interface Settings {
   updateChannel: UpdateChannelSetting;
   /** UI language; "system" follows the OS locale. Per device (see localOnlyKeys). */
   language: LanguageSetting;
+  /** Overall interface size in percent (webview zoom). Per device (see localOnlyKeys): screens differ between devices. */
+  uiScale: UiScale;
 }
 export const defaultSettings: Settings = {
   design: "Werklade Dunkel",
@@ -41,6 +46,7 @@ export const defaultSettings: Settings = {
   updateCheckOnStart: false,
   updateChannel: "stable",
   language: "system",
+  uiScale: 100,
 };
 const storageKey = "werkterm.settings";
 export function normalizeSettings(input: unknown): Settings {
@@ -58,6 +64,7 @@ export function normalizeSettings(input: unknown): Settings {
   if (v.rightClick === "menu" || v.rightClick === "paste") result.rightClick = v.rightClick;
   if (typeof v.logFolder === "string") result.logFolder = v.logFolder;
   if (v.updateChannel === "stable" || v.updateChannel === "test") result.updateChannel = v.updateChannel;
+  if ((uiScales as readonly unknown[]).includes(v.uiScale)) result.uiScale = v.uiScale as UiScale;
   if (v.language === "system" || v.language === "de" || v.language === "en") result.language = v.language;
   if (v.pasteConfirm === "always" || v.pasteConfirm === "never" || v.pasteConfirm === "multiline") result.pasteConfirm = v.pasteConfirm;
   if (v.splitMode === "single" || v.splitMode === "columns" || v.splitMode === "rows" || v.splitMode === "quad") result.splitMode = v.splitMode;
@@ -86,8 +93,8 @@ export function loadSettings(): Settings {
 }
 /** Writes the localStorage cache only; the file write is done by SettingsSync. */
 export function saveSettings(settings: Settings): void { try { localStorage.setItem(storageKey, JSON.stringify(normalizeSettings(settings))); } catch { /* Session settings remain usable. */ } }
-/** Settings that describe this device (local paths, language, update channel). They live in localStorage only, never in settings.json. */
-export const localOnlyKeys = ["logFolder", "language", "updateChannel"] as const;
+/** Settings that describe this device (local paths, language, update channel, interface size). They live in localStorage only, never in settings.json. */
+export const localOnlyKeys = ["logFolder", "language", "updateChannel", "uiScale"] as const;
 const isLocalKey = (key: string): boolean => (localOnlyKeys as readonly string[]).includes(key);
 /** JSON text of the shared settings file: normalized, without device-local keys. */
 export function serializeSettings(settings: Settings): string {
@@ -96,7 +103,7 @@ export function serializeSettings(settings: Settings): string {
   return JSON.stringify(shared, null, 2);
 }
 const localValues = (cacheText: string | null): Pick<Settings, typeof localOnlyKeys[number]> => {
-  try { const { logFolder, language, updateChannel } = normalizeSettings(JSON.parse(cacheText ?? "null")); return { logFolder, language, updateChannel }; } catch { return { logFolder: defaultSettings.logFolder, language: defaultSettings.language, updateChannel: defaultSettings.updateChannel }; }
+  try { const { logFolder, language, updateChannel, uiScale } = normalizeSettings(JSON.parse(cacheText ?? "null")); return { logFolder, language, updateChannel, uiScale }; } catch { return { logFolder: defaultSettings.logFolder, language: defaultSettings.language, updateChannel: defaultSettings.updateChannel, uiScale: defaultSettings.uiScale }; }
 };
 
 const isPlainObject = (value: unknown): boolean => !!value && typeof value === "object" && !Array.isArray(value);
@@ -148,5 +155,5 @@ export function mergeSettings(base: Settings | null, mine: Settings, theirs: Set
     if (mineEntry === undefined) delete sessions[id]; else sessions[id] = mineEntry;
   }
   result.pasteRemember = { global, sessions };
-  return { ...normalizeSettings(result), logFolder: mine.logFolder, language: mine.language, updateChannel: mine.updateChannel };
+  return { ...normalizeSettings(result), logFolder: mine.logFolder, language: mine.language, updateChannel: mine.updateChannel, uiScale: mine.uiScale };
 }

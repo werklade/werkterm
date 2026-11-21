@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { builtInDesigns, normalizeDesign, registerUserDesign, unregisterUserDesign } from "./designs";
-import { defaultSettings, interpretLoaded, loadSettings, mergeSettings, normalizeSettings, saveSettings, selectedTheme, serializeSettings, type Settings } from "./settings";
+import { defaultSettings, interpretLoaded, loadSettings, mergeSettings, normalizeSettings, saveSettings, selectedTheme, serializeSettings, uiScales, type Settings } from "./settings";
 it("normalizes Tux settings with defaults and finite minute bounds", () => {
   expect(normalizeSettings({})).toMatchObject({ tuxEnabled: true, tuxIdleMinutes: 10 });
   expect(normalizeSettings({ tuxEnabled: false, tuxIdleMinutes: 121 })).toMatchObject({ tuxEnabled: false, tuxIdleMinutes: 120 });
@@ -186,6 +186,30 @@ describe("update channel setting", () => {
     expect(outcome.ok && outcome.settings).toMatchObject({ updateChannel: "test", fontSize: 20 });
     const without = interpretLoaded('{"updateChannel":"test"}', null);
     expect(without.ok && without.settings.updateChannel).toBe("stable");
+  });
+});
+
+describe("interface size setting", () => {
+  it("defaults to 100 and accepts only the offered percentages", () => {
+    expect(defaultSettings.uiScale).toBe(100);
+    expect(normalizeSettings({}).uiScale).toBe(100);
+    expect(normalizeSettings(null).uiScale).toBe(100);
+    for (const uiScale of uiScales) expect(normalizeSettings({ uiScale }).uiScale).toBe(uiScale);
+    for (const uiScale of [0, 80, 95, 120, 200, 100.5, -100, "125", "", null, true, {}, [125], Number.NaN]) expect(normalizeSettings({ uiScale }).uiScale).toBe(100);
+  });
+  it("stays per device: not written to the file, taken from the cache when loading", () => {
+    expect(JSON.parse(serializeSettings({ ...defaultSettings, uiScale: 125 }))).not.toHaveProperty("uiScale");
+    const outcome = interpretLoaded('{"uiScale":90,"fontSize":20}', '{"uiScale":150}');
+    expect(outcome.ok && outcome.settings).toMatchObject({ uiScale: 150, fontSize: 20 });
+    const without = interpretLoaded('{"uiScale":125}', null);
+    expect(without.ok && without.settings.uiScale).toBe(100);
+    const unreadableCache = interpretLoaded("{}", "not json");
+    expect(unreadableCache.ok && unreadableCache.settings.uiScale).toBe(100);
+  });
+  it("always keeps the local interface size when merging", () => {
+    const base = normalizeSettings({});
+    expect(mergeSettings(base, { ...base, uiScale: 125 }, { ...base, uiScale: 90 }).uiScale).toBe(125);
+    expect(mergeSettings(base, base, { ...base, uiScale: 150 }).uiScale).toBe(100);
   });
 });
 

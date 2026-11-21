@@ -8,7 +8,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { defaultLogFolder } from "../lib/sessionLog";
 import { useModal } from "./useModal";
 import { describeRemembered, hasRemembered, resetRemembered } from "../lib/paste";
-import { defaultSettings, normalizeSettings, selectedTheme, type Settings } from "../lib/settings";
+import { defaultSettings, normalizeSettings, selectedTheme, uiScales, type Settings } from "../lib/settings";
 import { ansiKeys, importedThemeId, terminalThemes, themeLabel, type TerminalTheme } from "../lib/terminalThemes";
 import { dataDirStatus, type DataDirStatus } from "../lib/dataDir";
 import { DataDirSection } from "./DataDirForm";
@@ -74,6 +74,7 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents, ta
     <h2>{t("menu.settings")}</h2><div className="settings-body"><div role="tablist" aria-orientation="vertical" aria-label={t("settings.tabs.label")}>{tabs.map((entry, index) => <button id={`settings-tab-${entry.id}`} role="tab" aria-selected={tab === entry.id} aria-controls="settings-panel" tabIndex={tab === entry.id ? 0 : -1} key={entry.id} onKeyDown={e => { const target = nextTabIndex(e.key, index, tabs.length); if (target !== null) { e.preventDefault(); const next = tabs[target].id; setTab(next); document.getElementById(`settings-tab-${next}`)?.focus(); } }} onClick={() => setTab(entry.id)}>{t(entry.label)}</button>)}</div>
     <div id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="settings-fields">{tab === "general" ? <>
       <label>{t("settings.language")}<select value={settings.language} onChange={e => change({ language: e.target.value as LanguageSetting })}><option value="system">{t("settings.language.system")}</option><option value="de">{t("settings.language.de")}</option><option value="en">{t("settings.language.en")}</option></select></label>
+      <label>{t("settings.uiScale")}<select value={settings.uiScale} onChange={e => change({ uiScale: Number(e.target.value) as Settings["uiScale"] })}>{uiScales.map(scale => <option key={scale} value={scale}>{t("settings.uiScale.value", { percent: scale })}</option>)}</select></label>
       <div className="settings-action-row"><button type="button" className="settings-secondary" onClick={onClearRecents}>{t("settings.clearRecents")}</button></div>
     </> : tab === "terminal" ? <>
       <h3>{t("settings.tux.heading")}</h3>{check(t("settings.tux.enable"), "tuxEnabled")}{number(t("settings.tux.idle"), "tuxIdleMinutes", 1, 120)}{number(t("settings.tux.count"), "tuxCount", 1, 8)}<button onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event(tuxTestEvent)), 100); }}>{t("settings.tux.test")}</button>

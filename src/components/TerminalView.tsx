@@ -22,6 +22,7 @@ import { createSessionEnd, endedText } from "../lib/sessionEnd";
 import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffset, offsetAfterResetToken } from "../lib/fontZoom";
 
 import { selectedTheme, type Settings } from "../lib/settings";
+import { uiScaleEvent } from "../lib/uiScale";
 import { emojiFallback } from "../lib/terminalThemes";
 
 import { inputProvenance, terminalWriters } from "../lib/multiExec";
@@ -269,6 +270,8 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
       const resize = terminal.onResize(({ cols, rows }) => { if (sessionId !== undefined && !exited) void resizeSession(sessionId, cols, rows).catch(report); });
       const observer = new ResizeObserver(fitVisible);
       observer.observe(element);
+      // Interface size changed: the ResizeObserver normally fires too; refit explicitly in case it does not.
+      window.addEventListener(uiScaleEvent, fitVisible);
       const onData = new Channel<ArrayBuffer>();
       onData.onmessage = buffer => {
         if (cancelled) return;
@@ -382,7 +385,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         otherEvents.forEach(type => element.removeEventListener(type, markOtherInput, true));
         terminalWriters.delete(id);
         clearTimeout(selectionTimer); selection.dispose();
-        provenance.dispose(); observer.disconnect(); input.dispose(); resize.dispose(); osc.dispose(); permissionReady.dispose(); promptCommand.dispose();
+        provenance.dispose(); observer.disconnect(); window.removeEventListener(uiScaleEvent, fitVisible); input.dispose(); resize.dispose(); osc.dispose(); permissionReady.dispose(); promptCommand.dispose();
         onData.onmessage = () => undefined;
         onExitChannel.onmessage = () => undefined;
         onPromptChannel.onmessage = rejectPrompt;

@@ -6,6 +6,7 @@ import { retroIdForDesign } from "../lib/tux/retroSprites";
 import { createRetroSim, type RetroSim } from "../lib/tux/retroSim";
 import { drawRetro } from "../lib/tux/retroDraw";
 import type { RetroStage } from "../lib/tux/retroGrid";
+import { uiScaleEvent } from "../lib/uiScale";
 
 export const tuxTestEvent = "werkterm:tux-test";
 /**
@@ -217,9 +218,11 @@ export function TuxOverlay({ terminal, enabled, minutes, count, visible, active,
     const resize = new ResizeObserver(reset); resize.observe(target);
     document.addEventListener("visibilitychange", reset);
     window.addEventListener(tuxTestEvent, test);
+    // Interface size (and with it the device pixel ratio) changed: measure again on the next start.
+    window.addEventListener(uiScaleEvent, reset);
     motion.addEventListener("change", reset);
     schedule();
-    return () => { clear(); clearTimeout(startTimer); input.dispose(); output.dispose(); scroll.dispose(); resize.disconnect(); events.forEach(event => target.removeEventListener(event, activity, true)); document.removeEventListener("visibilitychange", reset); window.removeEventListener(tuxTestEvent, test); motion.removeEventListener("change", reset); };
+    return () => { clear(); clearTimeout(startTimer); input.dispose(); output.dispose(); scroll.dispose(); resize.disconnect(); events.forEach(event => target.removeEventListener(event, activity, true)); document.removeEventListener("visibilitychange", reset); window.removeEventListener(tuxTestEvent, test); window.removeEventListener(uiScaleEvent, reset); motion.removeEventListener("change", reset); };
   }, [terminal, enabled, minutes, count, visible, active, retro]);
   return <canvas ref={canvas} aria-hidden="true" style={{ position: "absolute", pointerEvents: "none", zIndex: 3 }} />;
 }

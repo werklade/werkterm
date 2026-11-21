@@ -50,6 +50,7 @@ import { jumpHostHint, listSessions, sessionTarget, type SavedSession } from "./
 import { availableShells, type ShellKind } from "./lib/pty";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+import { revertedUiScale, uiScaler } from "./lib/uiScale";
 import { SettingsSync, fileSettingsIo, setMigrateFlag, takeMigrateFlag } from "./lib/settingsSync";
 import { appRestart, dataDirFingerprint, dataDirResetPointer, dataDirSet, dataDirStatus, mergeEntry, planReload, shouldCheck, type DataDirChoice, type DataDirStatus, type FileFingerprint } from "./lib/dataDir";
 import { runSwitch } from "./lib/dataDirSwitch";
@@ -227,6 +228,16 @@ export default function App() {
   const [settings, setSettings] = useState(loadSettings);
   // main.tsx applies the cached language before the first render; this follows later changes (settings.json load, dialog).
   useLayoutEffect(() => { setLanguage(resolveLanguage(settings.language)); }, [settings.language]);
+  // Interface size (webview zoom): main.tsx applies the cached value before the first render; a size already set is not
+  // requested again. On failure the setting returns to the size actually shown, so selection and display agree.
+  useLayoutEffect(() => {
+    const failed = settings.uiScale;
+    void uiScaler.apply(failed).catch(reason => {
+      setStatus(t("app.status.uiScale", { reason: errorText(reason) }));
+      const back = revertedUiScale(failed, settingsRef.current.uiScale, uiScaler.applied());
+      if (back !== null) changeSettings({ ...settingsRef.current, uiScale: back as Settings["uiScale"] });
+    });
+  }, [settings.uiScale]);
   const [fontResetToken, setFontResetToken] = useState(0);
   const fingerprint = useRef<FileFingerprint[] | null>(null);
   const [settingsSync] = useState(() => new SettingsSync(fileSettingsIo, message => setStatus(message), {
