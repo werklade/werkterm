@@ -21,6 +21,7 @@ pub mod sessions;
 pub mod ssh;
 pub mod telnet;
 mod terminal_colors;
+mod transfer_tree;
 pub mod tunnels;
 pub mod ui_error;
 #[cfg(desktop)]
@@ -165,6 +166,10 @@ pub fn run() {
             commands::ssh_download,
             commands::ssh_upload,
             commands::ssh_cancel_transfer,
+            commands::ssh_list_tree,
+            commands::ssh_ensure_dir,
+            commands::local_list_tree,
+            commands::local_ensure_dir,
             commands::ssh_mkdir,
             commands::ssh_create_file,
             commands::ssh_count_entries,

@@ -60,7 +60,8 @@ import { parseQuickConnect, withQuickConnectUser } from "./lib/quickConnect";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { beginClose, advanceClose, type CloseAnswer } from "./lib/editorClose";
 import { invoke, Channel } from "@tauri-apps/api/core";
-import { allocateTransferId, cancelTransfer, downloadFile, uploadFile, type TransferProgress } from "./lib/transfers";
+import { allocateTransferId, cancelTransfer, downloadFile, ensureLocalDir, ensureRemoteDir, listLocalTree, listRemoteTree, uploadFile, type TransferProgress } from "./lib/transfers";
+import { sep } from "@tauri-apps/api/path";
 import { TransferQueue, type QueueState, type ConflictResolution } from "./lib/transferQueue";
 import { FileActionDialog, type FileDialog } from "./components/FileActionDialog";
 import type { EditorDocument } from "./lib/editorTypes";
@@ -395,6 +396,11 @@ export default function App() {
   const [transferQueue] = useState(() => new TransferQueue({
     download: downloadFile,
     upload: uploadFile,
+    listRemoteTree,
+    listLocalTree,
+    ensureRemoteDir,
+    ensureLocalDir,
+    localSeparator: sep,
     cancel: cancelTransfer,
     allocateId: allocateTransferId,
     createChannel: (update: (progress: TransferProgress) => void) => new Channel<TransferProgress>(update),
@@ -417,7 +423,8 @@ export default function App() {
   }));
   useEffect(() => transferQueue.subscribe(setTransfer), [transferQueue]);
   useEffect(() => transferQueue.onFinished(event => {
-    if (event.cancelled) setStatus(t("app.status.transferCancelled"));
+    if (event.summary !== undefined) setStatus(event.summary);
+    else if (event.cancelled) setStatus(t("app.status.transferCancelled"));
     else if (event.error === undefined) setStatus(event.kind === "upload" ? t("app.status.uploadDone") : t("app.status.downloadDone"));
   }), [transferQueue]);
   useEffect(() => () => {

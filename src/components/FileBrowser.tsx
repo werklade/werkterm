@@ -3,7 +3,7 @@ import { errorCode } from "../lib/backendError";
 import { useEffect, useRef, useState } from "react";
 import { PermissionsDialog } from "./PermissionsDialog";
 import { SecretDialog } from "./SecretDialog";
-import { BrowserContextMenu } from "./BrowserContextMenu";
+import { BrowserContextMenu, UploadMenu } from "./BrowserContextMenu";
 import { changePermissions, countPermissionEntries, permissionRoute, disableSudo, enableSudo, modeToRwx, type ChmodOptions } from "../lib/permissions";
 import { parseQuickConnect } from "../lib/quickConnect";
 import { ResizeGrip } from "./ResizeGrip";
@@ -58,7 +58,7 @@ interface Props {
 type BrowserPrompt = FileDialog
   | { type: "sudo"; label: string; answer: (secret: string | null) => void }
   | { type: "permissions"; entry: DirEntry; answer: (options: ChmodOptions | null) => void };
-type Action = "sudo" | "chmod" | "up" | "refresh" | "download" | "upload" | "mkdir" | "create" | "delete" | "edit";
+type Action = "sudo" | "chmod" | "up" | "refresh" | "download" | "upload" | "uploadFolder" | "mkdir" | "create" | "delete" | "edit";
 // Module-level lists hold keys only; they are translated while rendering.
 const actions: { icon: IconName; label: TextKey; action?: Action }[] = [
   { icon: "folder-up", label: "browser.action.up", action: "up" },
@@ -123,6 +123,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [context, setContext] = useState<{ entry: DirEntry; x: number; y: number } | null>(null);
+  const [uploadMenu, setUploadMenu] = useState<{ x: number; y: number } | null>(null);
   const [sort, setSort] = useState(loadFileSort);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -292,7 +293,15 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
       } else if (action === "upload") {
         const paths = await open({ multiple: true, directory: false, title: t("browser.selectFiles") });
         if (paths) transferQueue.enqueue(paths.map(localPath => ({ kind: "upload", sessionId: targetId, localPath, remoteDir: targetDir })));
-      } else if (action === "download" && entry && !isDirectory(entry)) {
+      } else if (action === "uploadFolder") {
+        const paths = await open({ multiple: true, directory: true, title: t("browser.selectFolders") });
+        if (paths) transferQueue.enqueue(paths.map(localPath => ({ kind: "uploadFolder", sessionId: targetId, localPath, remoteDir: targetDir })));
+      } else if (action === "download" && entry && isDirectory(entry)) {
+        // The folder itself is created inside the chosen folder; existing folders are reused.
+        const localParent = await open({ multiple: false, directory: true, title: t("browser.selectTargetFolder", { name: entry.name }) });
+        if (!localParent) return;
+        transferQueue.enqueue([{ kind: "downloadFolder", sessionId: targetId, remotePath: remoteChild(targetDir, entry.name), localParent }]);
+      } else if (action === "download" && entry) {
         const localPath = await save({ defaultPath: entry.name, title: t("browser.saveFile") });
         if (!localPath) return;
         transferQueue.enqueue([{ kind: "download", sessionId: targetId, remotePath: remoteChild(targetDir, entry.name), localPath }]);
@@ -343,15 +352,18 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
     <div className="browser-toolbar">{actions.map(action => {
       const viewAction = action.action === "up" || action.action === "refresh";
       const missingSelection = (action.action === "download" || action.action === "delete") && !selectedEntry;
-      const directoryDownload = action.action === "download" && selectedEntry && isDirectory(selectedEntry);
       const editAction = action.action === "edit";
       const sudoAction = action.action === "sudo";
       const disabled = sudoAction ? !sudoReady || busy : editAction ? !editorReady || busy || !selectedEntry || isDirectory(selectedEntry)
-        : viewAction ? !ready : !writable || busy || !action.action || missingSelection || directoryDownload;
+        : viewAction ? !ready : !writable || busy || !action.action || missingSelection;
       const label = t(action.label);
       const title = editAction ? (kind === "ssh" && !editorReady ? t("browser.onlySftp") : label)
-        : !viewAction && !(sudoAction ? sudoReady : writable) ? disabledReason : directoryDownload ? t("browser.folderDownloadLater") : label;
-      return <button key={action.icon} type="button" aria-label={action.action === "sudo" ? t("browser.action.sudo.label") : label} aria-pressed={action.action === "sudo" ? sudoActive : undefined} title={title} disabled={Boolean(disabled)} onClick={() => perform(action.action)}><Icon name={action.icon} /></button>;
+        : !viewAction && !(sudoAction ? sudoReady : writable) ? disabledReason : action.action === "upload" ? t("browser.uploadTitle") : label;
+      return <button key={action.icon} type="button" aria-label={action.action === "sudo" ? t("browser.action.sudo.label") : label} aria-pressed={action.action === "sudo" ? sudoActive : undefined} title={title} disabled={Boolean(disabled)} aria-haspopup={action.action === "upload" ? "menu" : undefined} onClick={event => {
+        if (action.action !== "upload") { perform(action.action); return; }
+        const rect = event.currentTarget.getBoundingClientRect();
+        setUploadMenu({ x: rect.left, y: rect.bottom + 2 });
+      }}><Icon name={action.icon} /></button>;
     })}</div>
     <form onSubmit={event => { event.preventDefault(); navigate(input); }}><input className="remote-path" aria-label={t("browser.pathLabel")} placeholder={t("browser.pathPlaceholder")} value={input} disabled={!ready} onChange={event => setInput(event.target.value)} /></form>
     {notice && <p className="empty-state">{notice}</p>}
@@ -371,6 +383,7 @@ export function FileBrowser({ markedSource, onCompareFile, tab, settings, onSett
       }
     }}><td><span className="browser-entry-name"><Icon name={isDirectory(entry) ? "folder" : "file"} /><span title={entry.name}>{entry.name}</span></span></td><td>{isDirectory(entry) ? "—" : formatSize(entry.size)}</td><td>{entry.modified === null ? "—" : new Date(entry.modified * 1000).toLocaleString(currentLocale(), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "")}</td></tr>)}</tbody></table>{listing.entries.length === 0 && <p className="empty-state">{t("browser.empty")}</p>}</div>}
     {context && <BrowserContextMenu {...context} permissionsDisabled={!permissionsReady} permissionsTitle={permissionsRoute === null && listing?.mode === "local" ? t("browser.unixPermissionsUnavailable") : t("browser.onlySftp")} markedName={markedSource ? markedSource.path.split(/[\\/]/).pop() : undefined} onAnswer={action => { const entry = context.entry; setContext(null); if ((action === "remember" || action === "compare") && tab && listing) onCompareFile?.({ tab, path: childPath(listing.path, entry.name) }, action === "remember"); else if (action && action !== "remember" && action !== "compare") perform(action, entry); }} />}
+    {uploadMenu && <UploadMenu {...uploadMenu} onAnswer={choice => { setUploadMenu(null); if (choice) perform(choice); }} />}
     {prompt?.type === "sudo" ? <SecretDialog key={promptSequence} title={t("browser.sudoPasswordTitle", { label: prompt.label })} prompt={{ type: "secret", requestId: 0, kind: "password", label: prompt.label }} onAnswer={prompt.answer} />
       : prompt?.type === "permissions" ? <PermissionsDialog key={promptSequence} entry={prompt.entry} onAnswer={prompt.answer} />
       : prompt && <FileActionDialog key={promptSequence} prompt={prompt} />}

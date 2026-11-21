@@ -1,5 +1,6 @@
-use super::{SshManager, ssh_error};
-use crate::ui_error::{ui_code, ui_err};
+use super::SshManager;
+use crate::transfer_tree::{TreeKind, TreeListing, new_file_mode};
+use crate::ui_error::{UiError, ui_code, ui_err};
 use russh_sftp::{
     client::{SftpSession, error::Error},
     protocol::{FileAttributes, OpenFlags, StatusCode},
@@ -24,6 +25,18 @@ pub(super) struct Transfers {
 
 const BLOCK_SIZE: usize = 64 * 1024;
 const CANCELLED: &str = ui_code("CANCELLED");
+
+/// Like the general SSH error, but a closed SFTP channel gets its own code so the transfer
+/// queue can drop the rest of a folder instead of failing every file. russh-sftp reports a
+/// closed channel as `SendError`/`RecvError` of its request queue.
+fn ssh_error(error: impl std::fmt::Display) -> String {
+    let detail = error.to_string();
+    if detail.contains("SendError") || detail.contains("RecvError") {
+        UiError::new("SFTP_CLOSED").detail(detail).into()
+    } else {
+        super::ssh_error(detail)
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +154,38 @@ async fn existing(sftp: &SftpSession, path: &str) -> Result<Option<FileAttribute
     }
 }
 
+/// Folder downloads must not replace local files silently; the queue asks first.
+async fn local_conflict(target: &Path, overwrite: bool) -> Result<(), String> {
+    if overwrite {
+        return Ok(());
+    }
+    match tokio::fs::symlink_metadata(target).await {
+        Ok(_) => {
+            let name = target
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Err(ui_err("EXISTS").arg("name", name).into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(ssh_error(error)),
+    }
+}
+fn remote_tree_kind(meta: &FileAttributes) -> TreeKind {
+    if meta.is_symlink() {
+        TreeKind::Symlink
+    } else if meta.is_dir() {
+        TreeKind::Dir
+    } else if meta.is_regular() {
+        TreeKind::File {
+            size: meta.size.unwrap_or(0),
+            executable: meta.permissions.is_some_and(|mode| mode & 0o111 != 0),
+        }
+    } else {
+        TreeKind::Other
+    }
+}
+
 impl SshManager {
     pub(super) async fn action_sftp(&self, id: u32) -> Result<Arc<SftpSession>, String> {
         let session = self.session(id).await?;
@@ -171,6 +216,7 @@ impl SshManager {
         id: u32,
         remote_path: String,
         local_path: String,
+        overwrite: bool,
         transfer_id: u32,
         send: &(dyn Fn(TransferProgress) + Send + Sync),
     ) -> Result<(), String> {
@@ -181,6 +227,7 @@ impl SshManager {
         let part = part_path(&target);
         let mut created = false;
         let result = async {
+            local_conflict(&target, overwrite).await?;
             let mut remote = sftp.open(remote_path).await.map_err(ssh_error)?;
             let metadata = remote.metadata().await.map_err(ssh_error)?;
             if !metadata.is_regular() {
@@ -225,6 +272,7 @@ impl SshManager {
             closed?;
             progress.finish(done).await;
             check_cancel(&cancel)?;
+            local_conflict(&target, overwrite).await?;
             finish_part(&part, &target, true).await
         }
         .await;
@@ -286,7 +334,7 @@ impl SshManager {
             }
             let permissions = match &previous {
                 Some(meta) => meta.permissions.ok_or(ui_code("PERMISSIONS_UNKNOWN"))? & 0o7777,
-                None => 0o644,
+                None => new_file_mode(&local_meta),
             };
             check_cancel(&cancel)?;
             let flags = OpenFlags::WRITE
@@ -366,6 +414,105 @@ impl SshManager {
         self.transfers.lock().await.active.remove(&transfer_id);
         cleanup?;
         result
+    }
+    /// Lists a remote folder recursively for a folder download. The selected folder may be a
+    /// link (the user picked it); links below it are skipped and counted, never followed.
+    /// Cancellation (transfer ID) and the entry limit are checked before every directory;
+    /// russh-sftp reads a directory in one call, so one huge directory is read completely.
+    pub async fn list_tree(
+        &self,
+        id: u32,
+        path: String,
+        transfer_id: u32,
+    ) -> Result<TreeListing, String> {
+        let path = action_path(&path)?;
+        let sftp = self.action_sftp(id).await?;
+        let cancel = self.begin_transfer(transfer_id).await?;
+        let result = async {
+            if !sftp
+                .metadata(path.clone())
+                .await
+                .map_err(ssh_error)?
+                .is_dir()
+            {
+                return Err(ui_err("TREE_NOT_DIRECTORY").into());
+            }
+            let mut tree = TreeListing::default();
+            let mut pending = vec![(path, String::new())];
+            while let Some((directory, relative)) = pending.pop() {
+                check_cancel(&cancel)?;
+                tree.check_limit()?;
+                for entry in sftp.read_dir(directory.clone()).await.map_err(ssh_error)? {
+                    let name = entry.file_name();
+                    if name == "." || name == ".." {
+                        continue;
+                    }
+                    let mut meta = entry.metadata();
+                    if meta.permissions.is_none() {
+                        // Without a type in the listing ask for it, without following links.
+                        check_cancel(&cancel)?;
+                        let child = remote_join(&directory, &name)?;
+                        meta = sftp.symlink_metadata(child).await.map_err(ssh_error)?;
+                    }
+                    // Downloads land on this machine: on Windows only names it can store.
+                    let kind = remote_tree_kind(&meta);
+                    if let Some(child) = tree.add(&relative, &name, kind, cfg!(windows))? {
+                        pending.push((remote_join(&directory, &name)?, child));
+                    }
+                }
+            }
+            if cfg!(windows) {
+                tree.check_windows_clashes()?;
+            }
+            check_cancel(&cancel)?;
+            Ok(tree.finish())
+        }
+        .await;
+        self.transfers.lock().await.active.remove(&transfer_id);
+        result
+    }
+    /// Lists a local folder for a folder upload; cancellable like a transfer.
+    pub async fn list_local_tree(
+        &self,
+        path: String,
+        transfer_id: u32,
+    ) -> Result<TreeListing, String> {
+        let cancel = self.begin_transfer(transfer_id).await?;
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            crate::transfer_tree::list_local_tree(Path::new(&path), &|| *cancel.borrow())
+        })
+        .await
+        .unwrap_or_else(|_| Err(ui_err("LOCAL_FS_READ_DIR").into()));
+        self.transfers.lock().await.active.remove(&transfer_id);
+        result
+    }
+    /// Creates a remote folder (0755) for a folder upload. An existing folder is reused;
+    /// a file or link with that name is an error.
+    pub async fn ensure_dir(&self, id: u32, path: String) -> Result<(), String> {
+        let path = action_path(&path)?;
+        let sftp = self.action_sftp(id).await?;
+        let is_dir = |meta: &FileAttributes| meta.is_dir() && !meta.is_symlink();
+        match existing(&sftp, &path).await? {
+            Some(meta) if is_dir(&meta) => return Ok(()),
+            Some(_) => return Err(ui_err("TARGET_NOT_DIRECTORY").arg("name", path).into()),
+            None => {}
+        }
+        if let Err(error) = sftp.create_dir(path.clone()).await {
+            // Created concurrently: fine as long as it is a real directory now.
+            return match existing(&sftp, &path).await? {
+                Some(meta) if is_dir(&meta) => Ok(()),
+                _ => Err(ssh_error(error)),
+            };
+        }
+        sftp.set_metadata(
+            path,
+            FileAttributes {
+                permissions: Some(0o755),
+                ..FileAttributes::empty()
+            },
+        )
+        .await
+        .map_err(ssh_error)
     }
     pub async fn mkdir(&self, id: u32, parent: String, name: String) -> Result<(), String> {
         let target = remote_join(&parent, &name)?;
@@ -500,6 +647,29 @@ mod tests {
         assert!(check_cancel(&later).is_ok());
         manager.cancel_transfer(43).await;
         assert!(check_cancel(&later).is_err());
+    }
+    #[tokio::test]
+    async fn cancelled_local_listing_stops_and_releases_its_id() {
+        let manager = SshManager::default();
+        let root = std::env::temp_dir().to_string_lossy().into_owned();
+        manager.cancel_transfer(77).await;
+        assert_eq!(
+            manager.list_local_tree(root.clone(), 77).await.unwrap_err(),
+            CANCELLED
+        );
+        // The ID is free again and an uncancelled listing of a missing folder reports that.
+        let missing = std::env::temp_dir().join("werkterm-missing-listing-folder");
+        let error = manager
+            .list_local_tree(missing.to_string_lossy().into_owned(), 77)
+            .await
+            .unwrap_err();
+        assert!(error.starts_with("LOCAL_FS_METADATA"), "{error}");
+    }
+    #[test]
+    fn closed_channel_errors_get_their_own_code() {
+        assert!(ssh_error("SendError: channel closed").starts_with("SFTP_CLOSED"));
+        assert!(ssh_error("RecvError").starts_with("SFTP_CLOSED"));
+        assert!(ssh_error("Permission denied").starts_with("SSH_FAILED"));
     }
     #[test]
     fn progress_is_limited_to_ten_messages_per_second() {

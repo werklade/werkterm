@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-import { cancelTransfer, countEntries, createFile, deleteEntry, downloadFile, localFileName, makeDirectory, remoteChild, transferText, uploadFile, validRemoteName } from "./transfers";
+import { cancelTransfer, countEntries, createFile, deleteEntry, downloadFile, ensureLocalDir, ensureRemoteDir, listLocalTree, listRemoteTree, localFileName, makeDirectory, remoteChild, transferText, uploadFile, validRemoteName } from "./transfers";
 import type { Channel } from "@tauri-apps/api/core";
 import type { TransferProgress } from "./transfers";
 
@@ -28,8 +28,16 @@ it("formats known, unknown and empty transfer sizes", () => {
 it("passes camelCase transfer and action parameters to the backend", async () => {
   invoke.mockResolvedValue(undefined);
   const channel = {} as Channel<TransferProgress>;
-  await downloadFile(7, "/remote/file", "C:\\file", 8, channel);
-  expect(invoke).toHaveBeenLastCalledWith("ssh_download", { id: 7, remotePath: "/remote/file", localPath: "C:\\file", transferId: 8, onProgress: channel });
+  await downloadFile(7, "/remote/file", "C:\\file", false, 8, channel);
+  expect(invoke).toHaveBeenLastCalledWith("ssh_download", { id: 7, remotePath: "/remote/file", localPath: "C:\\file", overwrite: false, transferId: 8, onProgress: channel });
+  await listRemoteTree(7, "/remote/dir", 3);
+  expect(invoke).toHaveBeenLastCalledWith("ssh_list_tree", { id: 7, path: "/remote/dir", transferId: 3 });
+  await listLocalTree("C:\\dir", 4);
+  expect(invoke).toHaveBeenLastCalledWith("local_list_tree", { path: "C:\\dir", transferId: 4 });
+  await ensureRemoteDir(7, "/remote/dir");
+  expect(invoke).toHaveBeenLastCalledWith("ssh_ensure_dir", { id: 7, path: "/remote/dir" });
+  await ensureLocalDir("C:\\dir");
+  expect(invoke).toHaveBeenLastCalledWith("local_ensure_dir", { path: "C:\\dir" });
   await uploadFile(7, "/local/file", "/remote", false, 9, channel);
   expect(invoke).toHaveBeenLastCalledWith("ssh_upload", { id: 7, localPath: "/local/file", remoteDir: "/remote", overwrite: false, transferId: 9, onProgress: channel });
   await cancelTransfer(9);

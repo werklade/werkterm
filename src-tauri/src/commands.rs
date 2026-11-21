@@ -542,14 +542,56 @@ pub async fn ssh_download(
     id: u32,
     remote_path: String,
     local_path: String,
+    // Single downloads come from a save dialog that already confirmed replacing the file.
+    overwrite: Option<bool>,
     transfer_id: u32,
     on_progress: Channel<crate::ssh::TransferProgress>,
 ) -> Result<(), String> {
     state
-        .download(id, remote_path, local_path, transfer_id, &move |progress| {
-            let _ = on_progress.send(progress);
-        })
+        .download(
+            id,
+            remote_path,
+            local_path,
+            overwrite.unwrap_or(true),
+            transfer_id,
+            &move |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
         .await
+}
+#[tauri::command]
+pub async fn ssh_list_tree(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    path: String,
+    transfer_id: u32,
+) -> Result<crate::transfer_tree::TreeListing, String> {
+    state.list_tree(id, path, transfer_id).await
+}
+#[tauri::command]
+pub async fn ssh_ensure_dir(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+    path: String,
+) -> Result<(), String> {
+    state.ensure_dir(id, path).await
+}
+#[tauri::command]
+pub async fn local_list_tree(
+    state: State<'_, Arc<SshManager>>,
+    path: String,
+    transfer_id: u32,
+) -> Result<crate::transfer_tree::TreeListing, String> {
+    state.list_local_tree(path, transfer_id).await
+}
+#[tauri::command]
+pub async fn local_ensure_dir(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::transfer_tree::ensure_local_dir(std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|_| String::from(ui_err("LOCAL_FS_CREATE_DIR")))?
 }
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
