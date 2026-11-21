@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.0] – 2026-11-21
+
 ### Added
 
 - File browser: select several entries. Click selects one entry, Ctrl+click adds or removes an entry, Shift+click selects the range from the last clicked entry; the arrow keys, Home and End move the selection, with Shift they extend it, Ctrl+A selects all entries and Escape keeps only the focused one. Right-clicking a selected entry keeps the selection, right-clicking another entry selects only that one. Opening another folder clears the selection; a refresh or a new sort order keeps it and only drops entries that are gone. With more than one entry selected, "Download" asks once for a target folder and queues all files and folders as one batch, so "Overwrite all" and "Cancel" apply to all of them and existing local files are not replaced without asking; "Delete" asks once with the number and the first names (and the number of entries inside selected folders), deletes one entry after the other and names failed entries in the status line; "Permissions" applies one dialog to all selected entries (symbolic links are skipped, the recursive option applies to the folders). "Rename" and "Open in editor" are disabled for several entries, F2 then does nothing. The list shows "n selected" below the entries. A single selection behaves as before (issue #34).
