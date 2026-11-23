@@ -14,7 +14,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { Channel, killPty, resizePty, spawnPty, writePty } from "../lib/pty";
-import { answerHostKey, answerSecret, cancelSshConnect, closeSsh, connectSsh, resizeSsh, writeSsh, type SshPrompt } from "../lib/ssh";
+import { answerHostKey, answerSecret, cancelSshConnect, closeSsh, connectSsh, loginShellIsBash, resizeSsh, writeSsh, type SshPrompt } from "../lib/ssh";
 import { parseOsc7, type TerminalCwd } from "../lib/osc7";
 import { parseQuickConnect, quickConnectSshArgs } from "../lib/quickConnect";
 import { createPromptCommandSender } from "../lib/promptCommand";
@@ -365,7 +365,9 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
           sendPermissionCommand();
           callbacks.current.onSession(id, spawnedId);
           void resizeSession(spawnedId, terminal.cols, terminal.rows).catch(report);
-          promptCommand.connect(spawnedId);
+          // Only ask the server (separate exec channel) when the command could be sent at all.
+          // The setting counts as of connecting (deliberate): turning it on later starts no check.
+          promptCommand.connect(spawnedId, kind === "ssh" && settings.current.sshPromptCommand ? loginShellIsBash(spawnedId).catch(() => false) : Promise.resolve(false));
         }
       }).catch((error: unknown) => {
         connecting = false;

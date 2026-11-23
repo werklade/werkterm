@@ -46,6 +46,10 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
   #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`
   (Zeilen dürfen nach unten überstehen, `src/App.css`); wartet auf Testbuild und Bestätigung auf Mint/Debian.
+- #36 (OSC-7-Einzeiler an Geräte ohne Bash, z. B. Netzwerkgeräte-CLI): Fix auf `main` – vor dem Senden fragt ein
+  eigener Exec-Kanal `$BASH_VERSION` ab (höchstens 5 s, Kanal wird immer geschlossen). Wartet auf Testbuild.
+  #8 hängt daran und bleibt `testing`, bis der Tester auch dafür Ergebnisse liefert.
+- #37 (Algorithmus in falscher SSH-Option nennt jetzt die richtige Option): Fix auf `main`, wartet auf Testbuild.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
@@ -63,7 +67,8 @@ Hier nur, was nicht öffentlich geführt wird:
 ## Bekannte Fehler / Einschränkungen
 - Hostkey: Hat known_hosts für einen Host nur Schlüssel eines anderen Typs, wird das als „geändert“ abgelehnt
   (strenger als OpenSSH). Abhilfe: alten Eintrag mit `ssh-keygen -R` entfernen.
-- Der SSH-Einzeiler für OSC 7 funktioniert nur mit Bash auf dem Server; sein Echo ist einmal sichtbar.
+- Der SSH-Einzeiler für OSC 7 funktioniert nur mit Bash auf dem Server (wird nur nach erfolgreicher Bash-Abfrage
+  gesendet, #36); sein Echo ist einmal sichtbar.
 - UNC-Pfade (`\\server\share`) im PowerShell-Tab: OSC 7 wird gesendet, lokales Listing nicht getestet.
 - Der WSL-Tab startet die Standard-Distribution, nicht eine wählbare.
 - Vite-Warnung: Bundle > 500 kB (xterm); unkritisch.

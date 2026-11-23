@@ -21,6 +21,8 @@ export interface ConnectOptions {
 export const connectSsh = (options: ConnectOptions) => invoke<{ id: number; mode: "SFTP" | "exec"; weakAlgorithms?: string[] }>("ssh_connect", { ...options, sessionId: options.sessionId ?? null, sshOptions: options.sshOptions ?? null });
 export const writeSsh = (id: number, data: string) => invoke<void>("ssh_write", { id, data });
 export const resizeSsh = (id: number, cols: number, rows: number) => invoke<void>("ssh_resize", { id, cols, rows });
+/** Whether the login shell of the SSH session is Bash; any failure resolves to false in the backend. */
+export const loginShellIsBash = (id: number) => invoke<boolean>("ssh_login_shell_is_bash", { id });
 export const closeSsh = (id: number) => invoke<void>("ssh_close", { id });
 export const answerHostKey = (requestId: number, accept: boolean) => invoke<void>("ssh_answer_host_key", { requestId, accept });
 export const answerSecret = (requestId: number, secret: string | null) => invoke<void>("ssh_answer_secret", { requestId, secret });

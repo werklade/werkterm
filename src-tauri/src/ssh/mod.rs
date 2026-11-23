@@ -1561,6 +1561,34 @@ impl SshManager {
             .await
             .map_err(ssh_error)
     }
+    /// Whether the login shell of the target is Bash, checked on a separate exec channel.
+    /// Every failure means "no": the check must never disturb the session or show an error.
+    pub async fn login_shell_is_bash(&self, id: u32) -> Result<bool, String> {
+        let Ok(session) = self.session(id).await else {
+            return Ok(false);
+        };
+        let handle = session.handle.clone();
+        drop(session);
+        let (report, answer) = oneshot::channel();
+        // The task owns the channel and always closes it, even after the caller gave up.
+        tokio::spawn(async move {
+            let Ok(Ok(mut channel)) =
+                tokio::time::timeout(PHASE_TIMEOUT, handle.channel_open_session()).await
+            else {
+                return;
+            };
+            check_bash(
+                &mut channel,
+                BASH_CHECK_TIMEOUT,
+                BASH_CHECK_CLOSE_TIMEOUT,
+                report,
+            )
+            .await;
+        });
+        Ok(tokio::time::timeout(BASH_CHECK_TIMEOUT, answer)
+            .await
+            .is_ok_and(|answer| answer.unwrap_or(false)))
+    }
     pub async fn close(&self, id: u32) -> Result<(), String> {
         let session = self.session(id).await?;
         let done = session.done.notified();
@@ -1657,6 +1685,34 @@ impl SshManager {
     }
 }
 
+/// How long the caller waits for the Bash check, including opening the channel.
+const BASH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+/// Closing the check channel must not linger.
+const BASH_CHECK_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+/// The marker line keeps output from shell startup files (for example .bashrc) apart.
+const BASH_CHECK_COMMAND: &str = "printf '\\nWERKTERM_BASH=%s\\n' \"$BASH_VERSION\"";
+const BASH_CHECK_PREFIX: &str = "WERKTERM_BASH=";
+
+/// Evaluates the last marker line of the Bash check output.
+fn bash_check_result(output: &str) -> bool {
+    output
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix(BASH_CHECK_PREFIX))
+        .is_some_and(is_bash_version)
+}
+
+/// `$BASH_VERSION` output such as `5.2.15(1)-release`: starts with `<digits>.<digits>`.
+fn is_bash_version(output: &str) -> bool {
+    let output = output.trim();
+    let Some((major, rest)) = output.split_once('.') else {
+        return false;
+    };
+    !major.is_empty()
+        && major.bytes().all(|b| b.is_ascii_digit())
+        && rest.bytes().next().is_some_and(|b| b.is_ascii_digit())
+}
+
 async fn exec(handle: &Handle, command: String) -> Result<String, String> {
     let mut channel = tokio::time::timeout(PHASE_TIMEOUT, handle.channel_open_session())
         .await
@@ -1688,7 +1744,18 @@ async fn run_exec(
     command: String,
     budget: Duration,
 ) -> Result<String, String> {
-    let result = tokio::time::timeout(budget, async {
+    let result = exec_output(channel, command, budget).await;
+    // Every operation result, including rejection and timeout, reaches close.
+    let _ = tokio::time::timeout(budget, channel.close_channel()).await;
+    result
+}
+/// Runs `command` and collects its output; the caller closes the channel.
+async fn exec_output(
+    channel: &mut impl ExecChannel,
+    command: String,
+    budget: Duration,
+) -> Result<String, String> {
+    tokio::time::timeout(budget, async {
         channel.execute(command).await?;
         let mut output = Vec::new();
         let mut code = None;
@@ -1708,15 +1775,48 @@ async fn run_exec(
     })
     .await
     .map_err(|_| String::from(ui_err("SSH_EXEC_TIMEOUT")))
-    .and_then(|result| result);
-    // Every operation result, including rejection and timeout, reaches close.
-    let _ = tokio::time::timeout(budget, channel.close_channel()).await;
-    result
+    .and_then(|result| result)
+}
+
+/// Runs the Bash check on an open channel, reports the answer as soon as it is known
+/// and then always closes the channel itself, even when nobody waits for the answer.
+async fn check_bash(
+    channel: &mut impl ExecChannel,
+    budget: Duration,
+    close_budget: Duration,
+    report: oneshot::Sender<bool>,
+) {
+    let output = exec_output(channel, BASH_CHECK_COMMAND.into(), budget).await;
+    let _ = report.send(output.is_ok_and(|output| bash_check_result(&output)));
+    let _ = tokio::time::timeout(close_budget, channel.close_channel()).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bash_version_detection() {
+        for output in [
+            "5.2.15(1)-release\n",
+            "4.4.20(1)-release",
+            "  3.2.57(1)-release\r\n",
+        ] {
+            assert!(is_bash_version(output), "{output:?}");
+        }
+        for output in [
+            "",
+            "\n",
+            "$BASH_VERSION",
+            "% Invalid input",
+            "CLINFR0329 Invalid command",
+            ".5",
+            "5.",
+            "5",
+            "a5.2",
+        ] {
+            assert!(!is_bash_version(output), "{output:?}");
+        }
+    }
     impl TerminalReader for mpsc::Receiver<ChannelMsg> {
         async fn receive(&mut self) -> Option<ChannelMsg> {
             self.recv().await
@@ -1977,6 +2077,90 @@ mod tests {
         }
         async fn close_channel(&mut self) {
             self.closed = true;
+        }
+    }
+    #[test]
+    fn bash_check_reads_the_last_marker_line() {
+        for (output, bash) in [
+            ("\nWERKTERM_BASH=5.2.15(1)-release\n", true),
+            (
+                "Welcome to host\r\nLast login: today\r\n\nWERKTERM_BASH=5.1.16(1)-release\r\n",
+                true,
+            ),
+            ("WERKTERM_BASH=1.0\n\nWERKTERM_BASH=\n", false),
+            ("\nWERKTERM_BASH=\n", false),
+            ("5.2.15(1)-release\n", false),
+            ("Greeting 5.2 from .bashrc\n\nWERKTERM_BASH=\n", false),
+            ("", false),
+        ] {
+            assert_eq!(bash_check_result(output), bash, "{output:?}");
+        }
+    }
+    #[tokio::test]
+    async fn bash_check_closes_its_channel_after_the_caller_gave_up() {
+        let mut channel = FakeExec {
+            messages: Default::default(),
+            execute_error: false,
+            hang: true,
+            closed: false,
+        };
+        let (report, answer) = oneshot::channel();
+        // The waiting side is gone before the check even starts.
+        drop(answer);
+        check_bash(
+            &mut channel,
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+            report,
+        )
+        .await;
+        assert!(channel.closed);
+    }
+    #[tokio::test]
+    async fn bash_check_reports_before_closing() {
+        for (messages, execute_error, hang, bash) in [
+            (
+                vec![
+                    ChannelMsg::Data {
+                        data: b"motd\n\nWERKTERM_BASH=5.2.15(1)-release\n".to_vec().into(),
+                    },
+                    ChannelMsg::ExitStatus { exit_status: 0 },
+                    ChannelMsg::Close,
+                ],
+                false,
+                false,
+                true,
+            ),
+            (
+                vec![
+                    ChannelMsg::Data {
+                        data: b"\nWERKTERM_BASH=\n".to_vec().into(),
+                    },
+                    ChannelMsg::ExitStatus { exit_status: 0 },
+                ],
+                false,
+                false,
+                false,
+            ),
+            (vec![], true, false, false),
+            (vec![], false, true, false),
+        ] {
+            let mut channel = FakeExec {
+                messages: messages.into(),
+                execute_error,
+                hang,
+                closed: false,
+            };
+            let (report, answer) = oneshot::channel();
+            check_bash(
+                &mut channel,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                report,
+            )
+            .await;
+            assert_eq!(answer.await, Ok(bash));
+            assert!(channel.closed);
         }
     }
     #[tokio::test]

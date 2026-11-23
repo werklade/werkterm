@@ -162,6 +162,7 @@ pub fn run() {
             commands::ssh_answer_secret,
             commands::ssh_write,
             commands::ssh_resize,
+            commands::ssh_login_shell_is_bash,
             commands::ssh_close,
             commands::ssh_list_dir,
             commands::ssh_sudo_enable,

@@ -458,6 +458,14 @@ pub async fn ssh_resize(
 }
 
 #[tauri::command]
+pub async fn ssh_login_shell_is_bash(
+    state: State<'_, Arc<SshManager>>,
+    id: u32,
+) -> Result<bool, String> {
+    state.login_shell_is_bash(id).await
+}
+
+#[tauri::command]
 pub async fn ssh_close(state: State<'_, Arc<SshManager>>, id: u32) -> Result<(), String> {
     state.close(id).await
 }

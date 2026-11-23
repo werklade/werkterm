@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Terminal: underscores are visible again at line height 1 on Linux. Fonts such as DejaVu Sans Mono (the fallback when Cascadia Mono is not installed) draw the underscore just below the cell, and the terminal cut every row off at its edge. Rows may now overflow downwards; the terminal as a whole is still clipped. Seen on Debian 13 (GNOME) and Linux Mint 22.3 (issue #7).
+- SSH: the one-liner for "Follow terminal folder" (OSC 7) is no longer typed into targets without Bash, such as network device command lines, which rejected it as an invalid command. After connecting, Werkterm asks the target once over a separate, short-lived exec channel on the same connection whether its login shell is Bash (at most 5 seconds) and sends the one-liner only then. Output from shell startup files does not disturb the check. Servers without exec support no longer get the one-liner (issues #36, #8).
+- SSH options: an algorithm in the wrong option now names the right one, for example "hmac-sha1 belongs to MACs, not HostKeyAlgorithms", instead of claiming it is not supported (issue #37).
 
 ## [1.3.0] – 2026-11-21
 
