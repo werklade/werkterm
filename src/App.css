@@ -61,6 +61,11 @@ input::placeholder { color: var(--fg-muted); }
 .terminal-panel { background: var(--bg-content); height: 100%; padding: 6px; }
 .terminal-panel[hidden] { display: none; }
 .terminal-container { height: 100%; width: 100%; overflow: hidden; }
+/* xterm DOM renderer clips each row (inline overflow:hidden), which hides underscores
+   that fonts like DejaVu Sans Mono draw below the cell at line height 1 (xtermjs#4067).
+   Let rows overflow vertically (as in xtermjs#6265); .terminal-container still clips the
+   terminal as a whole, so the bottom row keeps its underscores too. */
+.terminal-container .xterm-rows > div { overflow-x: clip !important; overflow-y: visible !important; }
 .terminal-empty { display: grid; height: 100%; place-items: center; color: var(--fg-muted); }
 .statusbar { flex: none; min-height: 23px; padding: 3px 10px; background: var(--bg-toolbar); border-top: 1px solid var(--border-strong); color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

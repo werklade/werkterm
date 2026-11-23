@@ -1,6 +1,6 @@
 # STATUS – Werkterm
 
-Stand: 2026-11-20
+Stand: 2026-11-23
 
 Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 
@@ -43,8 +43,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 ## In Arbeit
 - #23 (in 1.3.0 ausgeliefert, `testing`): offen ist der Test gegen einen alten SSH-Server.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
-- #7 (Unterstriche): Anleitung `werkterm-1.2.4-unterstriche-1.md` (Werklade-Ordner, nicht im Repo) an den Tester;
-  wartet auf Ergebnisse.
+- #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
+  #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`
+  (Zeilen dürfen nach unten überstehen, `src/App.css`); wartet auf Testbuild und Bestätigung auf Mint/Debian.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
