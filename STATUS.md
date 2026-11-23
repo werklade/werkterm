@@ -50,6 +50,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   eigener Exec-Kanal `$BASH_VERSION` ab (höchstens 5 s, Kanal wird immer geschlossen). Wartet auf Testbuild.
   #8 hängt daran und bleibt `testing`, bis der Tester auch dafür Ergebnisse liefert.
 - #37 (Algorithmus in falscher SSH-Option nennt jetzt die richtige Option): Fix auf `main`, wartet auf Testbuild.
+- Testbuild 1.3.1 (Branch test/1.3.1 = main bis 03af43f plus Versionscommit, Run 45183643467, 2026-11-23, alle Jobs
+  grün): enthält #7, #36, #8, #37. Veröffentlichen im Testkanal (`npm run publish-pkg -- 1.3.1 --channel test --run
+  45183643467`) steht aus.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
