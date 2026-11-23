@@ -1147,6 +1147,7 @@
   "error.SSH_OPTION_UNKNOWN": "SSH options, line {line}: option “{key}” is not supported",
   "error.SSH_OPTION_DUPLICATE": "SSH options, line {line}: option “{key}” appears twice",
   "error.SSH_OPTION_UNKNOWN_ALGORITHM": "SSH options, line {line}: algorithm “{name}” is not supported",
+  "error.SSH_OPTION_WRONG_LIST": "SSH options, line {line}: “{name}” belongs to {option}, not {current}",
   "error.SSH_OPTION_EMPTY_LIST": "SSH options, line {line}: the algorithm list ends up empty",
   "error.SSH_OPTION_RANGE": "SSH options, line {line}: value must be between {min} and {max}",
   "error.SSH_RESOLVE_TIMEOUT": "Name resolution timed out",

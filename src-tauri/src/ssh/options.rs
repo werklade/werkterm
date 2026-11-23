@@ -84,6 +84,26 @@ enum ListKind {
 }
 
 impl ListKind {
+    /// Lists of the same family (host key and public key algorithms) share their names,
+    /// so a name missing from one of them is unknown rather than misplaced.
+    fn family(self) -> u8 {
+        match self {
+            Self::Kex => 0,
+            Self::HostKey | Self::Pubkey => 1,
+            Self::Cipher => 2,
+            Self::Mac => 3,
+        }
+    }
+    fn option_name(self) -> &'static str {
+        match self {
+            Self::Kex => "KexAlgorithms",
+            Self::HostKey => "HostKeyAlgorithms",
+            Self::Pubkey => "PubkeyAcceptedAlgorithms",
+            Self::Cipher => "Ciphers",
+            Self::Mac => "MACs",
+        }
+    }
+
     /// Every name the user may write for this list.
     fn supported(self) -> Vec<&'static str> {
         match self {
@@ -204,6 +224,22 @@ fn parse_list(
             return Err(line_err("SSH_OPTION_MALFORMED", line));
         }
         if !supported.contains(&item.as_str()) {
+            if let Some(other) = [
+                ListKind::Kex,
+                ListKind::HostKey,
+                ListKind::Pubkey,
+                ListKind::Cipher,
+                ListKind::Mac,
+            ]
+            .into_iter()
+            .find(|other| {
+                other.family() != kind.family() && other.supported().contains(&item.as_str())
+            }) {
+                return Err(line_err("SSH_OPTION_WRONG_LIST", line)
+                    .arg("name", item)
+                    .arg("option", other.option_name())
+                    .arg("current", kind.option_name()));
+            }
             return Err(line_err("SSH_OPTION_UNKNOWN_ALGORITHM", line).arg("name", item));
         }
         if !names.contains(&item) {
@@ -520,6 +556,35 @@ mod tests {
     }
 
     #[test]
+    fn reports_the_matching_option_for_misplaced_algorithms() {
+        for (text, option, current) in [
+            ("HostKeyAlgorithms=+hmac-sha1", "MACs", "HostKeyAlgorithms"),
+            ("Ciphers hmac-sha2-256", "MACs", "Ciphers"),
+            ("MACs aes128-cbc", "Ciphers", "MACs"),
+            (
+                "KexAlgorithms ssh-rsa",
+                "HostKeyAlgorithms",
+                "KexAlgorithms",
+            ),
+        ] {
+            let error = parse(text).unwrap_err();
+            assert_eq!(code_of(&error), Some("SSH_OPTION_WRONG_LIST"), "{error}");
+            assert!(
+                error.contains(&format!(r#""option":"{option}""#)),
+                "{error}"
+            );
+            assert!(
+                error.contains(&format!(r#""current":"{current}""#)),
+                "{error}"
+            );
+        }
+
+        for text in ["MACs hmac-md5", "Ciphers rot13"] {
+            assert_eq!(code(text), "SSH_OPTION_UNKNOWN_ALGORITHM", "{text}");
+        }
+    }
+
+    #[test]
     fn rejects_unknown_keys_algorithms_and_malformed_lines_with_line_number() {
         let error = parse("Ciphers +aes128-cbc\n\nProxyCommand=nc %h %p").unwrap_err();
         assert!(error.starts_with("SSH_OPTION_UNKNOWN:"), "{error}");
@@ -669,6 +734,7 @@ mod tests {
                 "{name}"
             );
         }
+        // HostKey and Pubkey are one family: no hint to the other key list.
         assert_eq!(
             code("HostKeyAlgorithms +sk-ssh-ed25519@openssh.com"),
             "SSH_OPTION_UNKNOWN_ALGORITHM"

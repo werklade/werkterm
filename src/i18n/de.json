@@ -1147,6 +1147,7 @@
   "error.SSH_OPTION_UNKNOWN": "SSH-Optionen, Zeile {line}: Option „{key}“ wird nicht unterstützt",
   "error.SSH_OPTION_DUPLICATE": "SSH-Optionen, Zeile {line}: Option „{key}“ steht doppelt",
   "error.SSH_OPTION_UNKNOWN_ALGORITHM": "SSH-Optionen, Zeile {line}: Algorithmus „{name}“ wird nicht unterstützt",
+  "error.SSH_OPTION_WRONG_LIST": "SSH-Optionen, Zeile {line}: „{name}“ gehört zu {option}, nicht zu {current}",
   "error.SSH_OPTION_EMPTY_LIST": "SSH-Optionen, Zeile {line}: Algorithmenliste ist danach leer",
   "error.SSH_OPTION_RANGE": "SSH-Optionen, Zeile {line}: Wert muss zwischen {min} und {max} liegen",
   "error.SSH_RESOLVE_TIMEOUT": "Zeitüberschreitung bei der Namensauflösung",
