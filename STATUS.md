@@ -41,9 +41,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- #41 (Schriftart als echte Auswahl, Import von TTF/OTF): auf `main`, Tests unter Windows und Linux grün; manueller
-  Test in der App offen (Neu-Messen der Zeichenbreite nach dem Laden, Linux-Schriftliste). Systemschriften werden bis
-  zum Neustart zwischengespeichert.
+- #41 (Schriftart als echte Auswahl, Import von TTF/OTF): auf `main`, Tests unter Windows und Linux grün; vom Nutzer
+  unter Windows in der App geprüft, im Testbuild 1.3.4. Offen: Linux-Schriftliste von Hand prüfen. Systemschriften
+  werden bis zum Neustart zwischengespeichert.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
   #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`
@@ -60,10 +60,12 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   Branch test/1.3.1 gelöscht, Server-Ordner `downloads/1.3.1` entfernt und gesperrt (2026-11-24).
 - Testbuild 1.3.2: abgelöst durch 1.3.3; Branch test/1.3.2 gelöscht (2026-11-24), Server-Ordner `downloads/1.3.2`
   entfernen und sperren steht noch aus (Nutzer, Betriebshandbuch Abschnitt 4).
-- Testbuild 1.3.3 (Branch test/1.3.3 = main bis 3daf085 plus Versionscommit, Run 45483058146, 2026-11-24, alle Jobs
-  grün): enthält #12, #19/#39/#40 (ohne Admin-Teil) und alles aus 1.3.2 (#38, #36, #37, #7, #8). Am 2026-11-24 im
-  Testkanal und in APT `test` veröffentlicht, von außen geprüft (updates-test/latest.json und SHA256SUMS byte-gleich,
-  AppImage/EXE/MSI samt .sig gegen die Prüfsummen des Artefakts). Wartet auf Rückmeldung.
+- Testbuild 1.3.4 (Branch test/1.3.4 = main bis 148bcdc plus Versionscommit, Run 45501951831, 2026-11-24, alle Jobs
+  grün): enthält #41 (Schriftauswahl, Schrift-Import) und alles aus 1.3.3. Am 2026-11-24 im Testkanal und in APT `test`
+  veröffentlicht, von außen geprüft (updates-test/latest.json und SHA256SUMS byte-gleich, AppImage/EXE/MSI samt .sig
+  gegen die Prüfsummen des Artefakts). Wartet auf Rückmeldung.
+- Testbuild 1.3.3: abgelöst durch 1.3.4; Branch test/1.3.3 gelöscht (2026-11-24), Server-Ordner `downloads/1.3.3`
+  entfernen und sperren steht noch aus (Nutzer, Betriebshandbuch Abschnitt 4).
 - Lokale Shells und Monitoring (Meilenstein 1.4.0, 2026-11-24, Branch feature/local-shells-monitor → main): Shell-Auswahl
   unter Windows (pwsh 7, PowerShell 5.1, cmd, WSL-Distributionen; #19/#39/#40 ohne Admin-Teil) und Monitoring-Leiste
   für lokale und WSL-Tabs (#12). Auf dem Entwicklungsrechner jedes Profil echt gestartet; Windows-Messwerte gegen
