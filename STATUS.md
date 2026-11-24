@@ -45,7 +45,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
   #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`
-  (Zeilen dürfen nach unten überstehen, `src/App.css`); wartet auf Testbuild und Bestätigung auf Mint/Debian.
+  (Zeilen dürfen nach unten überstehen, `src/App.css`); vom Tester mit 1.3.1 bestätigt, geschlossen.
 - #36 (OSC-7-Einzeiler nur nach Bash-Abfrage) und #37 (richtige Option in der Meldung): vom Tester mit 1.3.1
   bestätigt, geschlossen; ausgeliefert mit dem nächsten Release. #8 bleibt `testing` (AlmaLinux/Appliance-Probe offen).
 - #38 (AppImage: lokale Shells erben `LD_LIBRARY_PATH` usw. des AppImage-Starters, `findmnt`/`eza` scheitern unter
