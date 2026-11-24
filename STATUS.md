@@ -55,10 +55,12 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - Testbuild 1.3.1 (2026-11-23, #7, #36, #8, #37): Tester 2026-11-24: Gerät ohne Bash, Bash-Gegenprobe,
   SSH-Optionsmeldung und Unterstriche ok; AlmaLinux/Appliance (#8) noch ohne Ergebnis. Abgelöst durch 1.3.2;
   Branch test/1.3.1 gelöscht, Server-Ordner `downloads/1.3.1` entfernt und gesperrt (2026-11-24).
-- Testbuild 1.3.2 (Branch test/1.3.2 = main bis 0d25af7 plus Versionscommit, Run 45357463479, 2026-11-24, alle Jobs
-  grün): enthält #38 und alles aus 1.3.1. Am 2026-11-24 im Testkanal und in APT `test` veröffentlicht, von außen
-  geprüft (updates-test/latest.json byte-gleich, AppImage/EXE/MSI und .deb aus dem APT-Pool gegen die Prüfsummen
-  des Artefakts). Wartet auf Rückmeldung des Testers.
+- Testbuild 1.3.2: abgelöst durch 1.3.3; Branch test/1.3.2 gelöscht (2026-11-24), Server-Ordner `downloads/1.3.2`
+  entfernen und sperren steht noch aus (Nutzer, Betriebshandbuch Abschnitt 4).
+- Testbuild 1.3.3 (Branch test/1.3.3 = main bis 3daf085 plus Versionscommit, Run 45483058146, 2026-11-24, alle Jobs
+  grün): enthält #12, #19/#39/#40 (ohne Admin-Teil) und alles aus 1.3.2 (#38, #36, #37, #7, #8). Am 2026-11-24 im
+  Testkanal und in APT `test` veröffentlicht, von außen geprüft (updates-test/latest.json und SHA256SUMS byte-gleich,
+  AppImage/EXE/MSI samt .sig gegen die Prüfsummen des Artefakts). Wartet auf Rückmeldung.
 - Lokale Shells und Monitoring (Meilenstein 1.4.0, 2026-11-24, Branch feature/local-shells-monitor → main): Shell-Auswahl
   unter Windows (pwsh 7, PowerShell 5.1, cmd, WSL-Distributionen; #19/#39/#40 ohne Admin-Teil) und Monitoring-Leiste
   für lokale und WSL-Tabs (#12). Auf dem Entwicklungsrechner jedes Profil echt gestartet; Windows-Messwerte gegen
