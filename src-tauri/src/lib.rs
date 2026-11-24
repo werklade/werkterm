@@ -5,6 +5,7 @@ mod designs;
 mod dnd_debug;
 pub mod editor;
 mod folder_diff;
+mod fonts;
 mod icon_sets;
 mod keygen;
 #[cfg(any(target_os = "linux", test))]
@@ -104,6 +105,11 @@ pub fn run() {
             designs::designs_delete,
             designs::designs_export,
             designs::designs_import,
+            fonts::fonts_list_system,
+            fonts::fonts_list_imported,
+            fonts::fonts_import,
+            fonts::fonts_read,
+            fonts::fonts_delete,
             icon_sets::icon_sets_list,
             icon_sets::icon_sets_load,
             icon_sets::icon_sets_import,

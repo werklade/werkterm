@@ -4,7 +4,8 @@ import { DesignEditor } from "./DesignEditor";
 import { tuxTestEvent } from "./TuxOverlay";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
+import { buildFontFamily, fontFamilyMatches, fontKey, fontsChangedEvent, groupImportedFonts, importedFontsSnapshot, isDefaultFontFamily, loadImportedFonts, registerImportedFont, unregisterImportedFont, visibleSystemFonts, type ImportedFont, type SystemFont } from "../lib/fonts";
 import { defaultLogFolder } from "../lib/sessionLog";
 import { useModal } from "./useModal";
 import { describeRemembered, hasRemembered, resetRemembered } from "../lib/paste";
@@ -68,6 +69,67 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents, ta
       change({ importedTheme: imported, theme: importedThemeId });
     } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
   };
+  // Font lists: loaded once per opening, only while the terminal tab is shown for the first time.
+  // Imported fonts come first; the slower system list fills its group when it arrives.
+  const [systemFonts, setSystemFonts] = useState<SystemFont[] | null>(null);
+  const [importedFonts, setImportedFonts] = useState<ImportedFont[]>(importedFontsSnapshot);
+  const [showAllFonts, setShowAllFonts] = useState(false);
+  const fontsRequested = useRef(false);
+  useEffect(() => {
+    if (tab !== "terminal" || fontsRequested.current) return;
+    fontsRequested.current = true;
+    void loadImportedFonts().then(setImportedFonts).catch(reason => setError(errorText(reason)));
+    void invoke<SystemFont[]>("fonts_list_system").then(setSystemFonts).catch(reason => { setError(errorText(reason)); setSystemFonts([]); });
+  }, [tab]);
+  // Follows registrations and removals from elsewhere (other instance, data folder reload).
+  useEffect(() => {
+    const changed = () => setImportedFonts(importedFontsSnapshot());
+    window.addEventListener(fontsChangedEvent, changed);
+    return () => window.removeEventListener(fontsChangedEvent, changed);
+  }, []);
+  const importedFamilies = groupImportedFonts(importedFonts);
+  const importedKeys = new Set(importedFamilies.map(family => family.key));
+  const selectedImported = importedFamilies.find(family => fontFamilyMatches(settings.fontFamily, family.family));
+  const selectedSystem = selectedImported ? undefined : systemFonts?.find(font => fontFamilyMatches(settings.fontFamily, font.family));
+  const fontChoice = isDefaultFontFamily(settings.fontFamily) ? "default" : selectedImported ? `imp:${selectedImported.key}` : selectedSystem ? `sys:${selectedSystem.family}` : "custom";
+  const shownImported = importedFamilies.filter(family => showAllFonts || family.monospaced || family.broken || family === selectedImported);
+  const shownSystem = visibleSystemFonts(systemFonts ?? [], importedKeys, showAllFonts, selectedSystem && fontKey(selectedSystem.family));
+  const chooseFont = (value: string) => {
+    if (value === "default") change({ fontFamily: defaultSettings.fontFamily });
+    else if (value.startsWith("imp:")) { const family = importedFamilies.find(entry => entry.key === value.slice(4)); if (family) change({ fontFamily: buildFontFamily(family.family) }); }
+    else if (value.startsWith("sys:")) change({ fontFamily: buildFontFamily(value.slice(4)) });
+  };
+  const importFont = async () => {
+    setBusy(true); setError("");
+    try {
+      const path = await open({ title: t("settings.font.import.title"), filters: [{ name: t("settings.font.import.filter"), extensions: ["ttf", "otf"] }], multiple: false, directory: false });
+      if (typeof path !== "string") return;
+      const font = await invoke<ImportedFont>("fonts_import", { path });
+      try { await registerImportedFont(font); }
+      catch (reason) {
+        // The browser rejected the face: do not leave an unusable file behind.
+        console.warn(`font ${font.id} not usable`, reason);
+        await invoke<void>("fonts_delete", { id: font.id }).catch(() => undefined);
+        setError(t("settings.font.loadFailed"));
+        return;
+      }
+      setImportedFonts(await loadImportedFonts());
+      window.dispatchEvent(new Event(fontsChangedEvent));
+      change({ fontFamily: buildFontFamily(font.family) });
+    } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
+  };
+  const removeFont = async () => {
+    const family = selectedImported;
+    if (!family) return;
+    setBusy(true); setError("");
+    try {
+      if (!await confirm(t("settings.font.remove.confirm", { name: family.family }), { title: t("settings.font.remove.title"), kind: "warning" })) return;
+      // Every face (weight/style) of the family; a failure stops with the remaining faces still listed.
+      try { for (const id of family.ids) { await invoke<void>("fonts_delete", { id }); unregisterImportedFont(id); } }
+      finally { setImportedFonts(importedFontsSnapshot()); }
+      change({ fontFamily: defaultSettings.fontFamily });
+    } catch (reason) { setError(errorText(reason)); } finally { setBusy(false); }
+  };
   useEffect(() => { if (!current.current.logFolder) void defaultLogFolder().then(logFolder => { if (!current.current.logFolder) change({ logFolder }); }).catch(reason => setError(errorText(reason))); }, []);
   const theme = selectedTheme(settings);
   return <dialog ref={dialog} className="ssh-dialog settings-dialog" aria-label={t("menu.settings")} onCancel={e => { e.preventDefault(); onClose(); }}>
@@ -80,7 +142,16 @@ export function SettingsDialog({ settings, onChange, onClose, onClearRecents, ta
       <h3>{t("settings.tux.heading")}</h3>{check(t("settings.tux.enable"), "tuxEnabled")}{number(t("settings.tux.idle"), "tuxIdleMinutes", 1, 120)}{number(t("settings.tux.count"), "tuxCount", 1, 8)}<button onClick={() => { onClose(); setTimeout(() => window.dispatchEvent(new Event(tuxTestEvent)), 100); }}>{t("settings.tux.test")}</button>
       <label>{t("settings.pasteConfirm")}<select value={settings.pasteConfirm} onChange={e => change({ pasteConfirm: e.target.value as Settings["pasteConfirm"] })}><option value="multiline">{t("settings.pasteConfirm.multiline")}</option><option value="always">{t("settings.pasteConfirm.always")}</option><option value="never">{t("settings.pasteConfirm.never")}</option></select></label>
       <div className="settings-remembered"><span role="status">{describeRemembered(settings.pasteRemember, tabPasteCount)}</span><button type="button" disabled={!hasRemembered(settings.pasteRemember, tabPasteCount)} onClick={() => { change({ pasteRemember: resetRemembered() }); onResetTabPaste?.(); }}>{t("settings.pasteReset")}</button></div>
-      <label>{t("settings.fontFamily")}<input list="mono-fonts" value={settings.fontFamily} onChange={e => change({ fontFamily: e.target.value })} /></label><datalist id="mono-fonts">{["Cascadia Mono", "DejaVu Sans Mono", "Consolas", "Liberation Mono", "Ubuntu Mono", "monospace"].map(font => <option key={font} value={font} />)}</datalist>
+      <label>{t("settings.fontFamily")}<select value={fontChoice} disabled={busy} onChange={e => chooseFont(e.target.value)}>
+        {fontChoice === "custom" && <option value="custom">{t("settings.font.custom", { value: settings.fontFamily })}</option>}
+        <optgroup label={t("settings.font.group.default")}><option value="default">{t("settings.font.default")}</option></optgroup>
+        {shownImported.length > 0 && <optgroup label={t("settings.font.group.imported")}>{shownImported.map(family => <option key={family.key} value={`imp:${family.key}`}>{family.broken ? t("settings.font.broken", { name: family.family }) : family.family}</option>)}</optgroup>}
+        {systemFonts === null ? <optgroup label={t("settings.font.group.system")}><option value="loading" disabled>{t("settings.font.loading")}</option></optgroup>
+          : shownSystem.length > 0 && <optgroup label={t("settings.font.group.system")}>{shownSystem.map(font => <option key={font.family} value={`sys:${font.family}`}>{font.family}</option>)}</optgroup>}
+      </select></label>
+      <label className="settings-check"><input type="checkbox" checked={showAllFonts} onChange={e => setShowAllFonts(e.target.checked)} />{t("settings.font.showAll")}</label>
+      <div className="settings-remembered"><button type="button" disabled={busy} onClick={() => void importFont()}>{t("settings.font.import")}</button><button type="button" disabled={busy || !selectedImported} onClick={() => void removeFont()}>{t("settings.font.remove")}</button></div>
+      <p className="settings-font-preview" aria-label={t("settings.font.preview")} style={{ fontFamily: settings.fontFamily }}>AaBb 0Oo 1lI {"{}[] => ->"}</p>
       {number(t("settings.fontSize"), "fontSize", 8, 32)}{number(t("settings.lineHeight"), "lineHeight", 1, 2, .1)}
       <label>{t("settings.cursorStyle")}<select value={settings.cursorStyle} onChange={e => change({ cursorStyle: e.target.value as Settings["cursorStyle"] })}><option value="block">{t("settings.cursorStyle.block")}</option><option value="bar">{t("settings.cursorStyle.bar")}</option><option value="underline">{t("settings.cursorStyle.underline")}</option></select></label>
       {check(t("settings.confirmCloseSsh"), "confirmCloseSsh")}

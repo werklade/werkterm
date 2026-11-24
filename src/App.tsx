@@ -52,6 +52,7 @@ import { availableShells, availableShellProfiles, type ShellKind, type ShellProf
 import { profileFromAction, profileKind, profileTitle, wslDistroFromProfile } from "./lib/shellProfiles";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+import { loadImportedFonts } from "./lib/fonts";
 import { revertedUiScale, uiScaler } from "./lib/uiScale";
 import { SettingsSync, fileSettingsIo, setMigrateFlag, takeMigrateFlag } from "./lib/settingsSync";
 import { appRestart, dataDirFingerprint, dataDirResetPointer, dataDirSet, dataDirStatus, mergeEntry, planReload, shouldCheck, type DataDirChoice, type DataDirStatus, type FileFingerprint } from "./lib/dataDir";
@@ -232,6 +233,7 @@ export default function App() {
   const [undoSlot] = useState(() => createUndoSlot(setUndoEntry));
   useEffect(() => () => undoSlot.dispose(), [undoSlot]);
   useEffect(() => { if (dataReady) reloadSessions(); }, [dataReady, reloadSessions]);
+  useEffect(() => { if (dataReady) void loadImportedFonts().catch(reason => console.warn("fonts_list_imported failed", reason)); }, [dataReady]);
   // localStorage only seeds the first render; settings.json replaces it once loaded (see bootstrapData).
   const [settings, setSettings] = useState(loadSettings);
   // main.tsx applies the cached language before the first render; this follows later changes (settings.json load, dialog).
@@ -963,6 +965,11 @@ export default function App() {
           if (await reloadIconSet(settingsRef.current.iconSet)) reloaded = true;
           failedReloads.current.delete("icon-sets/");
         } catch (reason) { failed("icon-sets/"); notes.push(errorText(reason)); }
+      }
+      // Registers added fonts and drops removed ones; terminals remeasure through fontsChangedEvent.
+      if (plan.reload.includes("fonts/")) {
+        try { await loadImportedFonts(); failedReloads.current.delete("fonts/"); }
+        catch (reason) { failed("fonts/"); notes.push(errorText(reason)); }
       }
       const summary = removedDesign ? t("app.status.designRemoved", { name: removedDesign }) : reloaded ? t("app.status.dataReloaded") : "";
       const message = [summary, ...notes].filter(Boolean).join("; ");

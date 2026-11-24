@@ -23,6 +23,7 @@ import { accumulateZoomWheel, effectiveFontSize, initialZoomWheel, nextZoomOffse
 import { registerPinchTarget } from "../lib/pinchZoom";
 
 import { selectedTheme, type Settings } from "../lib/settings";
+import { ensureFontLoaded, fontsChangedEvent } from "../lib/fonts";
 import { uiScaleEvent } from "../lib/uiScale";
 import { emojiFallback } from "../lib/terminalThemes";
 
@@ -75,6 +76,12 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
   const [tuxTerminal, setTuxTerminal] = useState<Terminal | null>(null);
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
   const [pasteMenu, setPasteMenu] = useState<{ x: number; y: number } | null>(null);
+  const [fontsRevision, setFontsRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => setFontsRevision(value => value + 1);
+    window.addEventListener(fontsChangedEvent, changed);
+    return () => window.removeEventListener(fontsChangedEvent, changed);
+  }, []);
   const [exportMenu, setExportMenu] = useState(false);
   const pasteMenuRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -410,7 +417,20 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
     if (!current) return;
     Object.assign(current.terminal.options, { fontFamily: preferences.fontFamily + emojiFallback, fontSize: effectiveFontSize(preferences.fontSize, zoomRef.current), lineHeight: preferences.lineHeight, cursorStyle: preferences.cursorStyle, cursorBlink: preferences.cursorBlink, scrollback: preferences.scrollback, theme: selectedTheme(preferences) });
     if (shownRef.current) current.fit.fit();
-  }, [preferences]);
+    // The face may have been registered just now: measure again once it is loaded. A failed load keeps the fallback.
+    let stale = false;
+    void ensureFontLoaded(preferences.fontFamily).then(() => {
+      if (stale || runtime.current !== current) return;
+      // xterm ignores setting an identical value (no change event, no new cell measurement):
+      // switch to another family first so the char size service measures the loaded face.
+      current.terminal.options.fontFamily = "monospace";
+      current.terminal.options.fontFamily = preferences.fontFamily + emojiFallback;
+      current.terminal.clearTextureAtlas?.();
+      if (shownRef.current) current.fit.fit();
+      current.terminal.refresh(0, current.terminal.rows - 1);
+    });
+    return () => { stale = true; };
+  }, [preferences, fontsRevision]);
 
   useEffect(() => {
     if (!active) return;

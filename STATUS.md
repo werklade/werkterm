@@ -41,6 +41,9 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
+- #41 (Schriftart als echte Auswahl, Import von TTF/OTF): auf `main`, Tests unter Windows und Linux grün; manueller
+  Test in der App offen (Neu-Messen der Zeichenbreite nach dem Laden, Linux-Schriftliste). Systemschriften werden bis
+  zum Neustart zwischengespeichert.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
   #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`

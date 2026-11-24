@@ -25,7 +25,7 @@ const FILES: [&str; 4] = [
     "macros.json",
     "settings.json",
 ];
-const DIRECTORIES: [&str; 2] = ["designs", "icon-sets"];
+const DIRECTORIES: [&str; 3] = ["designs", "icon-sets", "fonts"];
 /// Exact marker the frontend matches to detect a concurrent change of settings.json.
 const SETTINGS_CONFLICT: &str = crate::ui_error::ui_code("SETTINGS_CONFLICT");
 
@@ -93,7 +93,7 @@ pub struct FileStamp {
 fn is_false(value: &bool) -> bool {
     !*value
 }
-/// Bounds for the directory fingerprint: designs/ is flat, icon-sets/ has one level of sets.
+/// Bounds for the directory fingerprint: designs/ and fonts/ are flat, icon-sets/ has one level of sets.
 #[derive(Clone, Copy)]
 struct TreeLimits {
     depth: usize,
@@ -1313,6 +1313,8 @@ mod tests {
         let source = temp.dir("source");
         let target = temp.dir("target");
         fs::create_dir_all(source.join("designs").join("nested")).unwrap();
+        fs::create_dir_all(source.join("fonts")).unwrap();
+        fs::write(source.join("fonts").join("example.ttf"), b"font").unwrap();
         fs::create_dir_all(source.join("icon-sets").join("set")).unwrap();
         fs::create_dir_all(target.join("designs")).unwrap();
         fs::write(source.join("sessions.json"), b"source").unwrap();
@@ -1347,6 +1349,10 @@ mod tests {
         assert_eq!(
             fs::read(target.join("icon-sets").join("set").join("icon.svg")).unwrap(),
             b"svg"
+        );
+        assert_eq!(
+            fs::read(target.join("fonts").join("example.ttf")).unwrap(),
+            b"font"
         );
         assert!(!target.join("recent.json").exists());
         assert_eq!(fs::read(source.join("sessions.json")).unwrap(), b"source");
