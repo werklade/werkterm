@@ -50,12 +50,15 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 - #38 (AppImage: lokale Shells erben `LD_LIBRARY_PATH` usw. des AppImage-Starters, `findmnt`/`eza` scheitern unter
   CachyOS): Fix auf `main` in `src-tauri/src/child_env.rs` – Kindprozesse bekommen die Umgebung ohne AppImage-Einträge,
   eigene Einträge bleiben in ihrer Reihenfolge; auch für entpackte AppImages. Unit-Tests plus Test mit echtem
-  Kindprozess; in WSL gegen die echte AppRun-Umgebung eines laufenden AppImages geprüft. Wartet auf Testbuild und
+  Kindprozess; in WSL gegen die echte AppRun-Umgebung eines laufenden AppImages geprüft. In Testbuild 1.3.2, wartet auf
   Bestätigung auf CachyOS.
-- Testbuild 1.3.1 (Branch test/1.3.1 = main bis 03af43f plus Versionscommit, Run 45183643467, 2026-11-23, alle Jobs
-  grün): enthält #7, #36, #8, #37. Am 2026-11-23 im Testkanal und in APT `test` veröffentlicht, von außen geprüft
-  (latest.json, alle Downloads und .deb gegen die Prüfsummen des Artefakts). Tester 2026-11-24: Gerät ohne Bash,
-  Bash-Gegenprobe, SSH-Optionsmeldung und Unterstriche ok; AlmaLinux/Appliance (#8) noch ohne Ergebnis.
+- Testbuild 1.3.1 (2026-11-23, #7, #36, #8, #37): Tester 2026-11-24: Gerät ohne Bash, Bash-Gegenprobe,
+  SSH-Optionsmeldung und Unterstriche ok; AlmaLinux/Appliance (#8) noch ohne Ergebnis. Abgelöst durch 1.3.2;
+  Branch test/1.3.1 gelöscht, Server-Ordner `downloads/1.3.1` noch zu entfernen und zu sperren (Nutzer).
+- Testbuild 1.3.2 (Branch test/1.3.2 = main bis 0d25af7 plus Versionscommit, Run 45357463479, 2026-11-24, alle Jobs
+  grün): enthält #38 und alles aus 1.3.1. Am 2026-11-24 im Testkanal und in APT `test` veröffentlicht, von außen
+  geprüft (updates-test/latest.json byte-gleich, AppImage/EXE/MSI und .deb aus dem APT-Pool gegen die Prüfsummen
+  des Artefakts). Wartet auf Rückmeldung des Testers.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
