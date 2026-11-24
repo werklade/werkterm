@@ -41,7 +41,6 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- #23 (in 1.3.0 ausgeliefert, `testing`): offen ist der Test gegen einen alten SSH-Server.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
   #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`
@@ -63,7 +62,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (offen: #23 aus 1.3.0 zur Bestätigung; ohne Meilenstein: #7–#10, #12, #13, #19, #32, #35).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (ohne Meilenstein: #7–#10, #12, #13, #19, #32, #35).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
