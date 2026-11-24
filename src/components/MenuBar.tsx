@@ -4,7 +4,7 @@ import { useT } from "../i18n";
 export interface MenuItem { heading?: boolean; radio?: boolean; icon?: React.ReactNode; label: string; action: string; shortcut?: string; disabled?: boolean; tooltip?: string; checked?: boolean; separator?: boolean; inlineCheck?: boolean }
 /** `id` is language independent (lookups, React keys); `label` is the translated name. */
 export interface AppMenu { id: string; label: string; mnemonic: number; items: MenuItem[] }
-export function MenuBar({ menus, onAction, toolbarIcon, iconOnly = false }: { menus: AppMenu[]; onAction(action: string): void; toolbarIcon?: React.ReactNode; iconOnly?: boolean }) {
+export function MenuBar({ menus, onAction, onOpen, toolbarIcon, iconOnly = false }: { menus: AppMenu[]; onAction(action: string): void; /** Called when a menu opens from the closed state (not when moving between menus). */ onOpen?(): void; toolbarIcon?: React.ReactNode; iconOnly?: boolean }) {
   const t = useT();
   const menuId = useId();
   const root = useRef<HTMLElement>(null);
@@ -14,6 +14,7 @@ export function MenuBar({ menus, onAction, toolbarIcon, iconOnly = false }: { me
   const [top, setTop] = useState(0);
   const close = (restore: boolean) => { setOpen(null); setItem(-1); if (restore) previous.current?.focus(); };
   const show = (index: number, last = false) => {
+    if (open === null) onOpen?.();
     if (open === null && !root.current?.contains(document.activeElement)) previous.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setTop(index); setOpen(index); setItem(menuMove(-1, last ? "End" : "Home", menus[index].items.map(entry => !!entry.disabled || !!entry.separator || !!entry.heading)));
   };

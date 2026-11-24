@@ -11,7 +11,9 @@ interface Sample { host: string; version: string | null; osName: string | null; 
 function Meter({ value }: { value: number }) { return <meter min={0} max={100} value={value} className={value >= 90 ? "critical" : value >= 75 ? "warn" : "ok"} />; }
 function Table({ rows }: { rows: [string, string][] }) { return <table><tbody>{rows.map(([name, value]) => <tr key={name}><td>{name}</td><td>{value}</td></tr>)}</tbody></table>; }
 let monitorQueue: Promise<unknown> = Promise.resolve();
-export function MonitorBar({ sessionId }: { sessionId: number }) {
+/** Where the samples come from: an SSH session or the local machine / a WSL distribution of a tab. */
+export type MonitorSource = { type: "ssh"; sessionId: number } | { type: "local"; tabId: number; wsl: boolean; wslDistro: string | null };
+export function MonitorBar({ source }: { source: MonitorSource }) {
   const t = useT();
   const [sample, setSample] = useState<Sample | null>(null);
   const [values, setValues] = useState<number[]>([]);
@@ -45,19 +47,24 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
     if (next !== shown) setShown(next);
   });
   useEffect(() => { setShown(Infinity); }, [width, diskKey]);
+  const sourceKey = source.type === "ssh" ? `ssh:${source.sessionId}` : `local:${source.tabId}:${source.wsl}:${source.wslDistro ?? ""}`;
   useEffect(() => {
     let alive = true;
     setSample(null); setError(""); setValues([]);
     const channel = new Channel<Sample>();
     channel.onmessage = value => { if (alive) { setSample(value); if (value.cpuPercent !== null) setValues(old => history(old, value.cpuPercent!)); } };
     monitorQueue = monitorQueue.catch(() => undefined).then(async () => {
-      if (alive) await invoke("ssh_monitor_start", { id: sessionId, onSample: channel });
+      if (!alive) return;
+      if (source.type === "ssh") await invoke("ssh_monitor_start", { id: source.sessionId, onSample: channel });
+      else await invoke("local_monitor_start", { tabId: source.tabId, wsl: source.wsl, wslDistro: source.wslDistro, onSample: channel });
     }).catch((reason: unknown) => { if (alive) setError(errorText(reason)); });
     return () => {
       alive = false;
-      monitorQueue = monitorQueue.catch(() => undefined).then(() => invoke("ssh_monitor_stop", { id: sessionId }));
+      monitorQueue = monitorQueue.catch(() => undefined).then(() => source.type === "ssh" ? invoke("ssh_monitor_stop", { id: source.sessionId }) : invoke("local_monitor_stop", { tabId: source.tabId }));
     };
-  }, [sessionId]);
+    // The key stands for all source fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey]);
   if (error) return <div className="monitor-bar"><Tip content={error}>{t("monitor.unavailable")}</Tip></div>;
   if (!sample) return <div className="monitor-bar">{t("monitor.loading")}</div>;
   if (sample.unsupported) return <div className="monitor-bar">{t("monitor.noLinux")}</div>;
@@ -65,7 +72,7 @@ export function MonitorBar({ sessionId }: { sessionId: number }) {
   const network = (upload: boolean) => <Table rows={sample.interfaces.flatMap(n => [[t(upload ? "monitor.net.sent" : "monitor.net.received", { name: n.name }), size(upload ? n.tx : n.rx)], [t("monitor.net.errors", { name: n.name }), decimal(upload ? n.txErrors : n.rxErrors)], [t("monitor.net.dropped", { name: n.name }), decimal(upload ? n.txDrop : n.rxDrop)]] as [string, string][])} />;
   const df = <><strong>{t("monitor.dfOutput")}</strong><pre>{dfTable(sample.dfAll)}</pre></>;
   const dist = distro(sample.osId, sample.osIdLike);
-  const distIcon = dist === "debian" ? <span className="monitor-tux" role="img" aria-label="Debian"><Icon name="debian" /></span> : dist === "tux" ? <span className="monitor-tux" role="img" aria-label="Linux"><Icon name="tux" /></span> : <span className="monitor-distro" style={{ background: distroBadges[dist][1] }} aria-hidden="true">{distroBadges[dist][0]}</span>;
+  const distIcon = sample.osId === "windows" ? <span className="monitor-tux" role="img" aria-label={t("monitor.windows")}><Icon name="windows" /></span> : dist === "debian" ? <span className="monitor-tux" role="img" aria-label="Debian"><Icon name="debian" /></span> : dist === "tux" ? <span className="monitor-tux" role="img" aria-label="Linux"><Icon name="tux" /></span> : <span className="monitor-distro" style={{ background: distroBadges[dist][1] }} aria-hidden="true">{distroBadges[dist][0]}</span>;
   const visible = disks.slice(0, shown), hidden = disks.slice(visible.length);
   return <div className="monitor-bar" ref={bar}>
     <Tip content={<><div>{t("monitor.host.hostname", { value: sample.host || "–" })}</div><div>{t("monitor.host.system", { value: sample.osName ?? "–" })}</div><div>{t("monitor.host.version", { value: sample.version ?? "–" })}</div><div>{t("monitor.host.cores", { value: sample.cpuCores ?? "–" })}</div></>}>{distIcon}{sample.host || "–"}</Tip>

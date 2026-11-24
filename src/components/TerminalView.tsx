@@ -27,7 +27,7 @@ import { uiScaleEvent } from "../lib/uiScale";
 import { emojiFallback } from "../lib/terminalThemes";
 
 import { inputProvenance, terminalWriters } from "../lib/multiExec";
-import { MonitorBar } from "./MonitorBar";
+import { MonitorBar, type MonitorSource } from "./MonitorBar";
 
 interface Props {
   /** Changes whenever "Schrift Standard" is chosen; clears this tab's zoom offset. */
@@ -42,7 +42,9 @@ interface Props {
   visible?: boolean;
   paneStyle?: React.CSSProperties;
   onFocusPane?: () => void;
-  monitoringSession?: number;
+  monitoringSource?: MonitorSource;
+  /** Shell profile id (local/WSL tabs); absent for the default shell. */
+  profile?: string;
   onInput?: (id: number, data: string, pasted: boolean) => void;
   gridFooter?: React.ReactNode;
   exited?: boolean;
@@ -68,7 +70,7 @@ interface Props {
 let nextConnectToken = 1;
 interface Runtime { terminal: Terminal; fit: FitAddon }
 
-export function TerminalView({ fontResetToken, onSerialPermission, serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSession, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
+export function TerminalView({ fontResetToken, onSerialPermission, serial, logPath, connected, onLogToggle, title, logAlways, onLog, paneStyle, onFocusPane, visible, monitoringSource, profile, onInput, gridFooter, exited: processExited, preferences, id, kind, target, savedSessionId, startCommand, active, shellIntegration, sshPromptCommand, onExit, onCloseTab, onRestart, onStatus, onSession, onCwd, onPrompt, onClearPrompts }: Props) {
   const t = useT();
   const [tuxTerminal, setTuxTerminal] = useState<Terminal | null>(null);
   const logRef = useRef({ title, logAlways, onLog }); logRef.current = { title, logAlways, onLog };
@@ -338,7 +340,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
         }
         return kind === "ssh"
         ? connectSsh({ ...dimensions, ...quickConnectSshArgs(target ?? ""), sessionId: savedSessionId ?? null, connectToken, onPrompt: onPromptChannel })
-        : spawnPty({ ...dimensions, kind, startCommand, serialPermissionShell: permissionShell, shellIntegration: settings.current.shellIntegration });
+        : spawnPty({ ...dimensions, kind, startCommand, profile, serialPermissionShell: permissionShell, shellIntegration: settings.current.shellIntegration });
       })();
       void spawned.then(result => {
         connecting = false;
@@ -416,7 +418,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
     return () => cancelAnimationFrame(frame);
   }, [active]);
 
-  useEffect(() => { if (visible ?? active) { const frame = requestAnimationFrame(() => runtime.current?.fit.fit()); return () => cancelAnimationFrame(frame); } }, [visible, active, monitoringSession, gridFooter]);
+  useEffect(() => { if (visible ?? active) { const frame = requestAnimationFrame(() => runtime.current?.fit.fit()); return () => cancelAnimationFrame(frame); } }, [visible, active, monitoringSource !== undefined, gridFooter]);
 
   const closeMenu = () => { setPasteMenu(null); setExportMenu(false); runtime.current?.terminal.focus(); };
   const copy = (all: boolean) => {
@@ -446,7 +448,7 @@ export function TerminalView({ fontResetToken, onSerialPermission, serial, logPa
     if (preferencesRef.current.rightClick === "paste" && !event.shiftKey) { terminalPasteRequests.get(id)?.(); return; }
     setExportMenu(false); setPasteMenu({ x: event.clientX, y: event.clientY });
   }} id={`terminal-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} className={`terminal-panel ${active ? "is-active" : ""} ${processExited ? "is-exited" : ""}`} hidden={!(visible ?? active)}>
-    <div style={{ position: "relative", flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}><div className="terminal-container" ref={container} style={{ height: "100%" }} /><TuxOverlay terminal={tuxTerminal} enabled={preferences.tuxEnabled} minutes={preferences.tuxIdleMinutes} count={preferences.tuxCount} visible={visible ?? active} active={active} design={preferences.design} /></div>{monitoringSession !== undefined && <MonitorBar sessionId={monitoringSession} />}{gridFooter}
+    <div style={{ position: "relative", flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}><div className="terminal-container" ref={container} style={{ height: "100%" }} /><TuxOverlay terminal={tuxTerminal} enabled={preferences.tuxEnabled} minutes={preferences.tuxIdleMinutes} count={preferences.tuxCount} visible={visible ?? active} active={active} design={preferences.design} /></div>{monitoringSource !== undefined && <MonitorBar source={monitoringSource} />}{gridFooter}
     {pasteMenu && <div ref={pasteMenuRef} role="menu" aria-label={t("terminal.actions")} className="session-context" style={{ left: pasteMenu.x, top: pasteMenu.y, maxHeight: "100vh", maxWidth: "100vw", overflowY: "auto" }} onKeyDown={event => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeMenu(); }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {

@@ -48,7 +48,8 @@ import { QuickConnect } from "./components/QuickConnect";
 import { SessionUserDialog } from "./components/SessionUserDialog";
 import { jumpHostHint, listSessionFolders, listSessions, sessionTarget, type SavedSession } from "./lib/sessions";
 import { createUndoSlot, type UndoEntry } from "./lib/undoOffer";
-import { availableShells, type ShellKind } from "./lib/pty";
+import { availableShells, availableShellProfiles, type ShellKind, type ShellProfile } from "./lib/pty";
+import { profileFromAction, profileKind, profileTitle, wslDistroFromProfile } from "./lib/shellProfiles";
 import { answerHostKey, answerSecret, type SshPrompt } from "./lib/ssh";
 import { loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { revertedUiScale, uiScaler } from "./lib/uiScale";
@@ -341,6 +342,11 @@ export default function App() {
   const setSidebarVisible = (value: boolean | ((current: boolean) => boolean)) => changeSettings({ ...settingsRef.current, sidebarVisible: typeof value === "function" ? value(settingsRef.current.sidebarVisible) : value });
   const [temporaryMenu, setTemporaryMenu] = useState(false);
   const [shellName, setShellName] = useState(localTitle);
+  const [shellProfiles, setShellProfiles] = useState<ShellProfile[]>([]);
+  const reloadProfiles = useCallback(() => {
+    void availableShellProfiles().then(setShellProfiles).catch((error: unknown) => setStatus(t("app.status.shellsLoadFailed", { reason: errorText(error) })));
+  }, []);
+  useEffect(reloadProfiles, [reloadProfiles]);
   const [recents, setRecents] = useState<Recent[]>([]);
   const [lastTabs, setLastTabs] = useState<LastTab[]>([]);
   const [restoreQueue, setRestoreQueue] = useState<LastTab[] | null>(null);
@@ -466,11 +472,11 @@ export default function App() {
     setPrompts([...promptQueue.current]);
     for (const item of removed) void declinePrompt(item.prompt).catch(() => undefined);
   }, []);
-  const openTab = (kind: ShellKind, startCommand?: import("./lib/pty").StartCommand) => {
+  const openTab = (kind: ShellKind, startCommand?: import("./lib/pty").StartCommand, profile?: string) => {
     if (windowClosing.current) return;
     const id = nextId.current++;
     liveTabs.current.add(id);
-    setTabs(current => [...current, { id, kind, startCommand, ...(startCommand ? { titleKey: ({ root: "app.tab.root", processes: "app.tab.processes", hardware: "app.tab.hardware" } as const)[startCommand] } : {}), title: kind === "wsl" ? "WSL" : shellName, exited: false, browserPath: "" }]);
+    setTabs(current => [...current, { id, kind: profile ? profileKind(profile) : kind, startCommand, ...(profile ? { profile } : {}), ...(startCommand ? { titleKey: ({ root: "app.tab.root", processes: "app.tab.processes", hardware: "app.tab.hardware" } as const)[startCommand] } : {}), title: profile ? profileTitle(profile, shellProfiles) : kind === "wsl" ? "WSL" : shellName, exited: false, browserPath: "" }]);
     setActiveId(id);
   };
   const connect = (target: string) => {
@@ -501,7 +507,7 @@ export default function App() {
     if (!restoreQueue.length) { setRestoreQueue(null); return; }
     const [tab, ...remaining] = restoreQueue;
     setRestoreQueue(remaining);
-    if (tab.type === "local" || tab.type === "wsl") { if (tab.type === "local" || hasWsl) openTab(tab.type); }
+    if (tab.type === "local" || tab.type === "wsl") { if (tab.type === "local" || hasWsl) openTab(tab.type, undefined, tab.profile); }
     else if (tab.type === "saved") { const session = savedSessions.find(s => s.id === tab.sessionId); if (session) connectSaved(session); }
     else if (tab.type === "quick") connect(tab.target);
   });
@@ -824,6 +830,8 @@ export default function App() {
       if (activeId === null) setActiveId(initialPanes[0]);
       setFocusedPane(0); setRatios({ x: 50, y: 50 }); return;
     }
+    const profile = profileFromAction(name);
+    if (profile) { openTab(profileKind(profile), undefined, profile); return; }
     if (name.startsWith("saved:")) { const session = savedSessions.find(s => s.id === name.slice(6)); if (session) connectSaved(session); return; }
     if (name.startsWith("bars:")) { changeSettings({ ...settings, compact: false, bars: name.slice(5) as Settings["bars"] }); return; }
     if (name.startsWith("size:")) { changeSettings({ ...settings, toolbarSize: name.slice(5) as Settings["toolbarSize"] }); return; }
@@ -991,7 +999,7 @@ export default function App() {
     macros.capture(focused, pasted ? data.replace(/\r\n|\n/g, "\r") : data);
     targets.forEach(id => terminalWriters.get(id)?.(data, pasted));
   };
-  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, activeId, multiExec, updateVersion, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
+  const menus = createMenus({ macros: macros.items, recording: macros.recording, savedSessions, settings, hasWsl, profiles: shellProfiles, activeId, multiExec, updateVersion, logging: !!(activeId && logPaths[activeId]), canLog: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, canPaste: !!activeTab && activeTab.kind !== "editor" && activeTab.kind !== "diff" && activeTab.kind !== "folderDiff" && !activeTab.exited && activeTab.sessionId !== undefined, isLinux: /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) });
   const restoreTabs = () => setRestoreQueue([...lastTabs]);
   /** Switch from the settings dialog: same prompts as "Beenden", then data_dir_set and restart. Rejects with the error shown in the dialog. */
   const restartWithDataDir = async (path: string | null, copy: boolean) => { await closeRequest.current({ kind: "dataDir", path, copy }); };
@@ -1000,10 +1008,10 @@ export default function App() {
   const statusText = transfer ? (transfer.queued > 0 ? t("app.status.transferQueued", { text: transfer.text, queued: transfer.queued }) : transfer.text) : activeEditor ? (activeEditor.status || t("app.editor")) : (status || t("app.status.ready"));
 
   return <div className={`app-shell toolbar-${settings.toolbarSize} ${settings.compact ? "compact" : ""}`}>
-    <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} /></div>
+    <div hidden={!temporaryMenu && (settings.compact || settings.bars === "toolbar")}><MenuBar menus={menus} onAction={action} onOpen={reloadProfiles} /></div>
     {!settings.compact && settings.bars !== "menu" && <Toolbar hasWsl={hasWsl} menus={menus} shellName={shellName} multiExec={multiExec} onAction={action} />}
     <div className={`workspace ${settings.sidebarRight ? "sidebar-right" : ""}`}>
-      <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
+      <div className="workspace-header">{sidebarVisible && <div className="quick-connect-slot" style={{ width: `calc(var(--sidebar-icon-width) + ${sidebarWidth}px)` }}><QuickConnect onConnect={connect} onStatus={reportStatus} /></div>}<TabBar onLogToggle={toggleSessionLog} onOpenLogFolder={() => action("logFolder")} showNumbers={settings.tabNumbers} showClose={settings.tabClose} tabs={tabs.map(tab => ({ ...tab, recording: macros.recordingId === tab.id, connected: tab.sessionId !== undefined, shell: shellName, logPath: logPaths[tab.id], dirty: editors[tab.id]?.dirty, tooltip: editors[tab.id]?.document.path ?? (() => { const session = savedSessions.find(s => s.id === tab.savedSessionId); return session ? [tab.title, jumpHostHint(session, savedSessions)].filter(Boolean).join(" – ") : tab.title; })() }))} activeId={activeId} hasWsl={hasWsl} profiles={shellProfiles} onMenuOpen={reloadProfiles} onOpen={openTab} onClose={closeTab} onSelect={id => { if (panes.includes(id)) setFocusedPane(panes.indexOf(id)); setActiveId(id); }} /></div>
       <div className="workspace-body">
       {sidebarVisible && <Sidebar width={sidebarWidth} onWidthChange={resizeSidebar} macrosPanel={macros.panel} markedSource={markedSource} onCompareFile={compareBrowserFile} collapsed={sidebarCollapsed} onCollapsedChange={collapseSidebar} toolItems={menus.find(menu => menu.id === "tools")?.items ?? []} onToolAction={action} onMultiExec={toggleMultiExec} active={sidebarPanel} onActive={setSidebarPanel} onOpenSettings={() => setSettingsOpen(true)} onAccess={setBrowserAccess} onOpenFile={openEditor} savedSessions={savedSessions} onSavedConnect={connectSaved} onEditSession={session => setSessionDialog({ session })} onReloadSessions={reloadSessions} onSessionsDeleted={sessionsDeleted} sessionFolders={sessionFolders} onSessionsWritten={sessionsWritten} onUndoable={(message, undo) => { reportStatus(message); undoSlot.offer(message, undo); }} transferQueue={transferQueue} onStatus={reportStatus} tab={browserTab} settings={settings} onSettings={changeSettings} onPath={setPath} />}
       <main className="terminal-workspace" aria-label={t("app.terminalArea")}>
@@ -1012,8 +1020,8 @@ export default function App() {
         {offerSave && activeTab && quickTarget && <div className="connection-save"><span>{t("app.saveConnection.question")}</span><button title={t("app.saveConnection.title")} onClick={() => setSessionDialog({ tabId: activeTab.id, preferPassword: true, session: { kind: "ssh", id: "", name: `${quickTarget.user}@${quickTarget.host}`, folder: "", host: quickTarget.host, port: quickTarget.port, user: quickTarget.user, auth: { type: "default" }, source: null, ...(quickTarget.sshOptions ? { sshOptions: quickTarget.sshOptions.join("\n") } : {}) } })}>{t("app.saveConnection.save")}</button><button title={t("app.saveConnection.dismissTitle")} onClick={() => dismissSave(activeTab.id)}>{t("app.saveConnection.dismiss")}</button></div>}
         {gridVisible && <div className="multiexec-header"><strong>{t("app.multiExec.active")}</strong><button onClick={() => setUnchecked(new Set())}>{t("app.multiExec.all")}</button><button onClick={() => setUnchecked(new Set(terminals.map(t => t.id)))}>{t("app.multiExec.none")}</button><button onClick={toggleMultiExec}>{t("app.multiExec.end")}</button></div>}
         <div className={`terminal-stack ${gridVisible ? "multiexec-grid" : ""}`} style={gridVisible ? { gridTemplateColumns: `repeat(${gridColumns(terminals.length)}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(terminals.length / gridColumns(terminals.length))}, minmax(0, 1fr))` } : undefined}>
-          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => <TerminalView fontResetToken={fontResetToken} logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : gridVisible ? () => { if (tab.id !== activeId) setActiveId(tab.id); } : undefined} exited={tab.exited}
-            onInput={receiveInput} monitoringSession={settings.monitoring && tab.id === activeId && tab.kind === "ssh" && !tab.exited ? tab.sessionId : undefined}
+          <Suspense fallback={null}>{tabs.filter(tab => tab.kind !== "editor" && tab.kind !== "diff" && tab.kind !== "folderDiff").map(tab => <TerminalView fontResetToken={fontResetToken} logPath={logPaths[tab.id]} connected={tab.sessionId !== undefined} onLogToggle={toggleSessionLog} title={tab.title} logAlways={!!savedSessions.find(s => s.id === tab.savedSessionId)?.log_always} onLog={onLog} key={`${tab.id}:${tab.generation ?? 0}`} id={tab.id} serial={tab.serial} kind={tab.kind as ShellKind | "ssh" | "telnet" | "serial"} target={tab.target} savedSessionId={tab.savedSessionId} startCommand={tab.startCommand} profile={tab.profile} active={tab.id === activeId} visible={splitVisible ? panes.includes(tab.id) : gridVisible || tab.id === activeId} paneStyle={splitVisible && panes.includes(tab.id) ? { ...paneStyle(settings.splitMode, panes.indexOf(tab.id), ratios.x, ratios.y), paddingTop: 38 } : undefined} onFocusPane={splitVisible ? () => { setFocusedPane(panes.indexOf(tab.id)); setActiveId(tab.id); } : gridVisible ? () => { if (tab.id !== activeId) setActiveId(tab.id); } : undefined} exited={tab.exited}
+            onInput={receiveInput} monitoringSource={!settings.monitoring || tab.id !== activeId || tab.exited || tab.sessionId === undefined ? undefined : tab.kind === "ssh" ? { type: "ssh", sessionId: tab.sessionId } : tab.kind === "local" || tab.kind === "wsl" ? { type: "local", tabId: tab.id, wsl: tab.kind === "wsl", wslDistro: wslDistroFromProfile(tab.profile) } : undefined}
             gridFooter={gridVisible ? <div className="multiexec-footer"><span>{tab.title}</span><label><input type="checkbox" disabled={tab.exited} checked={!unchecked.has(tab.id)} onChange={e => setUnchecked(current => { const next = new Set(current); if (e.target.checked) next.delete(tab.id); else next.add(tab.id); return next; })} />{t("app.multiExec.receive")}</label></div> : undefined}
             preferences={settings} shellIntegration={settings.shellIntegration} sshPromptCommand={settings.sshPromptCommand}
             onSerialPermission={(id, info) => setSerialPermission({ id, info })} onExit={markExited} onCloseTab={closeTab} onRestart={restartTab} onStatus={setStatus} onSession={setSession} onCwd={setCwd} onPrompt={queuePrompt} onClearPrompts={removePrompts} />)}</Suspense>

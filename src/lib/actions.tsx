@@ -5,6 +5,8 @@ import type { Settings } from "./settings";
 import type { SavedSession } from "./sessions";
 import { getLanguage, t, type Language } from "../i18n";
 import { formatShortcut } from "./formatShortcut";
+import type { ShellProfile } from "./pty";
+import { profileMenuItems } from "./shellProfiles";
 
 export type MenuId = "edit" | "terminal" | "sessions" | "macros" | "view" | "split" | "tools" | "settings" | "help";
 /**
@@ -18,8 +20,8 @@ export const menuMnemonics: Record<Language, Record<MenuId, number>> = {
   en: { edit: 0, terminal: 0, sessions: 0, macros: 0, view: 0, split: 1, tools: 1, settings: 4, help: 0 },
 };
 
-export function createMenus({ macros = [], recording = false, savedSessions, settings, hasWsl, activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux, updateVersion = null }: {
-  macros?: Macro[]; recording?: boolean; savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
+export function createMenus({ macros = [], recording = false, savedSessions, settings, hasWsl, profiles = [], activeId, multiExec, logging = false, canLog = !!activeId, canPaste = !!activeId, isLinux, updateVersion = null }: {
+  macros?: Macro[]; recording?: boolean; savedSessions: SavedSession[]; settings: Settings; hasWsl: boolean; /** Installed shells; listed in the Terminal menu when there is more than one. */ profiles?: ShellProfile[]; activeId: number | null; multiExec: boolean; logging?: boolean; canLog?: boolean; canPaste?: boolean; isLinux: boolean;
   /** Version found by the opt-in start check; marks the update entry in the Help menu. */
   updateVersion?: string | null;
 }): AppMenu[] {
@@ -36,6 +38,7 @@ export function createMenus({ macros = [], recording = false, savedSessions, set
     { id: "terminal", label: t("menu.terminal"), mnemonic: mnemonic("terminal"), items: [
       { label: t("menu.terminal.local"), action: "local", shortcut: ctrlShift("T") },
       ...(hasWsl ? [{ label: "WSL", action: "wsl" }] : []),
+      ...(profiles.length > 1 ? [{ label: "", action: "terminal-profiles-start", separator: true }, ...profileMenuItems(profiles, "terminal-profiles"), { label: "", action: "terminal-profiles-end", separator: true }] : []),
       { label: logging ? t("menu.terminal.logStop") : t("menu.terminal.logStart"), action: "logToggle", disabled: !canLog },
       { label: t("menu.terminal.logFolder"), action: "logFolder" },
       { label: t("menu.terminal.quick"), action: "quick" }, { label: t("menu.terminal.close"), action: "close", shortcut: ctrlShift("W"), disabled: activeId === 0 }, { label: t("menu.terminal.quit"), action: "quit" },

@@ -40,6 +40,8 @@ export interface BrowserTab {
   target?: string;
   savedSessionId?: string;
   startCommand?: import("../lib/pty").StartCommand;
+  /** Shell profile id of local/WSL tabs (see `ShellProfile`); absent for the default shell. */
+  profile?: string;
   saveDismissed?: boolean;
   sessionId?: number;
   cwd?: { host: string; path: string };

@@ -36,10 +36,20 @@ pub enum Recent {
     deny_unknown_fields
 )]
 pub enum LastTab {
-    Local {},
-    Wsl {},
-    Saved { session_id: String },
-    Quick { target: String },
+    Local {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
+    },
+    Wsl {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
+    },
+    Saved {
+        session_id: String,
+    },
+    Quick {
+        target: String,
+    },
 }
 #[derive(Serialize, Deserialize)]
 struct History {
@@ -204,8 +214,29 @@ pub fn last_tabs_list(app: tauri::AppHandle) -> Result<Vec<LastTab>, String> {
 pub fn last_tabs_save(app: tauri::AppHandle, tabs: Vec<LastTab>) -> Result<(), String> {
     let _guard = LOCK.lock().map_err(locked)?;
     for tab in &tabs {
-        if let LastTab::Quick { target } = tab {
-            validate_target(target)?;
+        match tab {
+            LastTab::Quick { target } => validate_target(target)?,
+            LastTab::Local {
+                profile: Some(profile),
+            }
+            | LastTab::Wsl {
+                profile: Some(profile),
+            } if profile.is_empty()
+                || profile.len() > 1024
+                || profile.chars().any(char::is_control) =>
+            {
+                return Err(UiError::new("PTY_PROFILE_MISSING")
+                    .arg(
+                        "name",
+                        profile
+                            .chars()
+                            .filter(|c| !c.is_control())
+                            .take(64)
+                            .collect::<String>(),
+                    )
+                    .into());
+            }
+            _ => {}
         }
     }
     save_tabs(&path(&app, "last-tabs.json")?, &tabs)
@@ -282,8 +313,14 @@ mod tests {
     #[test]
     fn last_tabs_roundtrip() {
         let tabs = vec![
-            LastTab::Local {},
-            LastTab::Wsl {},
+            LastTab::Local { profile: None },
+            LastTab::Wsl { profile: None },
+            LastTab::Local {
+                profile: Some("cmd".into()),
+            },
+            LastTab::Wsl {
+                profile: Some("wsl:Debian".into()),
+            },
             LastTab::Saved {
                 session_id: "id".into(),
             },
@@ -294,7 +331,7 @@ mod tests {
         let bytes = serde_json::to_vec(&tabs).unwrap();
         assert_eq!(
             String::from_utf8(bytes.clone()).unwrap(),
-            r#"[{"type":"local"},{"type":"wsl"},{"type":"saved","sessionId":"id"},{"type":"quick","target":"u@host"}]"#
+            r#"[{"type":"local"},{"type":"wsl"},{"type":"local","profile":"cmd"},{"type":"wsl","profile":"wsl:Debian"},{"type":"saved","sessionId":"id"},{"type":"quick","target":"u@host"}]"#
         );
         assert_eq!(
             serde_json::from_slice::<Vec<LastTab>>(&bytes).unwrap(),
@@ -338,7 +375,7 @@ mod tests {
         );
         let tabs_path = dir.join("last-tabs.json");
         fs::write(&tabs_path, "invalid").unwrap();
-        save_tabs(&tabs_path, &[LastTab::Local {}]).unwrap();
+        save_tabs(&tabs_path, &[LastTab::Local { profile: None }]).unwrap();
         assert_eq!(
             fs::read_to_string(tabs_path.with_extension("json.bak")).unwrap(),
             "invalid"
