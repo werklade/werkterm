@@ -12,6 +12,7 @@ pub mod linux_graphics;
 pub mod local_fs;
 mod local_ports;
 mod macros;
+mod monitor;
 #[cfg(any(target_os = "linux", test))]
 mod pinch;
 pub mod pty;
@@ -38,6 +39,7 @@ fn shutdown(app: &tauri::AppHandle) {
     use tauri::Manager;
     let manager = app.state::<Arc<tunnels::TunnelManager>>();
     tauri::async_runtime::block_on(manager.stop_all());
+    app.state::<Arc<monitor::local::LocalMonitors>>().stop_all();
     telnet::stop_all();
     session_log::stop_all();
     let docs = app.state::<Arc<editor::EditorDocs>>();
@@ -75,6 +77,7 @@ pub fn run() {
             }
         })
         .manage(Arc::new(pty::PtyManager::default()))
+        .manage(Arc::new(monitor::local::LocalMonitors::default()))
         .manage(Arc::new(ssh::SshManager::default()))
         .manage(Arc::new(commands::PendingPrompts::default()))
         .plugin(tauri_plugin_opener::init())
@@ -158,6 +161,8 @@ pub fn run() {
             commands::available_shell_profiles,
             ssh::monitor::ssh_monitor_start,
             ssh::monitor::ssh_monitor_stop,
+            monitor::local::local_monitor_start,
+            monitor::local::local_monitor_stop,
             commands::ssh_connect,
             commands::ssh_cancel_connect,
             commands::ssh_answer_host_key,
