@@ -1,10 +1,13 @@
-use crate::pty::{PtyError, ShellKind, ShellSpec, bash_osc7_startup, powershell_args};
+use crate::pty::{PtyError, ShellKind, ShellSpec};
+#[cfg(any(windows, test))]
+use crate::pty::{bash_osc7_startup, powershell_args};
 use crate::ui_error::ui_err;
 use serde::Serialize;
 #[cfg(any(windows, test))]
-use std::ffi::OsStr;
-use std::path::Path;
-use std::path::PathBuf;
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -52,15 +55,15 @@ pub fn parse_wsl_list(output: &[u8]) -> Vec<WslDistro> {
             let default = line.starts_with('*');
             let mut fields = line.strip_prefix('*').unwrap_or(line).split_whitespace();
             let name = fields.next()?;
+            let version: u8 = fields.next_back()?.parse().ok()?;
             let state = fields.next()?;
-            let version = fields.next()?.parse().ok()?;
-            if fields.next().is_some() || name.to_ascii_lowercase().starts_with("docker-desktop") {
+            if name.to_ascii_lowercase().starts_with("docker-desktop") {
                 return None;
             }
             Some(WslDistro {
                 name: name.to_owned(),
                 default,
-                running: state.eq_ignore_ascii_case("Running"),
+                running: state.eq_ignore_ascii_case("Running") && fields.next().is_none(),
                 version: Some(version),
             })
         })
@@ -130,49 +133,51 @@ fn profile_missing(id: &str) -> PtyError {
     PtyError::Operation(ui_err("PTY_PROFILE_MISSING").arg("name", name))
 }
 
-pub fn resolve_profile(
+#[cfg(any(windows, test))]
+fn resolve_profile(
     id: &str,
     kind: ShellKind,
-    profiles: &[ShellProfile],
-    system_root: &Path,
-    cmd_path: Option<&Path>,
     shell_integration: bool,
+    cmd: impl FnOnce() -> Option<PathBuf>,
+    powershell: impl FnOnce() -> Option<PathBuf>,
+    pwsh: impl FnOnce() -> Vec<PathBuf>,
+    wsl_available: impl FnOnce() -> bool,
 ) -> Result<ShellSpec, PtyError> {
-    let profile = profiles
-        .iter()
-        .find(|profile| {
-            profile.kind == kind
-                && (profile.id == id
-                    || (profile.id.starts_with("pwsh:")
-                        && id.starts_with("pwsh:")
-                        && profile.id.to_lowercase() == id.to_lowercase()))
-        })
-        .ok_or_else(|| profile_missing(id))?;
-
-    let (program, args) = match (kind, profile.id.as_str()) {
-        (ShellKind::Local, "powershell") => (
-            powershell_path(system_root).to_string_lossy().into_owned(),
-            powershell_args(shell_integration),
-        ),
+    let missing = || profile_missing(id);
+    let (program, args) = match (kind, id) {
         (ShellKind::Local, "cmd") => (
-            cmd_path
-                .ok_or_else(|| profile_missing(id))?
-                .to_string_lossy()
-                .into_owned(),
+            cmd().ok_or_else(missing)?.to_string_lossy().into_owned(),
             Vec::new(),
         ),
-        (ShellKind::Local, found) if found.starts_with("pwsh:") => (
-            found["pwsh:".len()..].to_owned(),
+        (ShellKind::Local, "powershell") => (
+            powershell()
+                .ok_or_else(missing)?
+                .to_string_lossy()
+                .into_owned(),
             powershell_args(shell_integration),
         ),
-        (ShellKind::Wsl, found) if found.starts_with("wsl:") => {
-            let mut args = vec!["-d".to_owned(), found["wsl:".len()..].to_owned()];
+        (ShellKind::Local, _) => {
+            let requested = id.strip_prefix("pwsh:").ok_or_else(missing)?.to_lowercase();
+            let candidate = pwsh()
+                .into_iter()
+                .find(|path| path.to_string_lossy().to_lowercase() == requested)
+                .ok_or_else(missing)?;
+            (
+                candidate.to_string_lossy().into_owned(),
+                powershell_args(shell_integration),
+            )
+        }
+        (ShellKind::Wsl, _) => {
+            let name = id.strip_prefix("wsl:").ok_or_else(missing)?;
+            if !valid_wsl_name(name) || !wsl_available() {
+                return Err(missing());
+            }
+            let mut args = vec!["-d".to_owned(), name.to_owned()];
             if shell_integration {
                 args.extend(["-e".into(), "bash".into(), "-c".into(), bash_osc7_startup()]);
             }
             ("wsl.exe".into(), args)
         }
-        _ => return Err(profile_missing(id)),
     };
     Ok(ShellSpec {
         program,
@@ -181,6 +186,15 @@ pub fn resolve_profile(
     })
 }
 
+#[cfg(any(windows, test))]
+fn valid_wsl_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && name.chars().count() <= 64
+        && !name.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+#[cfg(any(windows, test))]
 fn powershell_path(system_root: &Path) -> PathBuf {
     system_root.join("System32/WindowsPowerShell/v1.0/powershell.exe")
 }
@@ -188,7 +202,7 @@ fn powershell_path(system_root: &Path) -> PathBuf {
 pub fn detect_profiles() -> Vec<ShellProfile> {
     #[cfg(windows)]
     {
-        windows::detect().profiles
+        windows::detect()
     }
     #[cfg(not(windows))]
     Vec::new()
@@ -201,14 +215,14 @@ pub(crate) fn resolve_installed_profile(
 ) -> Result<ShellSpec, PtyError> {
     #[cfg(windows)]
     {
-        let installed = windows::detect();
         resolve_profile(
             id,
             kind,
-            &installed.profiles,
-            &installed.system_root,
-            installed.cmd_path.as_deref(),
             shell_integration,
+            || windows::cmd_path(&windows::system_root()),
+            || windows::installed_powershell(&windows::system_root()),
+            windows::installed_pwsh_candidates,
+            || crate::pty::program_in_path("wsl.exe"),
         )
     }
     #[cfg(not(windows))]
@@ -232,24 +246,28 @@ mod windows {
         GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
     };
 
-    pub(super) struct Installed {
-        pub profiles: Vec<ShellProfile>,
-        pub system_root: PathBuf,
-        pub cmd_path: Option<PathBuf>,
+    pub(super) fn system_root() -> PathBuf {
+        std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_default()
     }
 
-    pub(super) fn detect() -> Installed {
-        let system_root = std::env::var_os("SystemRoot")
-            .map(PathBuf::from)
-            .unwrap_or_default();
-        let cmd_path = Some(system_root.join("System32/cmd.exe"))
+    pub(super) fn cmd_path(system_root: &Path) -> Option<PathBuf> {
+        Some(system_root.join("System32/cmd.exe"))
             .filter(|path| path.is_absolute() && path.is_file())
             .or_else(|| {
                 let path = std::path::absolute(std::env::var_os("ComSpec")?).ok()?;
                 path.is_file().then_some(path)
-            });
+            })
+    }
 
-        let candidates = pwsh_candidates(
+    pub(super) fn installed_powershell(system_root: &Path) -> Option<PathBuf> {
+        let path = powershell_path(system_root);
+        (system_root.is_absolute() && path.is_file()).then_some(path)
+    }
+
+    pub(super) fn installed_pwsh_candidates() -> Vec<PathBuf> {
+        pwsh_candidates(
             std::env::var_os("PATH").as_deref(),
             std::env::var_os("ProgramFiles").as_deref().map(Path::new),
             std::env::var_os("LOCALAPPDATA").as_deref().map(Path::new),
@@ -257,7 +275,13 @@ mod windows {
                 path.symlink_metadata()
                     .is_ok_and(|metadata| !metadata.is_dir())
             },
-        );
+        )
+    }
+
+    pub(super) fn detect() -> Vec<ShellProfile> {
+        let system_root = system_root();
+        let cmd_path = cmd_path(&system_root);
+        let candidates = installed_pwsh_candidates();
         let mut pwsh: Vec<_> = candidates
             .into_iter()
             .map(|path| {
@@ -298,7 +322,7 @@ mod windows {
         pwsh.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
         let mut profiles: Vec<_> = pwsh.into_iter().map(|(_, _, profile)| profile).collect();
 
-        if system_root.is_absolute() && powershell_path(&system_root).is_file() {
+        if installed_powershell(&system_root).is_some() {
             profiles.push(ShellProfile {
                 id: "powershell".into(),
                 kind: ShellKind::Local,
@@ -326,11 +350,7 @@ mod windows {
             version: distro.version.map(|version| version.to_string()),
             is_default: distro.default,
         }));
-        Installed {
-            profiles,
-            system_root,
-            cmd_path,
-        }
+        profiles
     }
 
     fn wsl_output() -> Option<Vec<u8>> {
@@ -452,9 +472,10 @@ mod tests {
         let listing = "\r\n  NAME            STATUS          VERSION\r\n\
                        * Ubuntu          rUnNiNg         2\r\n\
                          Debian          Stopped         1\r\n\
-                         D\0istro         Wird-ausgeführt 2\r\n\
+                         D\0istro         Wird ausgeführt 2\r\n\
                          docker-desktop  Running         2\r\n\
                          Docker-Desktop-Data Stopped     2\r\n\
+                         no-state        2\r\n\
                          malformed       Running\r\n\
                          bad-version     Stopped         x\r\n\
                          extra-field     Running         2 trailing\r\n";
@@ -535,21 +556,29 @@ mod tests {
         let root = Path::new("/Windows");
         let cmd = root.join("System32/cmd.exe");
         let distro = "Distro;literal";
-        let profiles = [
-            ("pwsh:/Apps/pwsh.exe", ShellKind::Local),
-            ("powershell", ShellKind::Local),
-            ("cmd", ShellKind::Local),
-            ("wsl:Distro;literal", ShellKind::Wsl),
-        ]
-        .map(|(id, kind)| ShellProfile {
-            id: id.into(),
-            kind,
-            label: String::new(),
-            version: None,
-            is_default: false,
-        });
-        let resolve =
-            |id, kind, integrate| resolve_profile(id, kind, &profiles, root, Some(&cmd), integrate);
+        let resolve = |id, kind, integrate| {
+            resolve_profile(
+                id,
+                kind,
+                integrate,
+                || {
+                    assert_eq!(id, "cmd");
+                    Some(cmd.clone())
+                },
+                || {
+                    assert_eq!(id, "powershell");
+                    Some(powershell_path(root))
+                },
+                || {
+                    assert!(id.starts_with("pwsh:"));
+                    vec![PathBuf::from("/Apps/pwsh.exe")]
+                },
+                || {
+                    assert!(id.starts_with("wsl:"));
+                    true
+                },
+            )
+        };
         for (id, program) in [
             ("pwsh:/apps/PWSH.EXE", "/Apps/pwsh.exe".into()),
             ("powershell", powershell_path(root)),
@@ -580,13 +609,57 @@ mod tests {
             ("wsl:Distro;literal", ShellKind::Local, distro),
             ("cmd", ShellKind::Wsl, "cmd"),
             ("pwsh:/unknown.exe", ShellKind::Local, "/unknown.exe"),
-            ("wsl:Missing", ShellKind::Wsl, "Missing"),
             ("unknown", ShellKind::Local, "unknown"),
         ] {
             let error = resolve(id, kind, false).unwrap_err().to_string();
             assert_eq!(
                 error,
                 format!(r#"PTY_PROFILE_MISSING: {{"args":{{"name":"{name}"}}}}"#)
+            );
+        }
+    }
+
+    #[test]
+    fn validates_wsl_names_before_checking_availability() {
+        for name in ["", "-Ubuntu", "Ubuntu 24", "Ubuntu\x07", &"é".repeat(65)] {
+            let id = format!("wsl:{name}");
+            assert!(
+                resolve_profile(
+                    &id,
+                    ShellKind::Wsl,
+                    false,
+                    || panic!("unexpected cmd lookup"),
+                    || panic!("unexpected PowerShell lookup"),
+                    || panic!("unexpected pwsh lookup"),
+                    || panic!("invalid name should skip PATH lookup"),
+                )
+                .is_err()
+            );
+        }
+        assert!(valid_wsl_name(&"é".repeat(64)));
+        let spec = resolve_profile(
+            "wsl:Ubuntu-24.04",
+            ShellKind::Wsl,
+            false,
+            || panic!("unexpected cmd lookup"),
+            || panic!("unexpected PowerShell lookup"),
+            || panic!("unexpected pwsh lookup"),
+            || true,
+        )
+        .unwrap();
+        assert_eq!(spec.args, ["-d", "Ubuntu-24.04"]);
+    }
+
+    #[test]
+    fn rejects_profiles_with_missing_executables() {
+        for (id, kind) in [
+            ("cmd", ShellKind::Local),
+            ("powershell", ShellKind::Local),
+            ("pwsh:/Apps/pwsh.exe", ShellKind::Local),
+            ("wsl:Ubuntu-24.04", ShellKind::Wsl),
+        ] {
+            assert!(
+                resolve_profile(id, kind, false, || None, || None, Vec::new, || false).is_err()
             );
         }
     }
