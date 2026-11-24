@@ -196,7 +196,11 @@ fn valid_wsl_name(name: &str) -> bool {
 
 #[cfg(any(windows, test))]
 fn powershell_path(system_root: &Path) -> PathBuf {
-    system_root.join("System32/WindowsPowerShell/v1.0/powershell.exe")
+    system_root
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe")
 }
 
 pub fn detect_profiles() -> Vec<ShellProfile> {
@@ -253,7 +257,7 @@ mod windows {
     }
 
     pub(super) fn cmd_path(system_root: &Path) -> Option<PathBuf> {
-        Some(system_root.join("System32/cmd.exe"))
+        Some(system_root.join("System32").join("cmd.exe"))
             .filter(|path| path.is_absolute() && path.is_file())
             .or_else(|| {
                 let path = std::path::absolute(std::env::var_os("ComSpec")?).ok()?;
@@ -525,8 +529,8 @@ mod tests {
         let first = root.join("first");
         let second = root.join("second");
         let installations = root.join("program-files");
-        let stable = installations.join("PowerShell/7");
-        let preview = installations.join("PowerShell/7-preview");
+        let stable = installations.join("PowerShell").join("7");
+        let preview = installations.join("PowerShell").join("7-preview");
         let app_data = root.join("app-data");
         let alias = app_data.join("Microsoft").join("WindowsApps");
         std::fs::create_dir_all(&stable).unwrap();
@@ -554,7 +558,7 @@ mod tests {
     #[test]
     fn resolves_installed_profiles_and_preserves_argument_boundaries() {
         let root = Path::new("/Windows");
-        let cmd = root.join("System32/cmd.exe");
+        let cmd = root.join("System32").join("cmd.exe");
         let distro = "Distro;literal";
         let resolve = |id, kind, integrate| {
             resolve_profile(
