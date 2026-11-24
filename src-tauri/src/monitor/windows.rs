@@ -252,8 +252,10 @@ fn drive_usage(letter: u8) -> Option<Disk> {
         return None;
     }
     let (mut total, mut free) = (0, 0);
-    // SAFETY: root is terminated, both byte counts are writable, and caller-free bytes is optional.
-    let ok = unsafe { GetDiskFreeSpaceExW(root.as_ptr(), ptr::null_mut(), &mut total, &mut free) };
+    // Both values are for the calling user (quota-aware), like Explorer; mixing the quota total
+    // with the volume-wide free space would report 0 bytes used under a disk quota.
+    // SAFETY: root is terminated, both byte counts are writable, and the volume-free bytes are optional.
+    let ok = unsafe { GetDiskFreeSpaceExW(root.as_ptr(), &mut free, &mut total, ptr::null_mut()) };
     (ok != 0).then(|| {
         let letter = char::from(letter);
         disk_usage(format!("{letter}:\\"), format!("{letter}:"), total, free)
