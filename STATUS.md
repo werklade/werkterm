@@ -54,7 +54,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   Bestätigung auf CachyOS.
 - Testbuild 1.3.1 (2026-11-23, #7, #36, #8, #37): Tester 2026-11-24: Gerät ohne Bash, Bash-Gegenprobe,
   SSH-Optionsmeldung und Unterstriche ok; AlmaLinux/Appliance (#8) noch ohne Ergebnis. Abgelöst durch 1.3.2;
-  Branch test/1.3.1 gelöscht, Server-Ordner `downloads/1.3.1` noch zu entfernen und zu sperren (Nutzer).
+  Branch test/1.3.1 gelöscht, Server-Ordner `downloads/1.3.1` entfernt und gesperrt (2026-11-24).
 - Testbuild 1.3.2 (Branch test/1.3.2 = main bis 0d25af7 plus Versionscommit, Run 45357463479, 2026-11-24, alle Jobs
   grün): enthält #38 und alles aus 1.3.1. Am 2026-11-24 im Testkanal und in APT `test` veröffentlicht, von außen
   geprüft (updates-test/latest.json byte-gleich, AppImage/EXE/MSI und .deb aus dem APT-Pool gegen die Prüfsummen
