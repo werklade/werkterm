@@ -77,10 +77,20 @@ const POWERSHELL_OSC7: &str = r#"$Global:WerktermOriginalPrompt = $function:prom
 // LC_ALL=C makes substring iteration operate on bytes, including UTF-8 paths.
 const BASH_OSC7_FUNCTION: &str = r#"__werkterm_osc7() { local LC_ALL=C p="$PWD" out='' c i; for ((i=0;i<${#p};i++)); do c="${p:i:1}"; case "$c" in [-_.~a-zA-Z0-9/]) out+="$c";; *) printf -v c '%%%02X' "'$c"; out+="$c";; esac; done; printf '\033]7;file://%s%s\007' "${WSL_DISTRO_NAME:-$HOSTNAME}" "$out"; }"#;
 
-fn bash_osc7_startup() -> String {
+pub(crate) fn bash_osc7_startup() -> String {
     format!(
         "{BASH_OSC7_FUNCTION}; export -f __werkterm_osc7; export PROMPT_COMMAND='__werkterm_osc7'\"${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\"; exec bash -i"
     )
+}
+
+pub(crate) fn powershell_args(shell_integration: bool) -> Vec<String> {
+    if shell_integration {
+        ["-NoLogo", "-NoExit", "-Command", POWERSHELL_OSC7]
+            .map(str::to_owned)
+            .to_vec()
+    } else {
+        vec!["-NoLogo".to_owned()]
+    }
 }
 
 pub fn resolve_shell(
@@ -99,7 +109,7 @@ pub fn resolve_shell(
                 "powershell.exe"
             }
             .to_owned(),
-            vec!["-NoLogo".to_owned()],
+            powershell_args(shell_integration),
         ),
         (Platform::Windows, ShellKind::Wsl) if has_program("wsl.exe") => {
             ("wsl.exe".to_owned(), vec![])
@@ -129,15 +139,11 @@ pub fn resolve_shell(
                 ]
                 .to_vec();
             }
-            ShellKind::Local if !is_unix => {
-                args = ["-NoLogo", "-NoExit", "-Command", POWERSHELL_OSC7]
-                    .map(str::to_owned)
-                    .to_vec();
-            }
             ShellKind::Local
-                if std::path::Path::new(&program)
-                    .file_name()
-                    .is_some_and(|name| name == "bash") =>
+                if is_unix
+                    && std::path::Path::new(&program)
+                        .file_name()
+                        .is_some_and(|name| name == "bash") =>
             {
                 args = vec!["-c".to_owned(), bash_osc7_startup()];
             }

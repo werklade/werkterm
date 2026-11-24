@@ -63,3 +63,6 @@ libc = "=0.2.191"
 # pinch from WebKitGTK's page zoom to the terminal font (issue #27).
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

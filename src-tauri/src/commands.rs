@@ -1,4 +1,5 @@
 use crate::pty::{Platform, PtyManager, ShellKind, program_in_path, resolve_shell};
+use crate::shells::{ShellProfile, detect_profiles, resolve_installed_profile};
 use crate::ssh::{
     DirListing, PromptFuture, Prompter, SecretKind, SshConnection, SshManager, SshTarget, ssh_dir,
 };
@@ -194,6 +195,7 @@ pub async fn pty_spawn(
     tab_id: u32,
     state: State<'_, Arc<PtyManager>>,
     kind: ShellKind,
+    profile: Option<String>,
     cols: u16,
     rows: u16,
     shell_integration: bool,
@@ -204,13 +206,16 @@ pub async fn pty_spawn(
 ) -> Result<u32, String> {
     let manager = Arc::clone(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let mut spec = resolve_shell(
-            kind,
-            Platform::current(),
-            std::env::var("SHELL").ok(),
-            shell_integration,
-            program_in_path,
-        )
+        let mut spec = match profile {
+            Some(id) => resolve_installed_profile(&id, kind, shell_integration),
+            None => resolve_shell(
+                kind,
+                Platform::current(),
+                std::env::var("SHELL").ok(),
+                shell_integration,
+                program_in_path,
+            ),
+        }
         .map_err(|error| error.to_string())?;
         crate::pty::apply_start_command(&mut spec, start_command)?;
         #[cfg(target_os = "linux")]
@@ -304,6 +309,13 @@ pub async fn available_shells() -> Result<Vec<ShellKind>, String> {
     })
     .await
     .map_err(|_| String::from(ui_err("SHELLS_UNAVAILABLE")))
+}
+
+#[tauri::command]
+pub async fn available_shell_profiles() -> Result<Vec<ShellProfile>, String> {
+    tauri::async_runtime::spawn_blocking(detect_profiles)
+        .await
+        .map_err(|_| String::from(ui_err("SHELLS_UNAVAILABLE")))
 }
 
 #[tauri::command]

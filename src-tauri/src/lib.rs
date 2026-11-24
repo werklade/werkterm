@@ -19,6 +19,7 @@ pub mod secrets;
 pub mod serial;
 mod session_log;
 pub mod sessions;
+pub mod shells;
 pub mod ssh;
 pub mod telnet;
 mod terminal_colors;
@@ -154,6 +155,7 @@ pub fn run() {
             commands::pty_resize,
             commands::pty_kill,
             commands::available_shells,
+            commands::available_shell_profiles,
             ssh::monitor::ssh_monitor_start,
             ssh::monitor::ssh_monitor_stop,
             commands::ssh_connect,
