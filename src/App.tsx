@@ -343,8 +343,11 @@ export default function App() {
   const [temporaryMenu, setTemporaryMenu] = useState(false);
   const [shellName, setShellName] = useState(localTitle);
   const [shellProfiles, setShellProfiles] = useState<ShellProfile[]>([]);
+  const profileRequest = useRef(0);
   const reloadProfiles = useCallback(() => {
-    void availableShellProfiles().then(setShellProfiles).catch((error: unknown) => setStatus(t("app.status.shellsLoadFailed", { reason: errorText(error) })));
+    // Only the newest request may update the list; an older, slower WSL listing must not overwrite it.
+    const request = ++profileRequest.current;
+    void availableShellProfiles().then(profiles => { if (request === profileRequest.current) setShellProfiles(profiles); }).catch((error: unknown) => { if (request === profileRequest.current) setStatus(t("app.status.shellsLoadFailed", { reason: errorText(error) })); });
   }, []);
   useEffect(reloadProfiles, [reloadProfiles]);
   const [recents, setRecents] = useState<Recent[]>([]);
@@ -476,7 +479,7 @@ export default function App() {
     if (windowClosing.current) return;
     const id = nextId.current++;
     liveTabs.current.add(id);
-    setTabs(current => [...current, { id, kind: profile ? profileKind(profile) : kind, startCommand, ...(profile ? { profile } : {}), ...(startCommand ? { titleKey: ({ root: "app.tab.root", processes: "app.tab.processes", hardware: "app.tab.hardware" } as const)[startCommand] } : {}), title: profile ? profileTitle(profile, shellProfiles) : kind === "wsl" ? "WSL" : shellName, exited: false, browserPath: "" }]);
+    setTabs(current => [...current, { id, kind: profile ? profileKind(profile) : kind, startCommand, ...(profile ? { profile } : {}), ...(startCommand ? { titleKey: ({ root: "app.tab.root", processes: "app.tab.processes", hardware: "app.tab.hardware" } as const)[startCommand] } : profile === "cmd" ? { titleKey: "shell.cmd" as const } : {}), title: profile ? profileTitle(profile, shellProfiles) : kind === "wsl" ? "WSL" : shellName, exited: false, browserPath: "" }]);
     setActiveId(id);
   };
   const connect = (target: string) => {

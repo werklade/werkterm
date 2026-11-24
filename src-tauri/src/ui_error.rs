@@ -253,14 +253,6 @@ mod tests {
         let mut files = Vec::new();
         rust_files(&root.join("src"), &mut files);
         let mut problems = Vec::new();
-        // Issue #12 lands the backend before the frontend locale update.
-        const PENDING_LOCAL_MONITOR_TRANSLATIONS: &[&str] = &[
-            "MONITOR_INVALID_DISTRO",
-            "MONITOR_START_FAILED",
-            "MONITOR_STOP_FAILED",
-            "MONITOR_STOP_TIMEOUT",
-            "MONITOR_WSL_WINDOWS_ONLY",
-        ];
         let mut count = 0;
         for file in files {
             let source = std::fs::read_to_string(&file).unwrap();
@@ -281,14 +273,8 @@ mod tests {
                             .collect(),
                     };
                     let plural = forms.len() == 2;
-                    // The Windows shell profile backend lands before its frontend translations.
-                    if code == "PTY_PROFILE_MISSING" && forms.is_empty() {
-                        continue;
-                    }
                     if forms.is_empty() || (forms.len() == 1 && text(&key).is_none()) {
-                        if !PENDING_LOCAL_MONITOR_TRANSLATIONS.contains(&code.as_str()) {
-                            problems.push(format!("{lang}: {key} fehlt ({})", file.display()));
-                        }
+                        problems.push(format!("{lang}: {key} fehlt ({})", file.display()));
                         continue;
                     }
                     if plural && !args.contains("count") {

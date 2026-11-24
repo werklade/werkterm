@@ -82,7 +82,8 @@ fn pwsh_candidates(
     local_app_data: Option<&Path>,
     exists: impl Fn(&Path) -> bool,
 ) -> Vec<PathBuf> {
-    let alias = local_app_data.map(|dir| dir.join("Microsoft/WindowsApps/pwsh.exe"));
+    let alias =
+        local_app_data.map(|dir| dir.join("Microsoft").join("WindowsApps").join("pwsh.exe"));
     let alias_key = alias.as_deref().map(|path| {
         std::path::absolute(path).map_or_else(|_| path_key(path), |absolute| path_key(&absolute))
     });
@@ -506,7 +507,7 @@ mod tests {
         let stable = installations.join("PowerShell/7");
         let preview = installations.join("PowerShell/7-preview");
         let app_data = root.join("app-data");
-        let alias = app_data.join("Microsoft/WindowsApps");
+        let alias = app_data.join("Microsoft").join("WindowsApps");
         std::fs::create_dir_all(&stable).unwrap();
         std::fs::create_dir_all(&preview).unwrap();
         let uppercase = root.join("FIRST");
