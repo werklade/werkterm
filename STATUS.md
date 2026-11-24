@@ -62,7 +62,7 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (ohne Meilenstein: #7–#10, #12, #13, #19, #32, #35).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (ohne Meilenstein: #8–#10, #12, #13, #19, #32, #35, #38).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
