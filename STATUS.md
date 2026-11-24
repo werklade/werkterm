@@ -48,10 +48,15 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   (Zeilen dürfen nach unten überstehen, `src/App.css`); wartet auf Testbuild und Bestätigung auf Mint/Debian.
 - #36 (OSC-7-Einzeiler nur nach Bash-Abfrage) und #37 (richtige Option in der Meldung): vom Tester mit 1.3.1
   bestätigt, geschlossen; ausgeliefert mit dem nächsten Release. #8 bleibt `testing` (AlmaLinux/Appliance-Probe offen).
+- #38 (AppImage: lokale Shells erben `LD_LIBRARY_PATH` usw. des AppImage-Starters, `findmnt`/`eza` scheitern unter
+  CachyOS): Fix auf `main` in `src-tauri/src/child_env.rs` – Kindprozesse bekommen die Umgebung ohne AppImage-Einträge,
+  eigene Einträge bleiben in ihrer Reihenfolge; auch für entpackte AppImages. Unit-Tests plus Test mit echtem
+  Kindprozess; in WSL gegen die echte AppRun-Umgebung eines laufenden AppImages geprüft. Wartet auf Testbuild und
+  Bestätigung auf CachyOS.
 - Testbuild 1.3.1 (Branch test/1.3.1 = main bis 03af43f plus Versionscommit, Run 45183643467, 2026-11-23, alle Jobs
   grün): enthält #7, #36, #8, #37. Am 2026-11-23 im Testkanal und in APT `test` veröffentlicht, von außen geprüft
-  (latest.json, alle Downloads und .deb gegen die Prüfsummen des Artefakts). Tester 2026-11-24: Gerät ohne Bash, Bash-Gegenprobe, SSH-Optionsmeldung und Unterstriche ok;
-  AlmaLinux/Appliance (#8) noch ohne Ergebnis.
+  (latest.json, alle Downloads und .deb gegen die Prüfsummen des Artefakts). Tester 2026-11-24: Gerät ohne Bash,
+  Bash-Gegenprobe, SSH-Optionsmeldung und Unterstriche ok; AlmaLinux/Appliance (#8) noch ohne Ergebnis.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
