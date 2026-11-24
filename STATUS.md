@@ -59,13 +59,19 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   grün): enthält #38 und alles aus 1.3.1. Am 2026-11-24 im Testkanal und in APT `test` veröffentlicht, von außen
   geprüft (updates-test/latest.json byte-gleich, AppImage/EXE/MSI und .deb aus dem APT-Pool gegen die Prüfsummen
   des Artefakts). Wartet auf Rückmeldung des Testers.
+- Lokale Shells und Monitoring (Meilenstein 1.4.0, 2026-11-24, Branch feature/local-shells-monitor → main): Shell-Auswahl
+  unter Windows (pwsh 7, PowerShell 5.1, cmd, WSL-Distributionen; #19/#39/#40 ohne Admin-Teil) und Monitoring-Leiste
+  für lokale und WSL-Tabs (#12). Auf dem Entwicklungsrechner jedes Profil echt gestartet; Windows-Messwerte gegen
+  `Win32_ComputerSystem.TotalPhysicalMemory` (Bytes) und `TotalVisibleMemorySize` (KiB ×1024) abgeglichen; WSL-Schleife
+  endet nach Beenden von `wsl.exe`. Codex- und code-reviewer-Review eingearbeitet. Nicht von Hand in der App geprüft.
+  Offen: Admin-Helfer (#19/#40, eigener Schritt), Ziehen im Dateibrowser (#32), Linux-Monitoring lokal von Hand prüfen.
 - Umzug des Paket-Servers pkg.werklade.de auf den endgültigen Server: am 2026-11-15 umgeschaltet und abgenommen
   (Downloads, APT, Update-Daten, Veröffentlichen). Veröffentlichen läuft wieder, auch im Testkanal (#16, #8).
   Offen: Beobachtungswoche bis 2026-11-22, danach den alten Server abbauen (Betriebshandbuch im privaten Repo
   `werklade/packages`).
 
 ## Offen
-Geplantes und gemeldete Fehler stehen als GitHub-Issues (ohne Meilenstein: #8–#10, #12, #13, #19, #32, #35, #38).
+Geplantes und gemeldete Fehler stehen als GitHub-Issues (ohne Meilenstein: #8–#10, #13, #32, #35, #38; Meilenstein 1.4.0: #12, #19, #39, #40).
 Hier nur, was nicht öffentlich geführt wird:
 - Setup-Skript `install/werklade-apt-setup.sh` als root auf frischem System testen.
 - Von Hand prüfen: Datenordner (Ersteinrichtung, Wechsel, nicht erreichbar, zwei Geräte mit Cloud-Ordner, UNC unter
@@ -78,6 +84,10 @@ Hier nur, was nicht öffentlich geführt wird:
   (strenger als OpenSSH). Abhilfe: alten Eintrag mit `ssh-keygen -R` entfernen.
 - Der SSH-Einzeiler für OSC 7 funktioniert nur mit Bash auf dem Server (wird nur nach erfolgreicher Bash-Abfrage
   gesendet, #36); sein Echo ist einmal sichtbar.
+- Windows-Monitoring: Bei mehr als 64 logischen Prozessoren zählt `GetSystemTimes` nur die Prozessorgruppe des
+  Sampler-Threads. Store-Installationen von PowerShell 7 zeigen keine Versionsnummer (App-Alias ohne Versionsressource).
+- Windows: Schließen eines lokalen Tabs meldet intern „os error 0“ beim Beenden der PTY (schon vor 1.4.0, wird im
+  Frontend verworfen, ohne sichtbare Folge).
 - UNC-Pfade (`\\server\share`) im PowerShell-Tab: OSC 7 wird gesendet, lokales Listing nicht getestet.
 - Der WSL-Tab startet die Standard-Distribution, nicht eine wählbare.
 - Vite-Warnung: Bundle > 500 kB (xterm); unkritisch.
