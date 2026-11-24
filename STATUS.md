@@ -1,6 +1,6 @@
 # STATUS – Werkterm
 
-Stand: 2026-11-23
+Stand: 2026-11-24
 
 Einzelheiten stehen in der Git-Historie und im CHANGELOG.
 
@@ -50,6 +50,11 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   eigener Exec-Kanal `$BASH_VERSION` ab (höchstens 5 s, Kanal wird immer geschlossen). Wartet auf Testbuild.
   #8 hängt daran und bleibt `testing`, bis der Tester auch dafür Ergebnisse liefert.
 - #37 (Algorithmus in falscher SSH-Option nennt jetzt die richtige Option): Fix auf `main`, wartet auf Testbuild.
+- #38 (AppImage: lokale Shells erben `LD_LIBRARY_PATH` usw. des AppImage-Starters, `findmnt`/`eza` scheitern unter
+  CachyOS): Fix auf `main` in `src-tauri/src/child_env.rs` – Kindprozesse bekommen die Umgebung ohne AppImage-Einträge,
+  eigene Einträge bleiben in ihrer Reihenfolge; auch für entpackte AppImages. Unit-Tests plus Test mit echtem
+  Kindprozess; in WSL gegen die echte AppRun-Umgebung eines laufenden AppImages geprüft. Wartet auf Testbuild und
+  Bestätigung auf CachyOS.
 - Testbuild 1.3.1 (Branch test/1.3.1 = main bis 03af43f plus Versionscommit, Run 45183643467, 2026-11-23, alle Jobs
   grün): enthält #7, #36, #8, #37. Am 2026-11-23 im Testkanal und in APT `test` veröffentlicht, von außen geprüft
   (latest.json, alle Downloads und .deb gegen die Prüfsummen des Artefakts). Wartet auf Rückmeldung des Testers.
