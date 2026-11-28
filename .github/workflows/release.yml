@@ -233,7 +233,7 @@ jobs:
           name: linux
           path: release-out/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   windows:
     name: Windows packages
@@ -316,7 +316,7 @@ jobs:
           name: windows
           path: release-out/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   bundle:
     name: Release bundle
@@ -354,4 +354,4 @@ jobs:
           name: werkterm-${{ needs.check.outputs.version }}
           path: release-dist/werkterm-${{ needs.check.outputs.version }}/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
