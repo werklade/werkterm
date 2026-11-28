@@ -41,9 +41,11 @@ Einzelheiten stehen in der Git-Historie und im CHANGELOG.
   für Fehler und Funktionswünsche auf GitHub.
 
 ## In Arbeit
-- #41 (Schriftart als echte Auswahl, Import von TTF/OTF): auf `main`, Tests unter Windows und Linux grün; vom Nutzer
-  unter Windows in der App geprüft, im Testbuild 1.3.4. Offen: Linux-Schriftliste von Hand prüfen. Systemschriften
-  werden bis zum Neustart zwischengespeichert.
+- #41, #39, #12: vom Nutzer im Testbuild 1.3.4 bestätigt, Issues am 2026-11-28 geschlossen; kommen mit 1.4.0.
+- #42 (Rückfrage vor dem Speichern einer Server-Datei): auf `main` (2026-11-28), Vitest und Rust-Tests grün, Review
+  durch Codex und code-reviewer eingearbeitet (Enter auf „Abbrechen“ speichert nicht; sudo-Zeile kommt vom Backend je
+  Dokument). Offen: Sichtprüfung in Dunkel/Hell und Fokus unter WebKitGTK im nächsten Testbuild.
+- #19/#40 (PowerShell/cmd als Administrator): UAC-Helfer `werkterm-elevate` mit abgesicherter Named Pipe in Arbeit.
 - #35 ("SSH-Vorgang fehlgeschlagen: Failure: Failure" kurz nach dem Verbinden, Neu laden hilft): offen.
 - #7 (Unterstriche): Ursache bestätigt (Mint 22.3, 1.3.0: bei Zeilenhöhe 1 unsichtbar, bei 1.2 sichtbar), xterm.js
   #4067 – der DOM-Renderer schneidet jede Zeile ab, DejaVu Sans Mono zeichnet `_` unter die Zelle. Fix auf `main`
