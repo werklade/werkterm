@@ -103,7 +103,7 @@ describe("remote editor save confirmation", () => {
     const prompt = dialog(editor)!;
     expect(prompt.props["aria-label"]).toBe("Datei auf dem Server überschreiben?");
     expect(find(prompt, el => String(el.props.children).startsWith("/etc/config auf Production"))).toBeDefined();
-    expect(find(prompt, el => el.props.children === "Der sudo-Modus ist aktiv: Die Datei wird als root geschrieben.")).toBeDefined();
+    expect(find(prompt, el => el.props.children === "Die Datei wurde im sudo-Modus geöffnet und wird als root geschrieben.")).toBeDefined();
     expect(find(prompt, el => el.props["data-autofocus"] === true)?.props.children).toBe("Auf Server speichern");
     expect(invoke).not.toHaveBeenCalled();
 
@@ -122,6 +122,21 @@ describe("remote editor save confirmation", () => {
     expect(await saving).toBe(true);
     expect(invoke).toHaveBeenCalledWith("editor_save", expect.objectContaining({ docId: 1, eol: "crLf" }));
     editor.unmount();
+  });
+
+  it("leaves Enter on a focused button to that button", async () => {
+    const editor = mount("ssh");
+    const saving = editor.handle.save();
+    const prompt = dialog(editor)!;
+    const preventDefault = vi.fn();
+    (prompt.props.onKeyDown as (event: unknown) => void)({
+      key: "Enter", target: { tagName: "BUTTON" }, preventDefault, stopPropagation: vi.fn(),
+    });
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(dialog(editor)).toBeDefined();
+    editor.unmount();
+    expect(await saving).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("editor_save", expect.anything());
   });
 
   it("remembers confirmation only until the editor tab closes", async () => {

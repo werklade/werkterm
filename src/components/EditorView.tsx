@@ -57,6 +57,8 @@ function EditorChoice({ choice, onAnswer }: { choice: Choice; onAnswer(value: Ch
     onCancel={event => { event.preventDefault(); onAnswer("cancel"); }}
     onKeyDown={remote ? event => {
       if (event.key !== "Enter" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      // A focused button handles Enter itself, so Enter on "Abbrechen" stays a cancel.
+      if ((event.target as { tagName?: string } | null)?.tagName === "BUTTON") return;
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat) onAnswer("saveRemote", remember);
