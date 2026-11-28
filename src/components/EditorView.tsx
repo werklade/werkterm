@@ -32,20 +32,46 @@ interface EditorViewProps {
   /** Changes whenever "Schrift Standard" is chosen; clears this tab's zoom offset. */
   fontResetToken?: number;
   document: EditorDocument;
+  remote?: { host: string; sudo: boolean };
   onDirtyChange(dirty: boolean): void;
   onStatusChange(status: string): void;
   onDocumentChange?(document: EditorDocument): void;
 }
-type ChoiceId = "overwrite" | "reload" | "cancel";
-const choiceLabels: Record<ChoiceId, TextKey> = { overwrite: "editor.choice.overwrite", reload: "editor.choice.reload", cancel: "common.cancel" };
-interface Choice { title: string; choices: ChoiceId[]; resolve(value: ChoiceId): void }
+type ChoiceId = "saveRemote" | "overwrite" | "reload" | "cancel";
+const choiceLabels: Record<ChoiceId, TextKey> = { saveRemote: "editor.remoteSave.confirm", overwrite: "editor.choice.overwrite", reload: "editor.choice.reload", cancel: "common.cancel" };
+interface RemoteSaveChoice { message: string; sudo: boolean }
+interface Choice {
+  title: string;
+  choices: ChoiceId[];
+  remoteSave?: RemoteSaveChoice;
+  resolve(value: ChoiceId): void;
+}
 const errorCodes = ["SUDO_INACTIVE", "SESSION_CLOSED", "ENCODING", "BINARY", "TOO_LARGE", "CONFLICT"] as const;
 
-function EditorChoice({ choice, onAnswer }: { choice: Choice; onAnswer(value: ChoiceId): void }) {
+function EditorChoice({ choice, onAnswer }: { choice: Choice; onAnswer(value: ChoiceId, remember?: boolean): void }) {
   const t = useT();
   const dialog = useModal();
-  return <dialog ref={dialog} className="editor-dialog" aria-modal="true" aria-label={choice.title} onCancel={event => { event.preventDefault(); onAnswer("cancel"); }}>
-    <p>{choice.title}</p><div>{choice.choices.map((value, index) => <button type="button" key={value} autoFocus={index === choice.choices.length - 1} onClick={() => onAnswer(value)}>{t(choiceLabels[value])}</button>)}</div>
+  const [remember, setRemember] = useState(false);
+  const remote = choice.remoteSave;
+  return <dialog ref={dialog} className="editor-dialog" aria-modal="true" aria-label={choice.title}
+    onCancel={event => { event.preventDefault(); onAnswer("cancel"); }}
+    onKeyDown={remote ? event => {
+      if (event.key !== "Enter" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) onAnswer("saveRemote", remember);
+    } : undefined}>
+    <p>{choice.title}</p>
+    {remote && <>
+      <p>{remote.message}</p>
+      {remote.sudo && <p>{t("editor.remoteSave.sudo")}</p>}
+      <label className="editor-dialog-remember"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} />{t("editor.remoteSave.remember")}</label>
+    </>}
+    <div>{choice.choices.map((value, index) => <button type="button" key={value}
+      className={value === "saveRemote" ? "editor-dialog-primary" : undefined}
+      autoFocus={!remote && index === choice.choices.length - 1}
+      data-autofocus={value === "saveRemote" ? true : undefined}
+      onClick={() => onAnswer(value, value === "saveRemote" && remember)}>{t(choiceLabels[value])}</button>)}</div>
   </dialog>;
 }
 
@@ -131,6 +157,7 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
   const dirty = useRef(false);
   const locks = useRef(0);
   const [locked, setLocked] = useState(false);
+  const skipRemoteConfirmation = useRef(false);
   const saving = useRef<Promise<boolean> | null>(null);
   const mounted = useRef(true);
   const chooseRef = useRef<Choice | null>(null);
@@ -167,14 +194,19 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     if (loaded.current.readonly || saving.current || locks.current) return;
     target.current = value; setEol(value); report();
   }
-  function ask(title: string, choices: ChoiceId[]): Promise<ChoiceId> {
+  function ask(title: string, choices: ChoiceId[], remoteSave?: RemoteSaveChoice): Promise<ChoiceId> {
     return new Promise(resolve => {
-      const next = { title, choices, resolve };
+      const next = { title, choices, remoteSave, resolve };
       chooseRef.current = next; setChoice(next);
     });
   }
-  function resolveChoice(value: ChoiceId) {
-    const pending = chooseRef.current; chooseRef.current = null; setChoice(null); pending?.resolve(value);
+  function resolveChoice(value: ChoiceId, remember?: boolean) {
+    const pending = chooseRef.current;
+    if (!pending) return;
+    if (value === "saveRemote" && remember) skipRemoteConfirmation.current = true;
+    chooseRef.current = null;
+    setChoice(null);
+    pending.resolve(value);
   }
   function fail(error: unknown) {
     // Known codes stand alone (WRITE_FAILED carries the backup path as args.backup); anything else gets the save prefix.
@@ -188,6 +220,14 @@ const EditorView = forwardRef<EditorHandle, EditorViewProps>(function EditorView
     if (!editor || loaded.current.readonly) return false;
     const desiredEol = target.current;
     if (!desiredEol) { setNotice(t("editor.mixedTargetRequired")); return false; }
+    const { remote, settings } = callbacks.current;
+    if (remote && settings.confirmRemoteSave && !skipRemoteConfirmation.current) {
+      const answer = await ask(t("editor.remoteSave.title"), ["cancel", "saveRemote"], {
+        message: t("editor.remoteSave.message", { path: loaded.current.path, host: remote.host }),
+        sudo: remote.sudo,
+      });
+      if (!mounted.current || answer !== "saveRemote") return false;
+    }
     setBusy(true);
     // Snapshot ensures typing during the request cannot accidentally mark unsaved text clean.
     const text = editor.state.doc.toString();

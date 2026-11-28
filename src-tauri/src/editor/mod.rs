@@ -186,6 +186,8 @@ pub struct EditorDocument {
     pub size: u64,
     pub mtime: Option<u64>,
     pub readonly: bool,
+    /// True when a remote file is read and written as root (sudo mode at open time).
+    pub sudo: bool,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -445,6 +447,7 @@ async fn load(
         size: stamp.size,
         mtime: stamp.mtime,
         readonly,
+        sudo: matches!(entry.source, DocumentSource::Remote { sudo: true, .. }),
     })
 }
 #[cfg(unix)]

@@ -1042,7 +1042,13 @@ export default function App() {
           <Suspense fallback={null}>{Object.entries(diffs).map(([key, pair]) => <div key={key} id={`diff-${key}`} role="tabpanel" aria-labelledby={`tab-${key}`} hidden={activeId !== Number(key)} style={{ height: "100%" }}><DiffView pair={pair} settings={settings} onOpen={source => openEditor(source.tab, source.path)} /></div>)}</Suspense>
           <Suspense fallback={<div className="terminal-empty">{t("app.status.editorLoading")}</div>}>{Object.entries(editors).map(([key, editor]) => {
             const id = Number(key);
-            return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView settings={settings} fontResetToken={fontResetToken} ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document}
+            const { source } = editor;
+            const remote = source.kind === "ssh" ? {
+              host: source.title,
+              // The backend fixes sudo mode when the file is opened; it reports it per document.
+              sudo: editor.document.sudo === true,
+            } : undefined;
+            return <div key={id} id={`editor-${id}`} role="tabpanel" aria-labelledby={`tab-${id}`} hidden={activeId !== id} style={{ height: "100%" }}><EditorView settings={settings} fontResetToken={fontResetToken} ref={handle => { if (handle) editorHandles.current.set(id, handle); else editorHandles.current.delete(id); }} document={editor.document} remote={remote}
               onDirtyChange={dirty => setEditors(current => !current[id] || current[id].dirty === dirty ? current : { ...current, [id]: { ...current[id], dirty } })}
               onStatusChange={status => setEditors(current => !current[id] || current[id].status === status ? current : { ...current, [id]: { ...current[id], status } })}
               onDocumentChange={document => setEditors(current => !current[id] ? current : { ...current, [id]: { ...current[id], document } })} /></div>;

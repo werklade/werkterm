@@ -48,6 +48,9 @@
 .editor-dialog::backdrop { background: var(--backdrop); }
 .editor-dialog > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .editor-dialog button, .editor-notice button { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-toolbar); color: var(--fg-primary); cursor: pointer; }
+.editor-dialog-remember { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.editor-dialog button.editor-dialog-primary { background: var(--accent); color: var(--on-accent); }
+.editor-dialog button.editor-dialog-primary:hover { background: var(--accent-hover-fill); }
 .editor-dialog button:focus-visible, .editor-notice button:focus-visible { outline: 2px solid var(--focus-ring); }
 
 .editor-error { background: var(--error-bg); color: var(--fg-primary); border: 2px solid var(--danger); overflow-wrap: anywhere; }

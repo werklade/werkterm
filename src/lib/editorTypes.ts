@@ -4,4 +4,6 @@ export interface EditorDocument {
   docId: number; name: string; path: string; text: string; bom: boolean;
   eol: EditorEol | "mixed" | "none"; eolCounts: EolCounts;
   size: number; mtime: number | null; readonly: boolean;
+  /** Remote file opened in sudo mode: it is written as root. */
+  sudo?: boolean;
 }
