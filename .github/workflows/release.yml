@@ -354,4 +354,4 @@ jobs:
           name: werkterm-${{ needs.check.outputs.version }}
           path: release-dist/werkterm-${{ needs.check.outputs.version }}/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
